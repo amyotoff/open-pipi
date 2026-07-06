@@ -1,0 +1,57 @@
+# Development overrides for Raspberry Pi local development
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# Raspberry Pi 4/5 with ≥ 4 GB RAM recommended
+
+services:
+  pipi-bot:
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src
+      - /var/run/dbus:/var/run/dbus
+      - /run/udev:/run/udev:ro
+      # Docker socket NOT mounted — use docker CLI from host if needed
+    environment:
+      - NODE_ENV=development
+      - TZ=${TZ:-UTC}
+      - OLLAMA_URL=http://127.0.0.1:11434
+      - CHROMIUM_CDP_URL=http://127.0.0.1:9222
+      - SANDBOXD_URL=http://127.0.0.1:4100
+      - SANDBOXD_TOKEN=${SANDBOXD_TOKEN:?SANDBOXD_TOKEN must be set}
+      - SANDBOX_PACK_PROJECT_ROOT=${PWD}/src
+      - SANDBOX_WORKSPACE_ROOT=${PWD}/data
+      - SANDBOX_WORKSPACE_CONTAINER_ROOT=/app/data
+    command: npm run dev
+    ports: !reset []
+    security_opt: !reset
+      - seccomp:unconfined
+
+  sandboxd:
+    volumes:
+      - ./.sandboxd:/var/lib/sandboxd
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - NODE_ENV=development
+      - TZ=${TZ:-UTC}
+      - SANDBOXD_PORT=4100
+      - SANDBOXD_TOKEN=${SANDBOXD_TOKEN:?SANDBOXD_TOKEN must be set}
+      - SANDBOXD_ALLOWED_IMAGES=${SANDBOXD_ALLOWED_IMAGES:-node:24-slim}
+      - SANDBOXD_CONTAINER_SCRATCH_ROOT=/var/lib/sandboxd
+      - SANDBOXD_HOST_SCRATCH_ROOT=${PWD}/.sandboxd
+    ports:
+      - "127.0.0.1:4100:4100"
+    security_opt: !reset
+      - seccomp:unconfined
+
+  ollama:
+    ports:
+      - "127.0.0.1:11434:11434"
+
+  chromium:
+    security_opt: !reset
+      - seccomp:unconfined
+    ports:
+      - "127.0.0.1:9222:9222"

@@ -1,0 +1,108 @@
+services:
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    restart: always
+    # No ports exposed — only pipi-bot accesses ollama via docker network
+    volumes:
+      - ollama-data:/root/.ollama
+
+  pipi-bot:
+    build: .
+    container_name: pipi-bot
+    restart: always
+    env_file: .env
+    depends_on:
+      ollama:
+        condition: service_started
+      sandboxd:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=production
+      - TZ=${TZ:-UTC}
+      - OLLAMA_URL=http://ollama:11434
+      - CHROMIUM_CDP_URL=http://chromium:9222
+      - SANDBOXD_URL=http://sandboxd:4100
+      - SANDBOXD_TOKEN=${SANDBOXD_TOKEN:?SANDBOXD_TOKEN must be set}
+      - SANDBOX_PACK_PROJECT_ROOT=${PWD}/src
+      - SANDBOX_WORKSPACE_ROOT=${PWD}/data
+      - SANDBOX_WORKSPACE_CONTAINER_ROOT=/app/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  sandboxd:
+    build:
+      context: .
+      dockerfile: Dockerfile.sandboxd
+    container_name: sandboxd
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - TZ=${TZ:-UTC}
+      - SANDBOXD_PORT=4100
+      - SANDBOXD_TOKEN=${SANDBOXD_TOKEN:?SANDBOXD_TOKEN must be set}
+      - SANDBOXD_ALLOWED_IMAGES=${SANDBOXD_ALLOWED_IMAGES:-node:24-slim}
+      - SANDBOXD_CONTAINER_SCRATCH_ROOT=/var/lib/sandboxd
+      - SANDBOXD_HOST_SCRATCH_ROOT=${PWD}/.sandboxd
+    volumes:
+      # sandboxd must be treated as a privileged boundary because docker.sock
+      # grants host-equivalent container control.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./.sandboxd:/var/lib/sandboxd
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - fetch('http://127.0.0.1:4100/health').then((res)=>process.exit(res.ok?0:1)).catch(()=>process.exit(1))
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  chromium:
+    image: mcr.microsoft.com/playwright:v1.59.1-noble
+    container_name: chromium
+    command:
+      - /bin/bash
+      - -lc
+      - /ms-playwright/chromium-*/chrome-linux64/chrome --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --remote-debugging-address=127.0.0.1 --remote-debugging-port=9223 --user-data-dir=/tmp/chromium-profile about:blank & exec node /opt/agent-browser/cdp-proxy.js
+    environment:
+      - CDP_TARGET_HOST=127.0.0.1
+      - CDP_TARGET_PORT=9223
+      - CDP_LISTEN_HOST=0.0.0.0
+      - CDP_LISTEN_PORT=9222
+    volumes:
+      - ./ops/agent-browser/cdp-proxy.js:/opt/agent-browser/cdp-proxy.js:ro
+    # No ports exposed — only pipi-bot accesses chromium via docker network
+    tmpfs:
+      - /tmp:size=1024m
+    shm_size: "1gb"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - node -e "fetch('http://127.0.0.1:9222/json/version').then((res)=>process.exit(res.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+volumes:
+  ollama-data:

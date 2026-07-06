@@ -1,0 +1,44 @@
+name: agent-browser
+
+services:
+  chromium:
+    image: mcr.microsoft.com/playwright:v1.59.1-noble
+    container_name: agent-browser-chromium
+    command:
+      - /bin/bash
+      - -lc
+      - /ms-playwright/chromium-*/chrome-linux64/chrome --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --remote-debugging-address=127.0.0.1 --remote-debugging-port=9223 --user-data-dir=/tmp/chromium-profile about:blank & exec node /opt/agent-browser/cdp-proxy.js
+    environment:
+      - CDP_TARGET_HOST=127.0.0.1
+      - CDP_TARGET_PORT=9223
+      - CDP_LISTEN_HOST=0.0.0.0
+      - CDP_LISTEN_PORT=9222
+    volumes:
+      - ./cdp-proxy.js:/opt/agent-browser/cdp-proxy.js:ro
+    networks:
+      agent-tools:
+        aliases:
+          - chromium
+    tmpfs:
+      - /tmp:size=1024m
+    shm_size: "1gb"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - node -e "fetch('http://127.0.0.1:9222/json/version').then((res)=>process.exit(res.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  agent-tools:
+    name: agent-tools

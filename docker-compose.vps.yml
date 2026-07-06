@@ -1,0 +1,26 @@
+services:
+  pipi-bot:
+    build: .
+    container_name: open-pipi-duobarca
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - NODE_ENV=production
+      - TZ=${TZ:-Europe/Rome}
+      - DATA_DIR=/app/data
+      - CHROMIUM_CDP_URL=http://agent-browser-chromium:9222
+    volumes:
+      - ./data:/app/data
+    networks:
+      - default
+      - agent-tools
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  agent-tools:
+    external: true
+    name: agent-tools

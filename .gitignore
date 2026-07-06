@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+.npm-cache/
+package-lock.json
+
+# Build output
+dist/
+
+# Local data & auth
+data/
+backups/
+.sandboxd/
+*.sqlite
+
+# Secrets
+.env
+.env.local
+.env.*.local
+gateway_identity.json
+tradfri_identity.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Test coverage
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+.claude/settings.json
+.claude/settings.local.json
+data-*/

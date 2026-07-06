@@ -1,0 +1,32 @@
+# ---- Build stage ----
+FROM node:24-slim AS builder
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --ignore-scripts
+
+COPY tsconfig.json ./
+COPY src/ ./src/
+RUN npx tsc \
+    && cp -r src/packs dist/packs \
+    && cp -r src/groundings dist/groundings
+
+# ---- Runtime stage ----
+FROM node:24-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    docker.io \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --omit=dev --ignore-scripts
+
+COPY --from=builder /app/dist ./dist
+
+EXPOSE 4100
+
+CMD ["node", "dist/sandboxd.js"]
