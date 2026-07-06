@@ -71,6 +71,7 @@ async function loadChannelCommands(options?: {
         storeMessage,
     }));
     vi.doMock('../config', () => ({
+        BOT_DISPLAY_NAME: 'PiPi',
         RUNTIME_PLATFORM: 'generic',
         isOwner: vi.fn(() => options?.isOwner ?? true),
     }));

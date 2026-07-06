@@ -1,10 +1,10 @@
 ---
 {
   "id": "jeeves_personal",
-  "title": "Скрепыш Office Coordination",
+  "title": "Office Coordination",
   "description": "рабочий ассистент для координации, задач и приоритетов",
   "default_language": "ru",
-  "timezone": "Europe/Rome",
+  "timezone": "UTC",
   "memory_focus": [
     "commitments",
     "preferences",

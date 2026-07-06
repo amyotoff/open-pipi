@@ -32,6 +32,20 @@ export const DB_PATH =
           : OPEN_PIPI_DB_PATH);
 
 export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+
+// Display name the assistant introduces itself with.
+export const BOT_DISPLAY_NAME = (process.env.BOT_DISPLAY_NAME || 'PiPi').trim() || 'PiPi';
+
+// Names the assistant responds to when mentioned in group chats.
+// Operators extend the defaults via a comma-separated BOT_NAME_ALIASES.
+const DEFAULT_BOT_NAME_ALIASES = ['pipi', 'пипи', 'jeeves', 'jivs', 'дживс'];
+export const BOT_NAME_ALIASES: string[] = [
+    ...new Set(
+        [...DEFAULT_BOT_NAME_ALIASES, BOT_DISPLAY_NAME, ...(process.env.BOT_NAME_ALIASES || '').split(',')]
+            .map((alias) => alias.trim().toLowerCase())
+            .filter(Boolean)
+    ),
+];
 export const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 export const GEMINI_EXECUTOR_MODEL = process.env.GEMINI_EXECUTOR_MODEL || 'gemini-2.5-flash';
 export const GEMINI_ADVISOR_MODEL = process.env.GEMINI_ADVISOR_MODEL || 'gemini-3-pro-preview';

@@ -59,6 +59,7 @@ async function loadRouter(options?: {
         sendChannelMessage,
     }));
     vi.doMock('./config', () => ({
+        BOT_NAME_ALIASES: ['pipi', 'пипи', 'jeeves', 'jivs', 'дживс'],
         isHouseholdChat: vi.fn(() => options?.isHouseholdChat ?? false),
         isOwner: vi.fn(() => options?.isOwner ?? true),
     }));
