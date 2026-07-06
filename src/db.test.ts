@@ -296,6 +296,24 @@ describe('db module', () => {
         );
     });
 
+    it('keeps a switched pack and grounding when the space is re-ensured', async () => {
+        const dbModule = await loadDbModule();
+        dbModule.initDatabase();
+
+        dbModule.ensureTelegramSpace('chat-1', 'group', 'chat-1');
+        const spaceId = dbModule.buildTelegramSpaceId('chat-1');
+        dbModule.updateSpaceAssistantPack(spaceId, 'office');
+        dbModule.updateSpaceGroundingPack(spaceId, 'office_grounding');
+
+        // Every incoming message re-ensures the space; that must not
+        // silently reset pack/grounding back to the defaults.
+        dbModule.ensureTelegramSpace('chat-1', 'group', 'chat-1');
+
+        const space = dbModule.getSpace(spaceId);
+        expect(space?.assistant_pack_id).toBe('office');
+        expect(space?.grounding_pack_id).toBe('office_grounding');
+    });
+
     it('creates new spaces with KISS operational defaults and backfills existing ones on policy update', async () => {
         const dbModule = await loadDbModule();
         dbModule.initDatabase();

@@ -160,7 +160,7 @@ describe('office_write_google_doc', () => {
     });
 
     it('creates a new doc when no URL is provided', async () => {
-        vi.stubGlobal('fetch', async (_url: string, opts?: RequestInit) => {
+        vi.stubGlobal('fetch', async (_url: string, _opts?: RequestInit) => {
             const isCreate = _url === 'https://docs.googleapis.com/v1/documents';
             return {
                 ok: true,

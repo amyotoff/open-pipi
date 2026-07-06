@@ -1650,8 +1650,12 @@ export function ensureSpace(
         channel,
         external_ref: externalRef,
         status: options?.status || 'ACTIVE',
-        assistant_pack_id: options?.assistant_pack_id || getDefaultPackId(),
-        grounding_pack_id: options?.grounding_pack_id || getDefaultGroundingId(),
+        // Leave pack/grounding undefined unless explicitly requested:
+        // upsertSpace falls back to the existing row first, so re-ensuring
+        // a space (e.g. on every incoming message) must not reset a
+        // previously switched pack back to the default.
+        assistant_pack_id: options?.assistant_pack_id,
+        grounding_pack_id: options?.grounding_pack_id,
         policy_json: options?.policy_json,
     });
     return getSpace(id)!;

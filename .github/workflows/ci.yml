@@ -9,19 +9,16 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [22, 24]
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: pnpm/action-setup@v4
 
-      - name: Use Node.js ${{ matrix.node-version }}
+      - name: Use Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: 24
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -37,11 +34,9 @@ jobs:
         run: pnpm test
 
       - name: Run feature smokes
-        if: matrix.node-version == 24
         run: pnpm test:smoke
 
       - name: Enforce coverage gate
-        if: matrix.node-version == 24
         run: pnpm test:coverage
 
       - name: Build

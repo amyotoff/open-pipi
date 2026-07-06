@@ -103,6 +103,8 @@ describe('core/tasks', () => {
     it('runs assistant prompt tasks through Butler and records task runs', async () => {
         const { db, tasks, mocks } = await loadTasksModule();
 
+        db.ensureTelegramSpace('chat-1', 'group', 'chat-1');
+        db.updateSpaceAssistantPack(db.buildTelegramSpaceId('chat-1'), 'office');
         tasks.ensureDefaultAssistantTasks('chat-1');
         await tasks.runAssistantTask('task:telegram:chat-1:briefing_morning');
 
