@@ -1,11 +1,11 @@
 ## Mission
-open-pipi is a Node.js project.
-Open PiPi — a Telegram-first, owner-operated assistant runtime with memory, planning, and research skills
+Open PiPi — a Telegram-first, owner-operated assistant runtime with memory, planning, and research skills.
 
 ## Stack
-- macOS as primary development machine
-- Raspberry Pi 4 8GB as experimental/staging machine
-- Node.js / TypeScript / Next.js / etc.
+- Node.js 24+ / TypeScript
+- pnpm as the package manager
+- SQLite (better-sqlite3) for runtime state
+- Runs on anything from a Raspberry Pi to a VPS (see Dockerfile / docker-compose files)
 
 ## Commands
 - pnpm install
