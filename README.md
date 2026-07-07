@@ -41,8 +41,8 @@ Optional:
 
 ```bash
 corepack enable
-git clone https://github.com/amyotoff/Open_Pipi_Private.git
-cd Open_Pipi_Private
+git clone https://github.com/amyotoff/OPENPIPIFAMILY.git
+cd OPENPIPIFAMILY
 cp .env.example .env
 pnpm install
 ```
@@ -538,6 +538,8 @@ The OAuth callback is intentionally public so Google can redirect to it, but it 
 | `PIPI_ADVISOR_MAX_CALLS_PER_TURN` | Hard cap on advisor consultations during one user turn |
 | `OWNER_TG_IDS` | Comma-separated Telegram owner IDs |
 | `OWNER_IDENTITIES` | Comma-separated channel-qualified owner IDs |
+| `BOT_DISPLAY_NAME` | Name the assistant introduces itself with (default: `PiPi`) |
+| `BOT_NAME_ALIASES` | Extra comma-separated group-mention names on top of the defaults |
 | `HOUSEHOLD_CHAT_ID` | Optional primary Telegram group anchor |
 | `BOOTSTRAP_OWNER_MODE` | Temporary first-run fail-open mode |
 | `BOOTSTRAP_PACK` | Default assistant pack ID from bootstrap |

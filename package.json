@@ -32,13 +32,13 @@
   ],
   "author": "Amyote",
   "license": "MIT",
-  "homepage": "https://github.com/amyotoff/Open_Pipi_Private",
+  "homepage": "https://github.com/amyotoff/OPENPIPIFAMILY",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/amyotoff/Open_Pipi_Private.git"
+    "url": "git+https://github.com/amyotoff/OPENPIPIFAMILY.git"
   },
   "bugs": {
-    "url": "https://github.com/amyotoff/Open_Pipi_Private/issues"
+    "url": "https://github.com/amyotoff/OPENPIPIFAMILY/issues"
   },
   "type": "commonjs",
   "dependencies": {
