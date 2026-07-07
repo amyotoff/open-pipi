@@ -9,6 +9,7 @@ import nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
 import { OutboundChannel, SendResult, MessageOptions } from './_types';
 import { registerChannel } from './_registry';
+import { isGmailEnabled } from './_loader';
 import { dispatchIncomingChannelMessage } from './runtime';
 import { executeChannelCommand } from '../core/channel-commands';
 import {
@@ -450,6 +451,6 @@ class GmailChannel implements OutboundChannel {
 // Self-registration
 // ==========================================
 
-if (process.env.CONCIERGE_SMTP_HOST && process.env.CONCIERGE_SMTP_USER) {
+if (isGmailEnabled()) {
     registerChannel('gmail', () => new GmailChannel());
 }
