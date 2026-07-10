@@ -33,7 +33,7 @@ import {
     stripToolResultPrefix,
 } from './operator-commands';
 import { bot } from './telegram-bot';
-import { buildTelegramHelpMessage, TELEGRAM_SETUP_ACTIONS } from './telegram-menu';
+import { buildTelegramHelpMessage, TELEGRAM_DAILY_ACTIONS, TELEGRAM_SETUP_ACTIONS } from './telegram-menu';
 import { sendMessageToChat, sendTypingAction } from './telegram-send';
 
 type ReplyTarget = {
@@ -45,6 +45,12 @@ type ReplyTarget = {
 function buildSetupKeyboard() {
     return Markup.inlineKeyboard(
         TELEGRAM_SETUP_ACTIONS.map((action) => Markup.button.callback(action.label, action.callbackData))
+    );
+}
+
+function buildDailyKeyboard() {
+    return Markup.inlineKeyboard(
+        TELEGRAM_DAILY_ACTIONS.map((action) => Markup.button.callback(action.label, action.callbackData))
     );
 }
 
@@ -74,7 +80,10 @@ function ensureReplyTargetMembership(chatId: string, chatType: string | undefine
     ensureSpaceMembership(buildTelegramSpaceId(chatId), replyTarget.personId, membershipRole);
 }
 
-async function runSharedTelegramCommand(ctx: any): Promise<void> {
+async function runSharedTelegramCommand(
+    ctx: any,
+    options?: { rawText?: string; replyExtra?: ReturnType<typeof buildDailyKeyboard> }
+): Promise<void> {
     const chatId = ctx.chat?.id?.toString();
     const senderId = ctx.from?.id?.toString();
     if (!chatId || !senderId) return;
@@ -86,15 +95,19 @@ async function runSharedTelegramCommand(ctx: any): Promise<void> {
         senderUsername: ctx.from?.username ?? null,
         senderDisplayName: ctx.from?.first_name ?? null,
         isDirect: ctx.chat?.type === 'private',
-        rawText: ((ctx.message as any)?.text || '').trim(),
+        rawText: options?.rawText || ((ctx.message as any)?.text || '').trim(),
         reply: async (text) => {
-            await ctx.reply(text);
+            await ctx.reply(text, options?.replyExtra);
         },
         sendTyping: async () => {
             await sendTypingAction(chatId);
         },
     });
 }
+
+const sharedTelegramCommand = async (ctx: any): Promise<void> => {
+    await runSharedTelegramCommand(ctx);
+};
 
 // ==========================================
 // Command handlers (the hamburger menu exposes only a curated subset)
@@ -152,7 +165,19 @@ bot.command('resume', async (ctx) => {
 });
 
 bot.command('today', async (ctx) => {
-    await runSharedTelegramCommand(ctx);
+    await runSharedTelegramCommand(ctx, { replyExtra: buildDailyKeyboard() });
+});
+
+bot.action(/^daily:(brief|focus|review)$/, async (ctx) => {
+    const senderId = ctx.from?.id.toString();
+    if (!senderId || !isOwner(senderId)) {
+        await ctx.answerCbQuery('This action is available only to the owner.');
+        return;
+    }
+
+    const action = ctx.match[1];
+    await ctx.answerCbQuery('Working…');
+    await runSharedTelegramCommand(ctx, { rawText: `/${action}` });
 });
 
 bot.command('yesterday', async (ctx) => {
@@ -163,12 +188,12 @@ bot.command('week', async (ctx) => {
     await runSharedTelegramCommand(ctx);
 });
 
-bot.command('status', runSharedTelegramCommand);
-bot.command('dashboard', runSharedTelegramCommand);
-bot.command('capture', runSharedTelegramCommand);
-bot.command('inbox', runSharedTelegramCommand);
-bot.command('drop', runSharedTelegramCommand);
-bot.command('link', runSharedTelegramCommand);
+bot.command('status', sharedTelegramCommand);
+bot.command('dashboard', sharedTelegramCommand);
+bot.command('capture', sharedTelegramCommand);
+bot.command('inbox', sharedTelegramCommand);
+bot.command('drop', sharedTelegramCommand);
+bot.command('link', sharedTelegramCommand);
 
 bot.command('setup', async (ctx) => {
     const senderId = ctx.from?.id.toString();
@@ -303,8 +328,8 @@ bot.command('killswitch', async (ctx) => {
 });
 
 // /reset and /clear — clear conversation context with a compact structured recollection
-bot.command('reset', runSharedTelegramCommand);
-bot.command('clear', runSharedTelegramCommand);
+bot.command('reset', sharedTelegramCommand);
+bot.command('clear', sharedTelegramCommand);
 
 // /atelier — show skill requests with inline management (owners only)
 bot.command('atelier', async (ctx) => {

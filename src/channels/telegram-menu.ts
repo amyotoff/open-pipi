@@ -5,13 +5,16 @@ export type TelegramMenuCommand = {
 
 export const TELEGRAM_MENU_COMMANDS: readonly TelegramMenuCommand[] = Object.freeze([
     { command: 'start', description: 'Start or restart' },
-    { command: 'help', description: 'See what I can do' },
-    { command: 'brief', description: 'Get a useful summary' },
-    { command: 'focus', description: "Choose today's focus" },
-    { command: 'plan', description: 'Turn a goal into next steps' },
-    { command: 'today', description: "See today's timeline" },
+    { command: 'today', description: "Open today's dashboard" },
     { command: 'tasks', description: 'Manage reminders and recurring tasks' },
+    { command: 'help', description: 'See what I can do' },
     { command: 'setup', description: 'Change assistant settings' },
+]);
+
+export const TELEGRAM_DAILY_ACTIONS = Object.freeze([
+    { label: 'Brief', callbackData: 'daily:brief' },
+    { label: 'Focus', callbackData: 'daily:focus' },
+    { label: 'Review day', callbackData: 'daily:review' },
 ]);
 
 export const TELEGRAM_SETUP_ACTIONS = Object.freeze([
@@ -24,8 +27,9 @@ export function buildTelegramHelpMessage(advanced = false): string {
         return [
             'Advanced commands',
             '',
+            'Daily: /brief, /focus, /plan, /review, /yesterday, /week',
             'Work: /research, /audit, /project, /history, /artifacts, /workspace, /workflow, /gdrive',
-            'Routines: /review, /yesterday, /week, /rituals',
+            'Routines: /rituals',
             'Assistant: /channel, /pack, /space, /members, /grounding, /atelier',
             'Operations: /status, /backup, /killswitch, /reset',
             'Consent: /approve, /deny',
@@ -43,10 +47,7 @@ export function buildTelegramHelpMessage(advanced = false): string {
         '• “Summarize what changed today.”',
         '',
         'Useful shortcuts:',
-        '/brief — a useful summary',
-        '/focus — choose the next focus',
-        '/plan — turn a goal into steps',
-        '/today — today’s timeline',
+        '/today — timeline with Brief, Focus, and Review actions',
         '/tasks — reminders and recurring tasks',
         '/setup — assistant settings',
         '',
