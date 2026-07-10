@@ -13,7 +13,7 @@
     "lint:fix": "eslint src/ --fix",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
-    "verify": "pnpm format:check && pnpm typecheck && pnpm lint && pnpm test && pnpm test:smoke && pnpm test:coverage && pnpm build",
+    "verify": "pnpm format:check && pnpm typecheck && pnpm lint && pnpm content:check && pnpm test && pnpm test:smoke && pnpm test:coverage && pnpm build",
     "release:check": "pnpm verify && pnpm audit --prod --audit-level=critical",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
@@ -22,6 +22,7 @@
     "test:evaluator": "vitest run src/core/evaluator.test.ts",
     "backup:restore": "ts-node src/scripts/restore-runtime-backup.ts",
     "bootstrap": "ts-node src/scripts/bootstrap.ts",
+    "content:check": "ts-node src/scripts/content-check.ts",
     "setup:check": "ts-node src/scripts/doctor.ts",
     "prepare": "husky"
   },

@@ -9,34 +9,12 @@ import {
     PackToolModuleExport,
 } from './pack-types';
 import { materializeCoreToolbox } from './coretoolbox';
-
-type MarkdownDocument<T> = {
-    meta: T;
-    body: string;
-};
+import { readJsonFrontmatter } from './content-document';
 
 const packCache = new Map<string, MaterializedAgent | null>();
 
 function packsRoot(): string {
     return path.join(__dirname, '../packs');
-}
-
-function parseJsonFrontmatter<T>(raw: string, filename: string): MarkdownDocument<T> {
-    const match = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
-    if (!match) {
-        throw new Error(`Expected JSON frontmatter in ${filename}`);
-    }
-
-    const [, jsonBlock, body] = match;
-    return {
-        meta: JSON.parse(jsonBlock.trim()) as T,
-        body: body.trim(),
-    };
-}
-
-function readPackDocument<T>(filePath: string): MarkdownDocument<T> {
-    const raw = fs.readFileSync(filePath, 'utf-8');
-    return parseJsonFrontmatter<T>(raw, filePath);
 }
 
 function dedupeToolScriptPaths(toolDir: string): string[] {
@@ -59,7 +37,7 @@ function dedupeToolScriptPaths(toolDir: string): string[] {
     return [...preferred.values()].map((file) => path.join(toolDir, file));
 }
 
-function loadPackTools(packRoot: string): PackToolDescriptor[] {
+function loadPackTools(packRoot: string, strict = false): PackToolDescriptor[] {
     const toolDir = path.join(packRoot, 'tools');
     const toolPaths = dedupeToolScriptPaths(toolDir);
     const projectRoot = path.join(packRoot, '..', '..');
@@ -69,6 +47,7 @@ function loadPackTools(packRoot: string): PackToolDescriptor[] {
             const loaded = require(toolPath) as { packTool?: PackToolModuleExport; default?: PackToolModuleExport };
             const packTool = loaded.packTool || loaded.default;
             if (!packTool?.id || !packTool.title || !packTool.description || typeof packTool.run !== 'function') {
+                if (strict) throw new Error(`Pack tool ${toolPath} must export id, title, description, and run.`);
                 return [];
             }
 
@@ -89,6 +68,7 @@ function loadPackTools(packRoot: string): PackToolDescriptor[] {
                 },
             ];
         } catch (error) {
+            if (strict) throw new Error(`Failed to load pack tool module ${toolPath}.`, { cause: error });
             console.warn(`[PACK] Failed to load tool module ${toolPath}:`, error);
             return [];
         }
@@ -109,44 +89,55 @@ export function listInstallablePackIds(): string[] {
         .sort();
 }
 
+function materializePackFromRoot(root: string, strictTools: boolean): MaterializedAgent {
+    const agentPath = path.join(root, 'agent.md');
+    const skillsPath = path.join(root, 'skills.md');
+    const toolsPath = path.join(root, 'tools.md');
+
+    if (!fs.existsSync(agentPath)) throw new Error(`Missing required pack file ${agentPath}.`);
+    if (!fs.existsSync(skillsPath)) throw new Error(`Missing required pack file ${skillsPath}.`);
+
+    const agentDoc = readJsonFrontmatter<InstallableAgentMeta>(agentPath);
+    const skillsDoc = readJsonFrontmatter<InstallableSkillsMeta>(skillsPath);
+    const toolsDoc = fs.existsSync(toolsPath) ? fs.readFileSync(toolsPath, 'utf-8').trim() : '';
+    const packTools = loadPackTools(root, strictTools);
+
+    return {
+        id: agentDoc.meta.id,
+        persona_id: agentDoc.meta.persona_id,
+        enabled_capabilities: skillsDoc.meta.enabled_capabilities || [],
+        memory_rules: agentDoc.meta.memory_rules || [],
+        seeded_tasks: agentDoc.meta.seeded_tasks || [],
+        default_policies: agentDoc.meta.default_policies || {},
+        authority_presets: agentDoc.meta.authority_presets || {},
+        onboarding_hints: agentDoc.meta.onboarding_hints,
+        system_prompt_path: agentPath,
+        system_prompt: agentDoc.body,
+        skills_doc: skillsDoc.body,
+        tools_doc: toolsDoc,
+        core_toolbox: materializeCoreToolbox(skillsDoc.meta.enabled_capabilities || []),
+        pack_tools: packTools,
+        source: 'installable',
+        pack_root: root,
+    };
+}
+
+export function loadPackFromRootStrict(root: string): MaterializedAgent {
+    return materializePackFromRoot(root, true);
+}
+
 function loadPackFromRootWithCache(root: string, cacheKey: string): MaterializedAgent | null {
     if (packCache.has(cacheKey)) {
         return packCache.get(cacheKey) || null;
     }
 
-    const agentPath = path.join(root, 'agent.md');
-    const skillsPath = path.join(root, 'skills.md');
-    const toolsPath = path.join(root, 'tools.md');
-
-    if (!fs.existsSync(agentPath) || !fs.existsSync(skillsPath)) {
+    if (!fs.existsSync(path.join(root, 'agent.md')) || !fs.existsSync(path.join(root, 'skills.md'))) {
         packCache.set(cacheKey, null);
         return null;
     }
 
     try {
-        const agentDoc = readPackDocument<InstallableAgentMeta>(agentPath);
-        const skillsDoc = readPackDocument<InstallableSkillsMeta>(skillsPath);
-        const toolsDoc = fs.existsSync(toolsPath) ? fs.readFileSync(toolsPath, 'utf-8').trim() : '';
-        const packTools = loadPackTools(root);
-
-        const materialized: MaterializedAgent = {
-            id: agentDoc.meta.id,
-            persona_id: agentDoc.meta.persona_id,
-            enabled_capabilities: skillsDoc.meta.enabled_capabilities || [],
-            memory_rules: agentDoc.meta.memory_rules || [],
-            seeded_tasks: agentDoc.meta.seeded_tasks || [],
-            default_policies: agentDoc.meta.default_policies || {},
-            authority_presets: agentDoc.meta.authority_presets || {},
-            onboarding_hints: agentDoc.meta.onboarding_hints,
-            system_prompt_path: agentPath,
-            system_prompt: agentDoc.body,
-            skills_doc: skillsDoc.body,
-            tools_doc: toolsDoc,
-            core_toolbox: materializeCoreToolbox(skillsDoc.meta.enabled_capabilities || []),
-            pack_tools: packTools,
-            source: 'installable',
-            pack_root: root,
-        };
+        const materialized = materializePackFromRoot(root, false);
 
         packCache.set(cacheKey, materialized);
         return materialized;

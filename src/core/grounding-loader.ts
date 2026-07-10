@@ -3,35 +3,13 @@ import path from 'path';
 import { getSpace } from '../db';
 import type { GroundingPack, InstallableGroundingMeta } from './grounding-types';
 import { ensureSpaceBehaviorSnapshot, getSpaceGroundingSnapshotRoot } from './space-behavior';
-
-type MarkdownDocument<T> = {
-    meta: T;
-    body: string;
-};
+import { readJsonFrontmatter } from './content-document';
 
 const DEFAULT_INSTALLABLE_GROUNDING_ID = 'jeeves_personal';
 const groundingCache = new Map<string, GroundingPack | null>();
 
 function groundingsRoot(): string {
     return path.join(__dirname, '../groundings');
-}
-
-function parseJsonFrontmatter<T>(raw: string, filename: string): MarkdownDocument<T> {
-    const match = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
-    if (!match) {
-        throw new Error(`Expected JSON frontmatter in ${filename}`);
-    }
-
-    const [, jsonBlock, body] = match;
-    return {
-        meta: JSON.parse(jsonBlock.trim()) as T,
-        body: body.trim(),
-    };
-}
-
-function readGroundingDocument<T>(filePath: string): MarkdownDocument<T> {
-    const raw = fs.readFileSync(filePath, 'utf-8');
-    return parseJsonFrontmatter<T>(raw, filePath);
 }
 
 function readOptionalMarkdown(filePath: string): string {
@@ -74,38 +52,50 @@ export function listInstallableGroundingIds(): string[] {
         .sort();
 }
 
-function loadGroundingPackFromRootWithCache(root: string, cacheKey: string): GroundingPack | null {
-    if (groundingCache.has(cacheKey)) {
-        return groundingCache.get(cacheKey) || null;
-    }
-
+export function loadGroundingPackFromRootStrict(root: string): GroundingPack {
     const groundingPath = path.join(root, 'grounding.md');
     const peoplePath = path.join(root, 'people.md');
     const operatingPath = path.join(root, 'operating.md');
     const glossaryPath = path.join(root, 'glossary.md');
 
-    if (!fs.existsSync(groundingPath) || !fs.existsSync(peoplePath) || !fs.existsSync(operatingPath)) {
+    for (const requiredPath of [groundingPath, peoplePath, operatingPath]) {
+        if (!fs.existsSync(requiredPath)) throw new Error(`Missing required grounding file ${requiredPath}.`);
+    }
+
+    const groundingDoc = readJsonFrontmatter<InstallableGroundingMeta>(groundingPath);
+    return {
+        id: groundingDoc.meta.id,
+        title: groundingDoc.meta.title,
+        description: groundingDoc.meta.description || null,
+        default_language: groundingDoc.meta.default_language || null,
+        timezone: groundingDoc.meta.timezone || null,
+        memory_focus: groundingDoc.meta.memory_focus || [],
+        attention_bias: groundingDoc.meta.attention_bias || [],
+        grounding_text: groundingDoc.body,
+        people_text: readOptionalMarkdown(peoplePath),
+        operating_text: readOptionalMarkdown(operatingPath),
+        glossary_text: readOptionalMarkdown(glossaryPath),
+        source: 'installable',
+        grounding_root: root,
+    };
+}
+
+function loadGroundingPackFromRootWithCache(root: string, cacheKey: string): GroundingPack | null {
+    if (groundingCache.has(cacheKey)) {
+        return groundingCache.get(cacheKey) || null;
+    }
+
+    if (
+        !fs.existsSync(path.join(root, 'grounding.md')) ||
+        !fs.existsSync(path.join(root, 'people.md')) ||
+        !fs.existsSync(path.join(root, 'operating.md'))
+    ) {
         groundingCache.set(cacheKey, null);
         return null;
     }
 
     try {
-        const groundingDoc = readGroundingDocument<InstallableGroundingMeta>(groundingPath);
-        const materialized: GroundingPack = {
-            id: groundingDoc.meta.id,
-            title: groundingDoc.meta.title,
-            description: groundingDoc.meta.description || null,
-            default_language: groundingDoc.meta.default_language || null,
-            timezone: groundingDoc.meta.timezone || null,
-            memory_focus: groundingDoc.meta.memory_focus || [],
-            attention_bias: groundingDoc.meta.attention_bias || [],
-            grounding_text: groundingDoc.body,
-            people_text: readOptionalMarkdown(peoplePath),
-            operating_text: readOptionalMarkdown(operatingPath),
-            glossary_text: readOptionalMarkdown(glossaryPath),
-            source: 'installable',
-            grounding_root: root,
-        };
+        const materialized = loadGroundingPackFromRootStrict(root);
 
         groundingCache.set(cacheKey, materialized);
         return materialized;

@@ -22,6 +22,20 @@ To add a skill:
 2. Import and add it to `ALL_SKILLS` in `src/skills/_registry.ts`
 3. Skills self-register their tools, handlers, cron jobs, and DB migrations
 
+The filename is also the capability ID used by pack validation; hyphens normalize to underscores (for example, `html-artifacts.skill.ts` → `html_artifacts`). Keep it aligned with the manifest `name`.
+
+## Packs And Groundings
+
+Packs live in `src/packs/<id>/` and require:
+
+- `agent.md` with JSON frontmatter and the system prompt body
+- `skills.md` with JSON frontmatter and contributor-facing skill guidance
+- optional `tools.md` and `tools/*.tool.js` or `tools/*.tool.ts`
+
+Groundings live in `src/groundings/<id>/` and require `grounding.md`, `people.md`, and `operating.md`; `glossary.md` is optional. The frontmatter `id` must match its directory name.
+
+Run `pnpm content:check` after changing either type. It validates required files, JSON frontmatter, IDs, seeded task schedules, pack tool exports, and grounding metadata. The check is also part of `pnpm verify`.
+
 ## Testing
 
 - Use `pnpm` for this repo. Do not mix `npm` and `pnpm` in the same checkout.

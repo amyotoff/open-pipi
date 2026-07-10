@@ -236,6 +236,14 @@ Built-in packs:
 
 This means "plug-and-play" here is literal: drop in a new pack directory, run the app, attach it to a space, and the core runtime keeps working.
 
+Before running or sharing custom content, validate every pack and grounding:
+
+```bash
+pnpm content:check
+```
+
+The same command is part of `pnpm verify`; use `pnpm content:check -- --json` when another tool needs structured diagnostics.
+
 ## Channels
 
 `Telegram` is still the richest surface. The others intentionally reuse the same kernel with lighter UX.
@@ -688,6 +696,7 @@ Useful scripts:
 | `pnpm verify` | Complete local quality gate |
 | `pnpm release:check` | Quality gate plus critical production dependency audit |
 | `pnpm bootstrap` | Description to grounding bootstrap flow |
+| `pnpm content:check` | Validate installable packs and groundings |
 | `pnpm setup:check` | Read-only first-run and configuration diagnostics |
 | `pnpm backup:restore` | Restore a runtime backup by id, path, `latest`, or `latest-healthy` |
 
