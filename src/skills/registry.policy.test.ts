@@ -164,6 +164,8 @@ describe('skills registry policy filtering', () => {
 
         const ownerTools = registry.getRegisteredToolsForContext({ chatId: 'chat-2', userId: '111' });
         const memberTools = registry.getRegisteredToolsForContext({ chatId: 'chat-2', userId: '222' });
+        const ownerHandlers = registry.getRegisteredHandlersForContext({ chatId: 'chat-2', userId: '111' });
+        const memberHandlers = registry.getRegisteredHandlersForContext({ chatId: 'chat-2', userId: '222' });
 
         expect(ownerTools.map((tool) => tool.name)).toContain('space_set_pack');
         expect(ownerTools.map((tool) => tool.name)).toContain('project_create');
@@ -177,6 +179,14 @@ describe('skills registry policy filtering', () => {
         expect(memberTools.map((tool) => tool.name)).toContain('task_create');
         expect(memberTools.map((tool) => tool.name)).not.toContain('member_set_role');
         expect(memberTools.map((tool) => tool.name)).toContain('atelier_request_capability');
+        expect(ownerHandlers.space_set_pack).toBeTypeOf('function');
+        expect(memberHandlers.space_set_pack).toBeUndefined();
+        expect(
+            registry.getToolDeclarationForContext('space_set_pack', { chatId: 'chat-2', userId: '111' })
+        ).toBeDefined();
+        expect(
+            registry.getToolDeclarationForContext('space_set_pack', { chatId: 'chat-2', userId: '222' })
+        ).toBeUndefined();
     });
 
     it('shows history search only to owner contexts', async () => {

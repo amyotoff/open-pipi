@@ -7,6 +7,7 @@ import { resolveSpacePolicy } from '../core/policy';
 import { deriveToolExecutionSpec, ToolExecutionSpec } from '../core/tool-execution';
 import cron from 'node-cron';
 import { resolveSpaceIdFromExecutionContext, RuntimeExecutionContext } from '../core/runtime-context';
+import { buildSkillToolRegistry, RegisteredSkillTool } from './tool-registry';
 
 // All skills imported statically (reliable, no dynamic magic)
 import memorySkill from './memory.skill';
@@ -81,12 +82,14 @@ const CORE_TOOL_EXECUTION_BASE: Record<string, Partial<ToolExecutionSpec>> = {
     clear_skill_requests: { run_mode: 'inline', approval: 'none', capabilities: ['shell_none'] },
 };
 
-// Collected tools and handlers from all skills
-const allTools: FunctionDeclaration[] = [];
-const allHandlers: Record<string, (args: any, context?: RuntimeExecutionContext) => Promise<string>> = {};
+const SKILL_TOOL_REGISTRY = buildSkillToolRegistry(ALL_SKILLS, DEFAULT_CAPABILITY_META);
+const REGISTERED_TOOLS = Array.from(SKILL_TOOL_REGISTRY.values(), (registration) => registration.declaration);
+const REGISTERED_HANDLERS = Object.fromEntries(
+    Array.from(SKILL_TOOL_REGISTRY.values(), (registration) => [registration.name, registration.handler])
+);
 
 export function getRegisteredTools(): FunctionDeclaration[] {
-    return allTools;
+    return [...REGISTERED_TOOLS];
 }
 
 export function getToolDeclarationForContext(
@@ -98,7 +101,7 @@ export function getToolDeclarationForContext(
         return packTool.declaration;
     }
 
-    return ALL_SKILLS.flatMap((skill) => skill.tools).find((tool) => tool.name === toolName);
+    return getSkillToolRegistrationForContext(toolName, context)?.declaration;
 }
 
 function isOwnerContext(context: RuntimeExecutionContext): boolean {
@@ -148,12 +151,24 @@ function isSkillAllowedForContext(skill: SkillManifest, context: RuntimeExecutio
     return true;
 }
 
-export function getRegisteredToolsForContext(context?: RuntimeExecutionContext): FunctionDeclaration[] {
-    if (!context) return allTools;
+function getSkillToolRegistrationForContext(
+    toolName: string,
+    context?: RuntimeExecutionContext
+): RegisteredSkillTool | undefined {
+    const registration = SKILL_TOOL_REGISTRY.get(toolName);
+    if (!registration || (context && !isSkillAllowedForContext(registration.skill, context))) {
+        return undefined;
+    }
 
-    const skillTools = ALL_SKILLS.filter((skill) => isSkillAllowedForContext(skill, context)).flatMap(
-        (skill) => skill.tools
-    );
+    return registration;
+}
+
+export function getRegisteredToolsForContext(context?: RuntimeExecutionContext): FunctionDeclaration[] {
+    if (!context) return getRegisteredTools();
+
+    const skillTools = Array.from(SKILL_TOOL_REGISTRY.values())
+        .filter((registration) => isSkillAllowedForContext(registration.skill, context))
+        .map((registration) => registration.declaration);
 
     const packTools = getPackToolsForContext(context).map((tool) => tool.declaration);
     return [...skillTools, ...packTools];
@@ -163,17 +178,21 @@ export function getRegisteredHandlers(): Record<
     string,
     (args: any, context?: RuntimeExecutionContext) => Promise<string>
 > {
-    return allHandlers;
+    return { ...REGISTERED_HANDLERS };
 }
 
 export function getRegisteredHandlersForContext(
     context?: RuntimeExecutionContext
 ): Record<string, (args: any, context?: RuntimeExecutionContext) => Promise<string>> {
-    if (!context) {
-        return allHandlers;
-    }
+    const handlers = context
+        ? Object.fromEntries(
+              Array.from(SKILL_TOOL_REGISTRY.values())
+                  .filter((registration) => isSkillAllowedForContext(registration.skill, context))
+                  .map((registration) => [registration.name, registration.handler])
+          )
+        : getRegisteredHandlers();
+    if (!context) return handlers;
 
-    const handlers = { ...allHandlers };
     for (const tool of getPackToolsForContext(context)) {
         handlers[tool.id] = async (args: any, runtimeContext?: RuntimeExecutionContext) =>
             executePackTool(tool.id, args, runtimeContext || context);
@@ -234,12 +253,11 @@ export function getToolExecutionSpecForContext(
         return deriveToolExecutionSpec(toolName, args, packTool.execution);
     }
 
-    const skill = ALL_SKILLS.find((item) => item.tools.some((tool) => tool.name === toolName));
-    if (skill) {
-        const meta = getCapabilityMeta(skill.name);
+    const registration = getSkillToolRegistrationForContext(toolName, context);
+    if (registration) {
         return deriveToolExecutionSpec(toolName, args, {
-            run_mode: meta.run_mode,
-            approval: meta.approval,
+            run_mode: registration.meta.run_mode,
+            approval: registration.meta.approval,
             audit_default: 'errors',
         });
     }
@@ -263,20 +281,7 @@ export async function initAllSkills(): Promise<void> {
             }
         }
 
-        // 2. Collect tools
-        allTools.push(...skill.tools);
-
-        // 3. Collect handlers
-        for (const [toolName, handler] of Object.entries(skill.handlers)) {
-            if (allHandlers[toolName]) {
-                console.warn(
-                    `[REGISTRY] Duplicate handler for tool "${toolName}" from skill "${skill.name}". Overwriting.`
-                );
-            }
-            allHandlers[toolName] = handler;
-        }
-
-        // 4. Register cron jobs
+        // 2. Register cron jobs
         if (skill.crons) {
             for (const job of skill.crons) {
                 cron.schedule(
@@ -294,7 +299,7 @@ export async function initAllSkills(): Promise<void> {
             }
         }
 
-        // 5. Run skill init
+        // 3. Run skill init
         if (skill.init) {
             try {
                 await skill.init();
@@ -306,5 +311,7 @@ export async function initAllSkills(): Promise<void> {
         console.log(`  [OK] ${skill.name} v${skill.version} — ${skill.tools.length} tools`);
     }
 
-    console.log(`[REGISTRY] Total: ${allTools.length} tools, ${Object.keys(allHandlers).length} handlers`);
+    console.log(
+        `[REGISTRY] Total: ${REGISTERED_TOOLS.length} tools, ${Object.keys(REGISTERED_HANDLERS).length} handlers`
+    );
 }
