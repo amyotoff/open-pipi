@@ -67,6 +67,14 @@ describe('core/tool-execution', () => {
             expect(spec.capabilities).toEqual(['web_browse', 'external_http']);
         });
 
+        it('keeps deep research in its distinct approval class', () => {
+            const spec = deriveToolExecutionSpec('web', { operation: 'deep_research' });
+
+            expect(spec.approval).toBe('explicit');
+            expect(spec.approval_action).toBe('deep_research');
+            expect(spec.approval_reason).toContain('deep web research');
+        });
+
         it('derives file_search save_artifact with artifact_write', () => {
             const spec = deriveToolExecutionSpec('file_search', { operation: 'save_artifact' });
             expect(spec.capabilities).toEqual(['artifact_write']);

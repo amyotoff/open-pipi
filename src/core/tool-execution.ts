@@ -89,14 +89,19 @@ export function deriveToolExecutionSpec(
     const operation = typeof args?.operation === 'string' ? args.operation.trim() : '';
 
     if (toolName === 'web') {
-        const capabilities: ToolCapability[] =
-            operation === 'search' ? ['external_http'] : ['web_browse', 'external_http'];
+        const isSearch = operation === 'search';
+        const isDeepResearch = operation === 'deep_research';
+        const capabilities: ToolCapability[] = isSearch ? ['external_http'] : ['web_browse', 'external_http'];
         return {
             tool_name: toolName,
-            run_mode: operation === 'search' ? 'inline' : 'sidecar',
-            approval: operation === 'search' ? 'none' : 'explicit',
-            approval_action: operation === 'search' ? undefined : 'browse_web',
-            approval_reason: operation === 'search' ? undefined : 'opening an external web page',
+            run_mode: isSearch ? 'inline' : 'sidecar',
+            approval: isSearch ? 'none' : 'explicit',
+            approval_action: isSearch ? undefined : isDeepResearch ? 'deep_research' : 'browse_web',
+            approval_reason: isSearch
+                ? undefined
+                : isDeepResearch
+                  ? 'running a deep web research agent that visits multiple external sites'
+                  : 'opening an external web page',
             audit_default: normalizeAuditMode(base?.audit_default, 'errors'),
             capabilities,
             sandbox: base?.sandbox,

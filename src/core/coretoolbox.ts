@@ -48,6 +48,7 @@ const PRIMITIVE_TEMPLATES: EntryTemplate<CorePrimitiveId>[] = [
             'workspace_find_files',
             'workspace_find_text',
             'workspace_list_artifacts',
+            'workspace_save_artifact',
         ],
     },
     {
@@ -107,6 +108,16 @@ const SYSTEM_TEMPLATES: EntryTemplate<SystemCapabilityId>[] = [
         tool_names: [],
     },
 ];
+
+export const CORE_PRIMITIVE_BACKING_TOOL_NAMES: readonly string[] = Object.freeze(
+    Array.from(new Set(PRIMITIVE_TEMPLATES.flatMap((template) => template.tool_names)))
+);
+
+const CORE_PRIMITIVE_BACKING_TOOL_NAME_SET = new Set(CORE_PRIMITIVE_BACKING_TOOL_NAMES);
+
+export function isCorePrimitiveBackingTool(toolName: string | undefined): boolean {
+    return Boolean(toolName && CORE_PRIMITIVE_BACKING_TOOL_NAME_SET.has(toolName));
+}
 
 function materializeEntries<TId extends string>(
     templates: EntryTemplate<TId>[],

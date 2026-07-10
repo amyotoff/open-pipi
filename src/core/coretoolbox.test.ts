@@ -112,6 +112,11 @@ describe('core/coretoolbox', () => {
         expect(toolbox.system_capabilities.find((entry) => entry.id === 'bio')?.backing_capabilities).toEqual([
             'memory',
         ]);
+        expect(mod.CORE_PRIMITIVE_BACKING_TOOL_NAMES).toContain('web_search');
+        expect(mod.CORE_PRIMITIVE_BACKING_TOOL_NAMES).toContain('workspace_save_artifact');
+        expect(mod.CORE_PRIMITIVE_BACKING_TOOL_NAMES).not.toContain('memory_remember');
+        expect(mod.isCorePrimitiveBackingTool('task_create')).toBe(true);
+        expect(mod.isCorePrimitiveBackingTool('project_create')).toBe(false);
     });
 
     it('routes the unified web primitive to the existing web_search handler', async () => {

@@ -4,6 +4,9 @@ async function loadLlm(options?: {
     advisorEnabled?: boolean;
     maxAdvisorCalls?: number;
     generateContent?: ReturnType<typeof vi.fn>;
+    registeredTools?: Array<{ name: string }>;
+    coreTools?: Array<{ name: string }>;
+    backingToolNames?: string[];
 }) {
     vi.resetModules();
 
@@ -46,7 +49,9 @@ async function loadLlm(options?: {
         summarizeText: vi.fn((text: string) => ({ preview: text.slice(0, 80) })),
     }));
     vi.doMock('./coretoolbox', () => ({
-        CORE_TOOLBOX_TOOL_DECLARATIONS: [],
+        CORE_TOOLBOX_TOOL_DECLARATIONS: options?.coreTools || [],
+        isCorePrimitiveBackingTool: (toolName: string | undefined) =>
+            Boolean(toolName && options?.backingToolNames?.includes(toolName)),
         handleCoreToolboxTool: vi.fn(async () => null),
     }));
     vi.doMock('./tool-executor', () => ({ executeToolCall }));
@@ -58,7 +63,7 @@ async function loadLlm(options?: {
         withSpan: vi.fn(async (_name: string, _options: any, fn: any) => await fn({})),
     }));
     vi.doMock('../skills/_registry', () => ({
-        getRegisteredToolsForContext: vi.fn(() => []),
+        getRegisteredToolsForContext: vi.fn(() => options?.registeredTools || []),
         getRegisteredHandlersForContext: vi.fn(() => ({})),
     }));
     vi.doMock('@google/genai', () => ({
@@ -148,5 +153,33 @@ describe('core/llm advisor strategy', () => {
             generateContent.mock.calls[0][0].config.tools[0].functionDeclarations.map((tool: any) => tool.name)
         ).not.toContain('consult_advisor');
         expect(generateContent).toHaveBeenCalledTimes(1);
+    });
+
+    it('hides legacy backing tools when their core primitive is exposed', async () => {
+        const generateContent = vi.fn().mockResolvedValue({
+            usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 10 },
+            functionCalls: [],
+            text: 'Done',
+        });
+        const mod = await loadLlm({
+            advisorEnabled: false,
+            generateContent,
+            registeredTools: [{ name: 'web_search' }, { name: 'memory_remember' }, { name: 'project_create' }],
+            coreTools: [{ name: 'web' }],
+            backingToolNames: ['web_search'],
+        });
+
+        await mod.processWithLLM([{ role: 'user', content: 'Find project context' }], {
+            chatId: 'chat-1',
+            userId: '111',
+        });
+
+        const names = generateContent.mock.calls[0][0].config.tools[0].functionDeclarations.map(
+            (tool: any) => tool.name
+        );
+        expect(names).toContain('web');
+        expect(names).toContain('memory_remember');
+        expect(names).toContain('project_create');
+        expect(names).not.toContain('web_search');
     });
 });
