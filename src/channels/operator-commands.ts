@@ -159,11 +159,12 @@ export async function runSetupTelegramCommand(context: TelegramOperatorContext):
     const subcommand = parts[0]?.toLowerCase();
 
     if (subcommand === 'apply') {
-        const result = handlers.pipi_apply_defaults
-            ? await handlers.pipi_apply_defaults({}, { chatId: context.chatId, userId: context.userId, spaceId })
-            : '[TOOL_RESULT] Setup management is not available.';
+        if (!handlers.pipi_apply_defaults) {
+            return '[TOOL_RESULT] Setup management is not available.';
+        }
+        await handlers.pipi_apply_defaults({}, { chatId: context.chatId, userId: context.userId, spaceId });
         updateSpacePolicy(spaceId, { onboarding_state: 'active', setup_version: 1 });
-        return `${stripToolResultPrefix(result)}\n\nSetup state: active`;
+        return "Recommended settings applied. You're ready — just tell me what you need.";
     }
 
     if (subcommand === 'smoke') {
@@ -187,16 +188,17 @@ export async function runSetupTelegramCommand(context: TelegramOperatorContext):
 /setup reset`;
     }
 
+    const settings = resolveSpaceOperationalSettings(getSpace(spaceId)?.policy_json);
+    if (!subcommand) {
+        return settings.onboarding_state === 'new'
+            ? 'Set up this chat\n\nChoose “Use recommended settings” for a quick start. You can change individual settings later.'
+            : 'Assistant settings\n\nThe assistant is active in this chat. You can refresh the recommended settings or inspect technical status.';
+    }
+
     const result = handlers.pipi_status
         ? await handlers.pipi_status({}, { chatId: context.chatId, userId: context.userId, spaceId })
         : '[TOOL_RESULT] Setup management is not available.';
-    const settings = resolveSpaceOperationalSettings(getSpace(spaceId)?.policy_json);
-    const nextStep =
-        settings.onboarding_state === 'new'
-            ? 'Next step: /setup apply'
-            : 'Quick actions: /setup status, /setup smoke, /setup reset';
-
-    return `Setup state: ${settings.onboarding_state}\n${nextStep}\n\n${stripToolResultPrefix(result)}`;
+    return `Technical setup status\nState: ${settings.onboarding_state}\n\n${stripToolResultPrefix(result)}`;
 }
 
 export async function runChannelTelegramCommand(context: TelegramOperatorContext): Promise<string> {

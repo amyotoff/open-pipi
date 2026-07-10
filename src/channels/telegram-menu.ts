@@ -14,6 +14,11 @@ export const TELEGRAM_MENU_COMMANDS: readonly TelegramMenuCommand[] = Object.fre
     { command: 'setup', description: 'Change assistant settings' },
 ]);
 
+export const TELEGRAM_SETUP_ACTIONS = Object.freeze([
+    { label: 'Use recommended settings', callbackData: 'setup:apply' },
+    { label: 'Technical status', callbackData: 'setup:status' },
+]);
+
 export function buildTelegramHelpMessage(advanced = false): string {
     if (advanced) {
         return [

@@ -240,8 +240,11 @@ async function evaluateSetupFacadeBootstrap(context: ScenarioContext): Promise<E
     });
     const beforeSettings = resolveSpaceOperationalSettings(getSpace(spaceId)?.policy_json);
 
-    if (!initial.includes('Setup state: new')) {
-        throw new Error(`Expected /setup to show a new state, got "${initial}".`);
+    if (!initial.includes('Set up this chat') || !initial.includes('Use recommended settings')) {
+        throw new Error(`Expected /setup to show the friendly quick-start screen, got "${initial}".`);
+    }
+    if (initial.includes('Setup state')) {
+        throw new Error(`Expected /setup to hide technical state details, got "${initial}".`);
     }
     if (beforeSettings.onboarding_state !== 'new') {
         throw new Error(`Expected a new setup state before apply, got "${beforeSettings.onboarding_state}".`);
@@ -267,14 +270,17 @@ async function evaluateSetupFacadeBootstrap(context: ScenarioContext): Promise<E
     if (afterSettings.setup_version !== 1) {
         throw new Error(`Expected setup_version=1 after apply, got ${afterSettings.setup_version}.`);
     }
-    if (!activeStatus.includes('Setup state: active')) {
-        throw new Error(`Expected /setup status to show active, got "${activeStatus}".`);
+    if (!applied.includes('Recommended settings applied')) {
+        throw new Error(`Expected /setup apply to confirm readiness, got "${applied}".`);
+    }
+    if (!activeStatus.includes('Technical setup status') || !activeStatus.includes('State: active')) {
+        throw new Error(`Expected /setup status to show the active technical state, got "${activeStatus}".`);
     }
 
     return buildPassed(
         'setup_facade_bootstrap',
         title,
-        'The setup facade gives a clear new -> active transition for a fresh Telegram space.',
+        'The setup facade gives a friendly quick start and a clear new -> active transition.',
         [
             `space_id=${spaceId}`,
             `before_state=${beforeSettings.onboarding_state}`,

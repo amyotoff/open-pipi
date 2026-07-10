@@ -124,7 +124,7 @@ You normally do not need commands: write what you want in a regular message. The
 
 Advanced setup and operator commands remain available for compatibility:
 
-- `/setup` shows onboarding state and next steps
+- `/setup` opens a simple settings screen with one-tap recommended setup
 - `/setup apply` marks the space active and applies the current default setup flow
 - `/setup smoke` runs the setup smoke handler
 - `/setup reset` returns onboarding to `new` without changing pack or grounding

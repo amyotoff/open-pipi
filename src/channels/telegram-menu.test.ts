@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildTelegramHelpMessage, TELEGRAM_MENU_COMMANDS } from './telegram-menu';
+import { buildTelegramHelpMessage, TELEGRAM_MENU_COMMANDS, TELEGRAM_SETUP_ACTIONS } from './telegram-menu';
 
 describe('Telegram product menu', () => {
     it('keeps the visible menu compact and outcome-oriented', () => {
@@ -27,5 +27,12 @@ describe('Telegram product menu', () => {
         expect(everyday).not.toContain('/killswitch');
         expect(advanced).toContain('/killswitch');
         expect(advanced).toContain('/pack');
+    });
+
+    it('offers one-tap recommended setup and keeps diagnostics secondary', () => {
+        expect(TELEGRAM_SETUP_ACTIONS).toEqual([
+            { label: 'Use recommended settings', callbackData: 'setup:apply' },
+            { label: 'Technical status', callbackData: 'setup:status' },
+        ]);
     });
 });
