@@ -2,11 +2,11 @@
 
 > Telegram-first, owner-operated assistant runtime with spaces, structured memory, artifacts, installable packs, and safe tool execution.
 
+[![CI](https://github.com/amyotoff/OPENPIPIFAMILY/actions/workflows/ci.yml/badge.svg)](https://github.com/amyotoff/OPENPIPIFAMILY/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/badge/version-2.5.0-informational.svg)](package.json)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D24-green.svg)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue.svg)](https://www.typescriptlang.org)
-[![CI](https://img.shields.io/badge/CI-GitHub_Actions-black.svg)](.github/workflows/ci.yml)
 
 ## TL;DR
 
@@ -22,7 +22,7 @@
 
 ## Quickstart
 
-This repo is `pnpm`-first. If this checkout used `npm` before, clean `node_modules` before your first `pnpm install` so you do not keep a bloated `node_modules/.ignored`.
+This repo is `pnpm`-first.
 
 ### 1. Requirements
 
@@ -65,7 +65,14 @@ If you only want the simplest working setup, these are the key vars:
 TELEGRAM_BOT_TOKEN=...
 GEMINI_API_KEY=...
 OWNER_TG_IDS=123456789
-TZ=Europe/Rome
+TZ=UTC
+```
+
+To give your assistant its own name (used in greetings and group mentions):
+
+```dotenv
+BOT_DISPLAY_NAME=Alfred
+BOT_NAME_ALIASES=alfred,альфред
 ```
 
 If you also want non-Telegram owners, add channel-qualified identities:
@@ -678,6 +685,17 @@ The repo is intentionally moving toward:
 - artifacts and journal as first-class continuity tools
 
 The bias is toward clarity and hackability, not toward preserving every abstraction forever.
+
+## Contributing
+
+Contributions are welcome:
+
+- read [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and expectations
+- check issues labeled `good first issue` for approachable starting points
+- report vulnerabilities privately via [SECURITY.md](SECURITY.md), not in public issues
+- be kind; the [Code of Conduct](CODE_OF_CONDUCT.md) applies everywhere in this repo
+
+Before opening a PR, make sure `pnpm typecheck`, `pnpm lint`, and `pnpm test` pass locally — CI enforces all three plus a coverage gate.
 
 ## License
 
