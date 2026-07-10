@@ -267,6 +267,22 @@ describe('channels/operator-commands', () => {
         expect(approvals.listPendingApprovalActions({ chatId: 'chat-5', userId: '111' })).toEqual([]);
     });
 
+    it('approves a newly registered action class without a command allowlist change', async () => {
+        const commands = await loadOperatorCommands();
+        const approvals = await import('../utils/approvals');
+
+        approvals.requireToolApproval('publish_report', { chatId: 'chat-new', userId: '111' }, 'publish report');
+        const result = commands.runApprovalTelegramCommand('approve', {
+            chatId: 'chat-new',
+            chatType: 'private',
+            userId: '111',
+            text: '/approve publish_report',
+        });
+
+        expect(result).toContain('Approved: publish_report.');
+        expect(approvals.listPendingApprovalActions({ chatId: 'chat-new', userId: '111' })).toEqual([]);
+    });
+
     it('shows current pack and available packs for /pack', async () => {
         const commands = await loadOperatorCommands();
 

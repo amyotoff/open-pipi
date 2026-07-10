@@ -9,6 +9,8 @@ export interface RegisteredSkillTool {
     declaration: FunctionDeclaration;
     handler: SkillToolHandler;
     meta: CapabilityMeta;
+    approvalAction?: string;
+    approvalReason?: string;
 }
 
 function resolveMeta(skill: SkillManifest, defaults: CapabilityMeta): CapabilityMeta {
@@ -47,13 +49,32 @@ export function buildSkillToolRegistry(
                 throw new Error(`Skill "${skill.name}" declares tool "${name}" without a handler.`);
             }
 
+            const toolMeta = skill.toolMeta?.[name];
             declaredNames.add(name);
-            registry.set(name, { name, skill, declaration, handler, meta });
+            registry.set(name, {
+                name,
+                skill,
+                declaration,
+                handler,
+                meta: {
+                    ...meta,
+                    run_mode: toolMeta?.run_mode || meta.run_mode,
+                    approval: toolMeta?.approval || meta.approval,
+                },
+                approvalAction: toolMeta?.approval_action,
+                approvalReason: toolMeta?.approval_reason,
+            });
         }
 
         for (const handlerName of Object.keys(skill.handlers)) {
             if (!declaredNames.has(handlerName)) {
                 throw new Error(`Skill "${skill.name}" registers handler "${handlerName}" without a declaration.`);
+            }
+        }
+
+        for (const toolMetaName of Object.keys(skill.toolMeta || {})) {
+            if (!declaredNames.has(toolMetaName)) {
+                throw new Error(`Skill "${skill.name}" defines metadata for unknown tool "${toolMetaName}".`);
             }
         }
     }

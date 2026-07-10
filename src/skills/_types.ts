@@ -19,11 +19,19 @@ export interface CapabilityMeta {
     pack_tags: string[];
 }
 
+export interface SkillToolMeta {
+    run_mode?: CapabilityMeta['run_mode'];
+    approval?: CapabilityMeta['approval'];
+    approval_action?: string;
+    approval_reason?: string;
+}
+
 export interface SkillManifest {
     name: string;
     description: string;
     version: string;
     meta?: CapabilityMeta;
+    toolMeta?: Record<string, SkillToolMeta>;
     tools: FunctionDeclaration[];
     handlers: Record<string, (args: any, context?: RuntimeExecutionContext) => Promise<string>>;
     crons?: CronJob[];

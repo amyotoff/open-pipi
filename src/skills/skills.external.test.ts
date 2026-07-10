@@ -22,11 +22,7 @@ afterEach(() => {
 });
 
 describe('External-facing skills', () => {
-    it('browsing skill enforces approval and can read a page with safe mocks', async () => {
-        const requireToolApproval = vi
-            .fn()
-            .mockReturnValueOnce('[TOOL_RESULT] approval required')
-            .mockReturnValueOnce(null);
+    it('browsing skill can search and read a page after executor policy checks', async () => {
         const searchAndSummarize = vi.fn(async () => 'Search summary');
         const assertSafeBrowserUrl = vi.fn(async (url: string) => url);
         const newPage = vi.fn(async () => ({
@@ -38,25 +34,17 @@ describe('External-facing skills', () => {
         const withBrowserContext = vi.fn(async (action: any) => action({ newPage }));
 
         const { default: skill } = await loadModule<any>('./browsing.skill', () => {
-            vi.doMock('../utils/approvals', () => ({ requireToolApproval }));
             vi.doMock('../utils/search', () => ({ searchAndSummarize }));
             vi.doMock('../utils/browser', () => ({ assertSafeBrowserUrl, withBrowserContext }));
         });
 
         expect(await skill.handlers.web_search({ query: 'rome restaurants' })).toContain('Search summary');
         expect(await skill.handlers.browse_web({ url: 'https://example.com' }, { chatId: 'c', userId: 'u' })).toContain(
-            'approval required'
-        );
-        expect(await skill.handlers.browse_web({ url: 'https://example.com' }, { chatId: 'c', userId: 'u' })).toContain(
             '<WEB_CONTENT>'
         );
     });
 
-    it('webrun skill enforces approval and can complete a mocked research loop', async () => {
-        const requireToolApproval = vi
-            .fn()
-            .mockReturnValueOnce('[TOOL_RESULT] approval required')
-            .mockReturnValue(null);
+    it('webrun skill can complete a mocked research loop after executor policy checks', async () => {
         const searchAndSummarize = vi.fn(async () => 'Grounded search result');
         const assertSafeBrowserUrl = vi.fn(async (url: string) => url);
         const withBrowserContext = vi.fn(async (action: any) =>
@@ -89,7 +77,6 @@ describe('External-facing skills', () => {
             });
 
         const { default: skill } = await loadModule<any>('./webrun.skill', () => {
-            vi.doMock('../utils/approvals', () => ({ requireToolApproval }));
             vi.doMock('../utils/search', () => ({ searchAndSummarize }));
             vi.doMock('../utils/browser', () => ({ assertSafeBrowserUrl, withBrowserContext }));
             vi.doMock('../config', () => ({ GEMINI_API_KEY: 'test-key' }));
@@ -101,9 +88,6 @@ describe('External-facing skills', () => {
             }));
         });
 
-        expect(
-            await skill.handlers.webrun_execute({ task: 'Find the best espresso bar' }, { chatId: 'c', userId: 'u' })
-        ).toContain('approval required');
         expect(
             await skill.handlers.webrun_execute({ task: 'Find the best espresso bar' }, { chatId: 'c', userId: 'u' })
         ).toContain('Final report with links');

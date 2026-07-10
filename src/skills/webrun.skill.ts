@@ -3,9 +3,7 @@ import { SkillManifest } from './_types';
 import { searchAndSummarize } from '../utils/search';
 import { assertSafeBrowserUrl, withBrowserContext } from '../utils/browser';
 import { GEMINI_API_KEY } from '../config';
-import { requireToolApproval } from '../utils/approvals';
 import { logInfo, summarizeText } from '../utils/logging';
-import { RuntimeExecutionContext } from '../core/runtime-context';
 
 let ai: GoogleGenAI | null = null;
 
@@ -31,6 +29,12 @@ const skill: SkillManifest = {
         policy_gate: 'browser',
         pack_tags: ['jeeves', 'office', 'reporter', 'tutor'],
     },
+    toolMeta: {
+        webrun_execute: {
+            approval_action: 'deep_research',
+            approval_reason: 'running a deep web research agent that visits multiple external sites',
+        },
+    },
     tools: [
         {
             name: 'webrun_execute',
@@ -51,14 +55,7 @@ Ask for permission before using it.`,
         },
     ],
     handlers: {
-        async webrun_execute(args: { task: string }, context?: RuntimeExecutionContext) {
-            const approvalMessage = requireToolApproval(
-                'webrun_execute',
-                context,
-                'running a deep web research agent that visits multiple external sites'
-            );
-            if (approvalMessage) return approvalMessage;
-
+        async webrun_execute(args: { task: string }) {
             logInfo('WEBRUN', 'task_started', summarizeText(args.task));
 
             const now = new Date();

@@ -24,6 +24,16 @@ describe('tool approvals', () => {
         expect(approvals.listPendingApprovalActions({ chatId: 'chat-1', userId: 'user-1' })).toEqual(['browse_web']);
     });
 
+    it('uses the tool name as a safe action class for new explicit tools', async () => {
+        const approvals = await loadApprovalsModule();
+        const context = { chatId: 'chat-new', userId: 'user-new' };
+
+        expect(approvals.requireToolApproval('publish_report', context, 'publishing a report')).toContain(
+            'publish_report'
+        );
+        expect(approvals.listPendingApprovalActions(context)).toEqual(['publish_report']);
+    });
+
     it('grants approval after an affirmative reply when exactly one action is pending', async () => {
         const approvals = await loadApprovalsModule();
         const context = { chatId: 'chat-2', userId: 'user-2' };

@@ -25,13 +25,28 @@ describe('skill tool registry', () => {
     it('binds each declaration to its handler, skill, and resolved metadata', async () => {
         const skill = makeSkill('memory', 'memory_remember');
         skill.meta = { ...defaults, cost: 'medium', pack_tags: ['jeeves', 'office'] };
+        skill.toolMeta = {
+            memory_remember: {
+                run_mode: 'sidecar',
+                approval: 'explicit',
+                approval_action: 'remember_private_data',
+                approval_reason: 'storing private data',
+            },
+        };
 
         const registry = buildSkillToolRegistry([skill], defaults);
         const registration = registry.get('memory_remember');
 
         expect(registration?.skill).toBe(skill);
         expect(registration?.declaration).toBe(skill.tools[0]);
-        expect(registration?.meta).toMatchObject({ cost: 'medium', pack_tags: ['jeeves', 'office'] });
+        expect(registration?.meta).toMatchObject({
+            run_mode: 'sidecar',
+            approval: 'explicit',
+            cost: 'medium',
+            pack_tags: ['jeeves', 'office'],
+        });
+        expect(registration?.approvalAction).toBe('remember_private_data');
+        expect(registration?.approvalReason).toBe('storing private data');
         await expect(registration?.handler({}, undefined)).resolves.toBe('memory_remember result');
     });
 
@@ -68,6 +83,15 @@ describe('skill tool registry', () => {
 
         expect(() => buildSkillToolRegistry([first, second], defaults)).toThrow(
             'Duplicate tool "shared_tool" declared by skills "memory" and "history".'
+        );
+    });
+
+    it('rejects metadata for an unknown tool', () => {
+        const skill = makeSkill('memory', 'memory_remember');
+        skill.toolMeta = { memory_forget: { approval: 'explicit' } };
+
+        expect(() => buildSkillToolRegistry([skill], defaults)).toThrow(
+            'Skill "memory" defines metadata for unknown tool "memory_forget".'
         );
     });
 });

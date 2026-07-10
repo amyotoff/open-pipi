@@ -19,6 +19,7 @@ import { AuditMode, normalizeAuditMode, ToolExecutionSpec } from './tool-executi
 import { runPackToolViaSandboxd } from './sandbox-client';
 import { addSpanAttributes, addSpanEvent, recordToolCallTelemetry, withSpan } from '../observability';
 import { normalizeArrayInput } from '../utils/tool-input';
+import { requireToolApproval } from '../utils/approvals';
 
 type ToolHandler = (args: any, context?: RuntimeExecutionContext) => Promise<string>;
 type HandlerMap = Record<string, ToolHandler>;
@@ -318,6 +319,7 @@ export async function executeToolCall(args: {
             addSpanAttributes({
                 'app.tool.capabilities': spec.capabilities.join(','),
                 'app.tool.run_mode': spec.run_mode,
+                'app.tool.approval': spec.approval,
                 'app.tool.audit_mode': auditMode,
             });
 
@@ -353,6 +355,23 @@ export async function executeToolCall(args: {
                     result,
                     error: 'sandbox_disabled',
                 });
+            }
+
+            if (spec.approval === 'explicit') {
+                const result = requireToolApproval(
+                    toolName,
+                    context,
+                    spec.approval_reason || `running the "${toolName}" tool`,
+                    spec.approval_action
+                );
+                if (result) {
+                    const logId = beginAuditLog(spec, context, auditMode, normalizedToolArgs);
+                    return finish(logId, {
+                        status: 'blocked',
+                        result,
+                        error: 'approval_required',
+                    });
+                }
             }
 
             const logId = beginAuditLog(spec, context, auditMode, normalizedToolArgs);
