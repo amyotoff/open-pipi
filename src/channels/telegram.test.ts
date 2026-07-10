@@ -79,7 +79,7 @@ describe('channels/telegram', () => {
         vi.resetModules();
     });
 
-    it('registers pack and backup in the Telegram menu', async () => {
+    it('registers only the compact everyday Telegram menu', async () => {
         const telegram = await import('./telegram');
 
         telegram.startTelegramBot();
@@ -90,12 +90,19 @@ describe('channels/telegram', () => {
         expect(firstCall).toBeDefined();
 
         const commands = (firstCall?.[0] ?? []) as Array<{ command: string; description: string }>;
-        expect(commands).toEqual(
-            expect.arrayContaining([
-                expect.objectContaining({ command: 'pack' }),
-                expect.objectContaining({ command: 'backup' }),
-            ])
-        );
+        expect(commands.map((item) => item.command)).toEqual([
+            'start',
+            'help',
+            'brief',
+            'focus',
+            'plan',
+            'today',
+            'tasks',
+            'setup',
+        ]);
+        expect(commands.map((item) => item.command)).not.toContain('pack');
+        expect(commands.map((item) => item.command)).not.toContain('backup');
+        expect(telegram.bot.command).toHaveBeenCalledWith('help', expect.any(Function));
         expect(launch).toHaveBeenCalledTimes(1);
     });
 

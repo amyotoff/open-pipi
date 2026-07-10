@@ -201,7 +201,7 @@ describe('core/channel-commands', () => {
         });
 
         expect(handled).toBe(true);
-        expect(reply).toHaveBeenCalledWith(expect.stringContaining('Supported commands'));
+        expect(reply).toHaveBeenCalledWith(expect.stringContaining('/help'));
         expect(mocks.runJeevesMvpActionForSpace).not.toHaveBeenCalled();
     });
 
@@ -312,6 +312,8 @@ describe('core/channel-commands', () => {
 
         expect(handled).toBe(true);
         expect(reply).toHaveBeenCalledWith(expect.stringContaining('/setup'));
+        expect(reply).toHaveBeenCalledWith(expect.stringContaining('/help'));
+        expect(reply).toHaveBeenCalledWith(expect.stringContaining('Tell me what this chat is for'));
     });
 
     it('treats /jeeves setup as a backward-compatible setup alias', async () => {

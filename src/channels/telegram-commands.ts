@@ -33,6 +33,7 @@ import {
     stripToolResultPrefix,
 } from './operator-commands';
 import { bot } from './telegram-bot';
+import { buildTelegramHelpMessage } from './telegram-menu';
 import { sendMessageToChat, sendTypingAction } from './telegram-send';
 
 type ReplyTarget = {
@@ -90,12 +91,21 @@ async function runSharedTelegramCommand(ctx: any): Promise<void> {
 }
 
 // ==========================================
-// Commands (visible in hamburger menu)
+// Command handlers (the hamburger menu exposes only a curated subset)
 // ==========================================
 
 // /start — greet residents
 bot.command('start', async (ctx) => {
     await runSharedTelegramCommand(ctx);
+});
+
+bot.command('help', async (ctx) => {
+    const senderId = ctx.from?.id.toString();
+    if (!senderId || !isOwner(senderId)) return;
+
+    const text = ((ctx.message as any)?.text || '').trim();
+    const advanced = /^\/help(?:@\w+)?\s+advanced\b/i.test(text);
+    await ctx.reply(buildTelegramHelpMessage(advanced));
 });
 
 // /jeeves — personal assistant status and lightweight setup (owners only)

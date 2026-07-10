@@ -115,11 +115,15 @@ What happens next:
 - `/setup` is the explicit onboarding surface for a fresh space
 - `/channel mode ...` controls whether that space is fully conversational, inbox-only, notify-only, or quiet
 
-### Operator flow
+### Telegram flow
 
-The `v1` operator loop is intentionally small:
+You normally do not need commands: write what you want in a regular message. The visible Telegram menu keeps only everyday outcomes:
 
-- `/start` gives the greeting and points new spaces to setup
+- `/start`, `/help`, `/brief`, `/focus`, `/plan`, `/today`, `/tasks`, `/setup`
+- `/help advanced` reveals technical and owner-only commands when you need them
+
+Advanced setup and operator commands remain available for compatibility:
+
 - `/setup` shows onboarding state and next steps
 - `/setup apply` marks the space active and applies the current default setup flow
 - `/setup smoke` runs the setup smoke handler

@@ -8,6 +8,7 @@
 
 import { Telegraf } from 'telegraf';
 import { TELEGRAM_BOT_TOKEN } from '../config';
+import { TELEGRAM_MENU_COMMANDS } from './telegram-menu';
 
 let messageHandler: ((ctx: any) => Promise<void>) | null = null;
 
@@ -65,40 +66,7 @@ export function startTelegramBot() {
 
     // Register hamburger menu commands
     bot.telegram
-        .setMyCommands([
-            { command: 'jeeves', description: '🎩 PA Jeeves status and setup' },
-            { command: 'setup', description: '🧭 Guided setup for this space' },
-            { command: 'brief', description: '📰 On-demand Jeeves briefing' },
-            { command: 'focus', description: '🎯 On-demand focus plan' },
-            { command: 'review', description: '🌙 On-demand evening review' },
-            { command: 'audit', description: '🔎 Structured review of current work' },
-            { command: 'plan', description: '🪜 Build a concrete next-step plan' },
-            { command: 'research', description: '🧭 Build a compact research brief' },
-            { command: 'handoff', description: '📦 Save a compact resume snapshot' },
-            { command: 'resume', description: '📌 Show the latest handoff snapshot' },
-            { command: 'today', description: '📓 Timeline for today' },
-            { command: 'yesterday', description: '📒 Timeline for yesterday' },
-            { command: 'week', description: '🗓 Timeline for the last 7 days' },
-            { command: 'status', description: '📡 System status and token usage' },
-            { command: 'killswitch', description: '⛔ Toggle the kill switch' },
-            { command: 'reset', description: '🔄 Clear conversation context' },
-            { command: 'channel', description: '📮 Inspect or change channel mode' },
-            { command: 'pack', description: '📦 Inspect or switch assistant pack' },
-            { command: 'backup', description: '💾 Create or inspect runtime backups' },
-            { command: 'approve', description: '✅ Approve a pending risky action' },
-            { command: 'deny', description: '🚫 Deny a pending risky action' },
-            { command: 'atelier', description: '🧰 Review requested capabilities' },
-            { command: 'space', description: '🧭 Inspect or configure this chat space' },
-            { command: 'project', description: '🪜 Inspect or steer a project' },
-            { command: 'history', description: '🕰 Search prior chat history' },
-            { command: 'artifacts', description: '📋 List active space artifacts' },
-            { command: 'workspace', description: '🗂 Inspect or use the attached workspace' },
-            { command: 'workflow', description: '🧱 Inspect pack workflows and artifacts' },
-            { command: 'tasks', description: '⏰ Inspect or manage scheduled tasks' },
-            { command: 'rituals', description: '🕯 Inspect or manage day/week rituals' },
-            { command: 'members', description: '👥 Inspect or manage chat members' },
-            { command: 'gdrive', description: '🔗 Connect or manage Google Drive access' },
-        ])
+        .setMyCommands([...TELEGRAM_MENU_COMMANDS])
         .catch((err) => console.error('[BOT] Failed to set commands:', err.message));
 
     bot.launch();
