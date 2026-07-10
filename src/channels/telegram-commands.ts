@@ -33,7 +33,12 @@ import {
     stripToolResultPrefix,
 } from './operator-commands';
 import { bot } from './telegram-bot';
-import { buildTelegramHelpMessage, TELEGRAM_DAILY_ACTIONS, TELEGRAM_SETUP_ACTIONS } from './telegram-menu';
+import {
+    buildTelegramHelpMessage,
+    TELEGRAM_DAILY_ACTIONS,
+    TELEGRAM_SETUP_ACTIONS,
+    TELEGRAM_TASK_ACTIONS,
+} from './telegram-menu';
 import { sendMessageToChat, sendTypingAction } from './telegram-send';
 
 type ReplyTarget = {
@@ -51,6 +56,12 @@ function buildSetupKeyboard() {
 function buildDailyKeyboard() {
     return Markup.inlineKeyboard(
         TELEGRAM_DAILY_ACTIONS.map((action) => Markup.button.callback(action.label, action.callbackData))
+    );
+}
+
+function buildTasksKeyboard() {
+    return Markup.inlineKeyboard(
+        TELEGRAM_TASK_ACTIONS.map((action) => Markup.button.callback(action.label, action.callbackData))
     );
 }
 
@@ -739,7 +750,7 @@ bot.command('tasks', async (ctx) => {
 
     if (parts.length === 0) {
         result = handlers.task_list
-            ? await handlers.task_list({}, context)
+            ? await handlers.task_list({ compact: true }, context)
             : '[TOOL_RESULT] Scheduled task management is not available.';
     } else if (parts[0] === 'create') {
         const spec = text.replace(/^\/tasks(?:@\w+)?\s+create\s+/i, '');
@@ -785,7 +796,30 @@ bot.command('tasks', async (ctx) => {
 /tasks cancel <task_id>`;
     }
 
-    await ctx.reply(result.replace('[TOOL_RESULT] ', ''));
+    await ctx.reply(result.replace('[TOOL_RESULT] ', ''), parts.length === 0 ? buildTasksKeyboard() : undefined);
+});
+
+bot.action(/^tasks:(all|add)$/, async (ctx) => {
+    const senderId = ctx.from?.id.toString();
+    const chatId = ctx.chat?.id.toString();
+    if (!senderId || !chatId || !isOwner(senderId)) {
+        await ctx.answerCbQuery('This action is available only to the owner.');
+        return;
+    }
+
+    const action = ctx.match[1];
+    if (action === 'add') {
+        await ctx.answerCbQuery();
+        await ctx.reply('Just tell me naturally, for example:\n“Every weekday at 9, remind me to review the inbox.”');
+        return;
+    }
+
+    const handlers = require('../skills/_registry').getRegisteredHandlers();
+    const result = handlers.task_list
+        ? await handlers.task_list({ include_inactive: true, compact: true }, { chatId, userId: senderId })
+        : '[TOOL_RESULT] Scheduled task management is not available.';
+    await ctx.answerCbQuery('Showing all tasks');
+    await ctx.editMessageText(result.replace('[TOOL_RESULT] ', ''), buildTasksKeyboard());
 });
 
 // /rituals — inspect or manage simple day/week rituals (owners only)

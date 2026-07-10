@@ -1090,6 +1090,11 @@ describe('CRUD skills', () => {
         expect(list).toContain('schedule: weekdays at 08:00; cron: 0 8 * * 1-5');
         expect(list).toContain('deadline');
         expect(list).toContain('2026-04-01 10:00');
+        const compactList = await skill.handlers.task_list({ compact: true }, context);
+        expect(compactList).toContain('Active scheduled tasks:');
+        expect(compactList).toContain('• Weekly digest — weekdays at 08:00');
+        expect(compactList).not.toContain(createdTask.id);
+        expect(compactList).not.toContain('cron:');
         expect(await skill.handlers.task_run_now({ task_id: createdTask.id }, context)).toContain('ran successfully');
         expect(
             (db.prepare('SELECT COUNT(*) as cnt FROM task_runs WHERE task_id = ?').get(createdTask.id) as any).cnt

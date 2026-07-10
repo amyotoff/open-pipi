@@ -121,6 +121,7 @@ You normally do not need commands: write what you want in a regular message. The
 
 - `/start`, `/today`, `/tasks`, `/help`, `/setup`
 - `/today` is the daily hub: timeline plus one-tap Brief, Focus, and Review actions
+- `/tasks` shows a compact schedule; add new tasks by describing them in a normal message
 - `/help advanced` reveals technical and owner-only commands when you need them
 
 Advanced setup and operator commands remain available for compatibility:

@@ -4,6 +4,7 @@ import {
     TELEGRAM_DAILY_ACTIONS,
     TELEGRAM_MENU_COMMANDS,
     TELEGRAM_SETUP_ACTIONS,
+    TELEGRAM_TASK_ACTIONS,
 } from './telegram-menu';
 
 describe('Telegram product menu', () => {
@@ -45,6 +46,13 @@ describe('Telegram product menu', () => {
             { label: 'Brief', callbackData: 'daily:brief' },
             { label: 'Focus', callbackData: 'daily:focus' },
             { label: 'Review day', callbackData: 'daily:review' },
+        ]);
+    });
+
+    it('keeps task discovery one tap away from the task list', () => {
+        expect(TELEGRAM_TASK_ACTIONS).toEqual([
+            { label: 'Show paused & all', callbackData: 'tasks:all' },
+            { label: 'How to add a task', callbackData: 'tasks:add' },
         ]);
     });
 });

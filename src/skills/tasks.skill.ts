@@ -92,6 +92,19 @@ function formatTaskLine(task: {
   schedule: ${schedule}; cron: ${task.schedule_value}; status: ${task.status}${lastRun}${deadline}`;
 }
 
+function formatCompactTaskLine(task: {
+    config_json: string | null;
+    title: string;
+    schedule_value: string;
+    status: string;
+}): string {
+    const marker = task.status === 'active' ? '•' : '⏸';
+    const schedule = describeReminderSchedule('cron', task.schedule_value);
+    const deadlineAt = getTaskDeadlineAt(task);
+    const deadline = deadlineAt ? `; due ${deadlineAt.substring(0, 16).replace('T', ' ')}` : '';
+    return `${marker} ${task.title} — ${schedule}${deadline}`;
+}
+
 function normalizeTaskSchedule(
     args: TaskCreateArgs
 ): { ok: true; cronExpression: string; description: string } | { ok: false; message: string } {
@@ -322,7 +335,7 @@ const skill: SkillManifest = {
             ].join('\n');
         },
 
-        async task_list(args: { include_inactive?: boolean }, context?: ExecutionContext) {
+        async task_list(args: { include_inactive?: boolean; compact?: boolean }, context?: ExecutionContext) {
             const access = requireTaskAuthority(context);
             if (!access.ok) return access.message;
 
@@ -330,6 +343,12 @@ const skill: SkillManifest = {
 
             if (tasks.length === 0) {
                 return '[TOOL_RESULT] No scheduled assistant tasks found for this space.';
+            }
+
+            if (args.compact) {
+                return `[TOOL_RESULT] ${args.include_inactive ? 'All scheduled tasks' : 'Active scheduled tasks'}:\n${tasks
+                    .map(formatCompactTaskLine)
+                    .join('\n')}`;
             }
 
             return `[TOOL_RESULT] Scheduled tasks for ${access.spaceId}:\n${tasks.map(formatTaskLine).join('\n')}`;
