@@ -671,6 +671,8 @@ Useful scripts:
 | `pnpm test:smoke` | Smoke flow |
 | `pnpm test:evaluator` | Minimal operational evaluator |
 | `pnpm test:watch` | Watch mode |
+| `pnpm verify` | Complete local quality gate |
+| `pnpm release:check` | Quality gate plus critical production dependency audit |
 | `pnpm bootstrap` | Description to grounding bootstrap flow |
 | `pnpm backup:restore` | Restore a runtime backup by id, path, `latest`, or `latest-healthy` |
 
@@ -691,11 +693,12 @@ The bias is toward clarity and hackability, not toward preserving every abstract
 Contributions are welcome:
 
 - read [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and expectations
+- read [RELEASING.md](RELEASING.md) before creating a release
 - check issues labeled `good first issue` for approachable starting points
 - report vulnerabilities privately via [SECURITY.md](SECURITY.md), not in public issues
 - be kind; the [Code of Conduct](CODE_OF_CONDUCT.md) applies everywhere in this repo
 
-Before opening a PR, make sure `pnpm typecheck`, `pnpm lint`, and `pnpm test` pass locally — CI enforces all three plus a coverage gate.
+Before opening a PR, run `pnpm verify` — CI enforces the same quality gates.
 
 ## License
 

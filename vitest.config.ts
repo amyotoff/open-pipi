@@ -14,8 +14,6 @@ export default defineConfig({
                 'src/test-helpers/**',
                 // Entry points and infrastructure that require live services
                 'src/index.ts',
-                // Covered by the regular suite; full V8 instrumentation destabilizes its ephemeral HTTP sockets.
-                'src/api.ts',
                 'src/sandboxd.ts',
                 'src/task-scheduler.ts',
                 // Channel adapters (require Telegram/Discord/WhatsApp/IMAP connections)

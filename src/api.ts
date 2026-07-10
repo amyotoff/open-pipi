@@ -1,5 +1,6 @@
 import type { Server } from 'node:http';
 import type { Express, Request, Response } from 'express';
+import { once } from 'node:events';
 import fs from 'node:fs';
 import { getToolLog, queryToolLogs, summarizeToolLogs, ToolLogQuery } from './db';
 import { getBriefPagePath } from './core/brief-pages';
@@ -177,9 +178,11 @@ export async function startApiServer(options: StartApiServerOptions = {}): Promi
     }
 
     const app = await createApiApp(token);
-    server = await new Promise<Server>((resolve) => {
-        const instance = app.listen(port, host, () => resolve(instance));
-    });
+    const instance = app.listen(port, host);
+    if (!instance.listening) {
+        await once(instance, 'listening');
+    }
+    server = instance;
 
     const address = server.address();
     const actualPort = typeof address === 'object' && address ? address.port : port;
