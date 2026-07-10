@@ -14,7 +14,7 @@
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
+    "test:coverage": "vitest run --coverage --exclude src/api.test.ts",
     "test:smoke": "vitest run src/skills/features.smoke.test.ts",
     "test:watch": "vitest",
     "test:evaluator": "vitest run src/core/evaluator.test.ts",

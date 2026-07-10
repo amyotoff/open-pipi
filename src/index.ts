@@ -6,38 +6,6 @@ let shuttingDown = false;
 let closeDatabaseRef: (() => void) | null = null;
 let closeApiServerRef: (() => Promise<void>) | null = null;
 
-type OptionalModuleLoader = {
-    label: string;
-    enabled: boolean;
-    importPath: string;
-    packageNames: string[];
-};
-
-function isMissingOptionalDependency(error: unknown): boolean {
-    if (!error || typeof error !== 'object') return false;
-    const code = 'code' in error ? String((error as { code?: unknown }).code || '') : '';
-    return code === 'MODULE_NOT_FOUND' || code === 'ERR_MODULE_NOT_FOUND';
-}
-
-async function loadOptionalModules(loaders: OptionalModuleLoader[]): Promise<void> {
-    for (const loader of loaders) {
-        if (!loader.enabled) continue;
-
-        try {
-            await import(loader.importPath);
-        } catch (error) {
-            if (isMissingOptionalDependency(error)) {
-                const packageList = loader.packageNames.join(', ');
-                throw new Error(
-                    `${loader.label} support is enabled by environment, but optional dependencies are missing: ${packageList}. Run "pnpm install" without "--no-optional", or add those packages explicitly.`,
-                    { cause: error }
-                );
-            }
-            throw error;
-        }
-    }
-}
-
 async function shutdown(signal: string) {
     if (shuttingDown) return;
     shuttingDown = true;
@@ -77,26 +45,8 @@ async function bootstrap() {
     config.assertSafeStartupConfig();
     config.validateCriticalConfig();
 
-    await loadOptionalModules([
-        {
-            label: 'WhatsApp',
-            enabled: process.env.WHATSAPP_ENABLED === 'true',
-            importPath: './channels/whatsapp',
-            packageNames: ['@whiskeysockets/baileys', '@hapi/boom'],
-        },
-        {
-            label: 'Discord',
-            enabled: Boolean(process.env.DISCORD_BOT_TOKEN && process.env.DISCORD_CHANNEL_ID),
-            importPath: './channels/discord',
-            packageNames: ['discord.js'],
-        },
-        {
-            label: 'Gmail',
-            enabled: Boolean(process.env.CONCIERGE_SMTP_HOST && process.env.CONCIERGE_SMTP_USER),
-            importPath: './channels/gmail',
-            packageNames: ['nodemailer'],
-        },
-    ]);
+    const channelLoader = await import('./channels/_loader');
+    await channelLoader.loadOptionalChannels();
 
     const [
         db,
