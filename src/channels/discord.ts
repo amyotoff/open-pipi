@@ -15,6 +15,7 @@ import {
 } from 'discord.js';
 import { OutboundChannel, SendResult, MessageOptions } from './_types';
 import { registerChannel } from './_registry';
+import { isDiscordEnabled } from './_loader';
 import { dispatchIncomingChannelMessage } from './runtime';
 import { executeChannelCommand } from '../core/channel-commands';
 
@@ -201,6 +202,6 @@ export class DiscordChannel implements OutboundChannel {
 // Self-registration
 // ==========================================
 
-if (process.env.DISCORD_BOT_TOKEN && process.env.DISCORD_CHANNEL_ID) {
+if (isDiscordEnabled()) {
     registerChannel('discord', () => new DiscordChannel());
 }
