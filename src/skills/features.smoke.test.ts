@@ -401,8 +401,8 @@ describe('feature smokes', () => {
             userId: '111',
             text: '/setup',
         });
-        expect(initial).toContain('Setup state: new');
-        expect(initial).toContain('/setup apply');
+        expect(initial).toContain('Set up this chat');
+        expect(initial).toContain('Use recommended settings');
 
         const applied = await commands.runSetupTelegramCommand({
             chatId: 'setup-chat',
@@ -410,8 +410,8 @@ describe('feature smokes', () => {
             userId: '111',
             text: '/setup apply',
         });
-        expect(applied).toContain('defaults applied');
-        expect(applied).toContain('Setup state: active');
+        expect(applied).toContain('Recommended settings applied');
+        expect(applied).toContain("You're ready");
 
         const smoke = await commands.runSetupTelegramCommand({
             chatId: 'setup-chat',

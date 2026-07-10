@@ -33,7 +33,7 @@ import {
     stripToolResultPrefix,
 } from './operator-commands';
 import { bot } from './telegram-bot';
-import { buildTelegramHelpMessage } from './telegram-menu';
+import { buildTelegramHelpMessage, TELEGRAM_SETUP_ACTIONS } from './telegram-menu';
 import { sendMessageToChat, sendTypingAction } from './telegram-send';
 
 type ReplyTarget = {
@@ -41,6 +41,12 @@ type ReplyTarget = {
     username: string | null;
     displayName: string | null;
 };
+
+function buildSetupKeyboard() {
+    return Markup.inlineKeyboard(
+        TELEGRAM_SETUP_ACTIONS.map((action) => Markup.button.callback(action.label, action.callbackData))
+    );
+}
 
 function getReplyTarget(message: any): ReplyTarget | null {
     const from = message?.reply_to_message?.from;
@@ -169,13 +175,34 @@ bot.command('setup', async (ctx) => {
     const chatId = ctx.chat?.id.toString();
     if (!senderId || !chatId || !isOwner(senderId)) return;
 
+    const text = ((ctx.message as any)?.text || '').trim();
     const result = await runSetupTelegramCommand({
         chatId,
         chatType: ctx.chat?.type,
         userId: senderId,
-        text: ((ctx.message as any)?.text || '').trim(),
+        text,
     });
-    await ctx.reply(stripToolResultPrefix(result));
+    const isSetupHome = /^\/setup(?:@\w+)?\s*$/i.test(text);
+    await ctx.reply(stripToolResultPrefix(result), isSetupHome ? buildSetupKeyboard() : undefined);
+});
+
+bot.action(/^setup:(apply|status)$/, async (ctx) => {
+    const senderId = ctx.from?.id.toString();
+    const chatId = ctx.chat?.id.toString();
+    if (!senderId || !chatId || !isOwner(senderId)) {
+        await ctx.answerCbQuery('This action is available only to the owner.');
+        return;
+    }
+
+    const action = ctx.match[1];
+    const result = await runSetupTelegramCommand({
+        chatId,
+        chatType: ctx.chat?.type,
+        userId: senderId,
+        text: `/setup ${action}`,
+    });
+    await ctx.answerCbQuery(action === 'apply' ? 'Settings applied' : 'Status updated');
+    await ctx.editMessageText(stripToolResultPrefix(result), action === 'status' ? buildSetupKeyboard() : undefined);
 });
 
 bot.command('channel', async (ctx) => {

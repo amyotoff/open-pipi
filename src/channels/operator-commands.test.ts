@@ -59,7 +59,7 @@ afterEach(() => {
 });
 
 describe('channels/operator-commands', () => {
-    it('shows setup state and next step for a new space', async () => {
+    it('shows a friendly one-tap setup screen for a new space', async () => {
         const commands = await loadOperatorCommands();
 
         const result = await commands.runSetupTelegramCommand({
@@ -69,8 +69,9 @@ describe('channels/operator-commands', () => {
             text: '/setup',
         });
 
-        expect(result).toContain('Setup state: new');
-        expect(result).toContain('/setup apply');
+        expect(result).toContain('Set up this chat');
+        expect(result).toContain('Use recommended settings');
+        expect(result).not.toContain('Setup state');
     });
 
     it('applies defaults and marks setup as active', async () => {
@@ -84,13 +85,44 @@ describe('channels/operator-commands', () => {
         });
 
         const row = db.prepare('SELECT policy_json FROM spaces WHERE id = ?').get('telegram:chat-2') as any;
-        expect(result).toContain('defaults applied');
+        expect(result).toContain('Recommended settings applied');
+        expect(result).toContain("You're ready");
         expect(JSON.parse(row.policy_json)).toEqual(
             expect.objectContaining({
                 onboarding_state: 'active',
                 setup_version: 1,
             })
         );
+    });
+
+    it('does not mark setup active when recommended settings are unavailable', async () => {
+        const commands = await loadOperatorCommands({ handlers: { pipi_apply_defaults: undefined } });
+
+        const result = await commands.runSetupTelegramCommand({
+            chatId: 'chat-unavailable',
+            chatType: 'private',
+            userId: '111',
+            text: '/setup apply',
+        });
+
+        const row = db.prepare('SELECT policy_json FROM spaces WHERE id = ?').get('telegram:chat-unavailable') as any;
+        expect(result).toContain('not available');
+        expect(JSON.parse(row.policy_json || '{}').onboarding_state).not.toBe('active');
+    });
+
+    it('keeps technical setup details behind the explicit status action', async () => {
+        const commands = await loadOperatorCommands();
+
+        const result = await commands.runSetupTelegramCommand({
+            chatId: 'chat-status',
+            chatType: 'private',
+            userId: '111',
+            text: '/setup status',
+        });
+
+        expect(result).toContain('Technical setup status');
+        expect(result).toContain('State: new');
+        expect(result).toContain('setup status body');
     });
 
     it('updates and reports channel mode for the current space', async () => {
