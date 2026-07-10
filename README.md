@@ -15,7 +15,7 @@
 - The main runtime unit is a `space`: a DM, group, channel, or email thread participant.
 - A `pack` changes the assistant's voice, enabled skills, default policies, seeded tasks, and optional pack-local tools.
 - A `grounding` holds stable facts and operating rules. Memory handles the changing stuff.
-- The happy path is simple: copy `.env.example`, fill a few vars, run `pnpm bootstrap`, then `pnpm dev`.
+- The happy path is simple: copy `.env.example`, fill a few vars, run `pnpm setup:check`, bootstrap, then `pnpm dev`.
 - `DATA_DIR` is the assistant's suitcase: database, auth state, restore points, and pinned per-space behavior all live there.
 - Safe updates are meant to preserve both memory and behavior. Existing spaces keep their current pack + grounding snapshot until you intentionally switch them.
 - If you want something hackable rather than a hosted SaaS or a no-code agent builder, this repo is aimed at that.
@@ -83,6 +83,14 @@ OWNER_IDENTITIES=discord:123456789,whatsapp:+393331234567,gmail:me@example.com
 
 If you only care about Telegram for now, you can leave the other channel vars empty.
 
+Check the setup without starting the bot or exposing secret values:
+
+```bash
+pnpm setup:check
+```
+
+The command reports missing required values, unsafe owner access, invalid pack/grounding IDs, data-directory permissions, and missing dependencies for optional channels you enabled. `pnpm setup:check -- --json` returns the same read-only result for scripts.
+
 ### 4. Bootstrap your assistant
 
 ```bash
@@ -96,7 +104,7 @@ This is the fastest way to make PiPi feel like your assistant instead of a gener
 - tells you which `BOOTSTRAP_PACK` and `BOOTSTRAP_GROUNDING` values to add to `.env`
 - gives you smoke-test prompts for the first run
 
-`BOOTSTRAP_PACK` and `BOOTSTRAP_GROUNDING` are not prefilled in `.env.example`; the script prints the exact lines to paste into your local `.env`.
+`.env.example` starts with the built-in Jeeves pack and grounding. The bootstrap script prints replacement values when you generate your own grounding.
 
 ### 5. Run it
 
@@ -680,6 +688,7 @@ Useful scripts:
 | `pnpm verify` | Complete local quality gate |
 | `pnpm release:check` | Quality gate plus critical production dependency audit |
 | `pnpm bootstrap` | Description to grounding bootstrap flow |
+| `pnpm setup:check` | Read-only first-run and configuration diagnostics |
 | `pnpm backup:restore` | Restore a runtime backup by id, path, `latest`, or `latest-healthy` |
 
 ## Current Direction
