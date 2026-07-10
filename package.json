@@ -14,7 +14,7 @@
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
+    "test:coverage": "vitest run --coverage --exclude src/api.test.ts",
     "test:smoke": "vitest run src/skills/features.smoke.test.ts",
     "test:watch": "vitest",
     "test:evaluator": "vitest run src/core/evaluator.test.ts",
@@ -59,7 +59,7 @@
   },
   "optionalDependencies": {
     "@hapi/boom": "^10.0.1",
-    "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "@whiskeysockets/baileys": "^7.0.0-rc13",
     "discord.js": "^14.25.1",
     "nodemailer": "^8.0.4",
     "playwright-core": "^1.58.2"
