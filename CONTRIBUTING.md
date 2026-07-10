@@ -14,21 +14,8 @@
 
 ## Skills Architecture
 
-Skills live in `src/skills/` and follow the `SkillManifest` interface:
-
-```typescript
-// src/skills/_types.ts
-interface SkillManifest {
-    name: string;
-    description: string;
-    version: string;
-    tools: FunctionDeclaration[];
-    handlers: Record<string, (args: any, context?: { chatId: string, userId: string }) => Promise<string>>;
-    crons?: CronJob[];
-    migrations?: string[];
-    init?: () => Promise<void>;
-}
-```
+Skills live in `src/skills/` and implement the authoritative `SkillManifest` interface from
+[`src/skills/_types.ts`](src/skills/_types.ts), including capability metadata and runtime context.
 
 To add a skill:
 1. Create `src/skills/your-skill.skill.ts` exporting a `SkillManifest`
@@ -38,9 +25,8 @@ To add a skill:
 ## Testing
 
 - Use `pnpm` for this repo. Do not mix `npm` and `pnpm` in the same checkout.
-- Run `pnpm test` before submitting
-- Run `pnpm typecheck` to verify types
-- Use standard test personas: Alice (`tg_id: '111'`), Bob (`tg_id: '222'`), Bender (`tg_id: '333'`)
+- Run `pnpm verify` before submitting.
+- Use obviously synthetic IDs and names in fixtures; never add real personal data.
 - Test your skill end-to-end and verify it works
 
 ## Pull Requests
