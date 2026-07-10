@@ -14,6 +14,7 @@ import fs from 'fs';
 import { dispatchIncomingChannelMessage, IncomingChannelMessage } from './runtime';
 import { OutboundChannel, SendResult, MessageOptions } from './_types';
 import { registerChannel } from './_registry';
+import { isWhatsAppEnabled } from './_loader';
 import { DATA_DIR } from '../config';
 import { executeChannelCommand } from '../core/channel-commands';
 
@@ -341,6 +342,6 @@ class WhatsAppChannel implements OutboundChannel {
 // Self-registration
 // ==========================================
 
-if (process.env.WHATSAPP_ENABLED === 'true') {
+if (isWhatsAppEnabled()) {
     registerChannel('whatsapp', () => new WhatsAppChannel());
 }
