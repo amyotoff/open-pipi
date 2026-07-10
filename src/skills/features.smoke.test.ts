@@ -380,7 +380,7 @@ describe('feature smokes', () => {
 
         const { default: skill } = await loadSkill<any>('./grounding.skill');
         expect(await skill.handlers.grounding_status({}, { chatId: 'chat-1', userId: '111' })).toContain(
-            'Скрепыш Office Coordination'
+            'Office Coordination'
         );
         expect(
             await skill.handlers.grounding_add_override(

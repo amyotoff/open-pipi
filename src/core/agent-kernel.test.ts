@@ -86,7 +86,7 @@ describe('core/agent-kernel', () => {
         fs.writeFileSync(
             agentPath,
             original.replace(
-                'You are Скрепыш, a calm office facilitator for team chats and operational coordination.',
+                'You are a calm office facilitator for team chats and operational coordination.',
                 'You are a pinned office ghost who refuses surprise upgrades.'
             )
         );

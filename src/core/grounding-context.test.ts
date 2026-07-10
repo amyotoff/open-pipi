@@ -56,7 +56,7 @@ describe('core/grounding-context', () => {
         expect(snapshot?.pack.id).toBe('jeeves_personal');
         expect(snapshot?.overrides).toHaveLength(1);
         expect(context).toContain('[GROUNDING]');
-        expect(context).toContain('Скрепыш Office Coordination');
+        expect(context).toContain('Office Coordination');
         expect(context).toContain('small-team office coordination space');
         expect(context).toContain('[GROUNDING_OVERRIDES]');
         expect(context).toContain('Alice moved abroad');

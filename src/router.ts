@@ -12,7 +12,7 @@ import {
     upsertResident,
 } from './db';
 import { handleButlerMessage, handleButlerPhoto } from './agents/butler';
-import { isHouseholdChat, isOwner } from './config';
+import { BOT_NAME_ALIASES, isHouseholdChat, isOwner } from './config';
 import { buildChannelPersonId, IncomingChannelMessage, sendChannelMessage } from './channels/runtime';
 import { recordApprovalResponse } from './utils/approvals';
 import { logInfo, logWarn, summarizeText } from './utils/logging';
@@ -21,7 +21,11 @@ import { addSpanAttributes, addSpanEvent, recordInboundMessage, withSpan } from 
 import { parseSpacePolicyRecord, resolveSpaceOperationalSettings } from './core/space-preferences';
 
 const groupMessageCounters: Record<string, number> = {};
-const GROUP_NAME_TRIGGER_PATTERN = /(скрепыш|срепи|skrepysh|screpy|srepi|jeeves|jivs|дживс|пипи|pipi)/i;
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+const GROUP_NAME_TRIGGER_PATTERN = new RegExp(`(${BOT_NAME_ALIASES.map(escapeRegExp).join('|')})`, 'i');
 const GROUP_REQUEST_TRIGGER_PATTERN =
     /(help|помоги|подскажи|расскажи|найди|compare|сравни|search|research|plan|спланируй|remind|напомни|todo|задач|remember this|remember|запомни|schedule|расписани|organize|организуй|write|напиши|draft|черновик|summarize|резюм|summary)/i;
 const EXTERNAL_GROUP_MODES = new Set(['mention_only', 'auto']);

@@ -15,6 +15,7 @@ import {
     getLatestArtifactByKind,
     Space,
 } from '../db';
+import { BOT_NAME_ALIASES } from '../config';
 import { materializeAgentForSpace } from './agent-kernel';
 import { LLMMessage } from './llm';
 import { resolveAllowedCapabilities, resolveSpacePolicy } from './policy';
@@ -60,12 +61,9 @@ const CROSS_SPACE_TRIGGER_PATTERN =
 const TOPIC_PREFIX_PATTERN = /(?:по|про|о|об|about|re|regarding)\s+([а-яёa-z0-9][а-яёa-z0-9\s_-]{2,80})/gi;
 
 const CROSS_SPACE_STOP_WORDS = new Set([
-    'пипи',
-    'скрепыш',
-    'срепыш',
+    ...BOT_NAME_ALIASES,
     'ало',
     'алло',
-    'дживс',
     'чат',
     'чате',
     'чата',

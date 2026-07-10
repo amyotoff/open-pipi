@@ -1,5 +1,6 @@
 import { Type } from '@google/genai';
 import { SkillManifest } from './_types';
+import { BOT_DISPLAY_NAME } from '../config';
 import { getSpace, getSpaceGroundingLevel, listGroundingOverrides, memberHasTrustFlag } from '../db';
 import { resolveSpacePolicy } from '../core/policy';
 import { materializeGroundingForSpace } from '../core/grounding-loader';
@@ -43,8 +44,8 @@ function buildStartPreview(grounding: ReturnType<typeof materializeGroundingForS
     }
     const desc = grounding.description || grounding.title;
     return isRu
-        ? `Привет. Я Скрепыш — ${desc}.\nГовори что нужно: задача, напоминание, вопрос, мысль вслух.`
-        : `Hi. I'm Skrepysh — ${desc}.\nTell me what you need: a task, reminder, question, or just think out loud.`;
+        ? `Привет. Я ${BOT_DISPLAY_NAME} — ${desc}.\nГовори что нужно: задача, напоминание, вопрос, мысль вслух.`
+        : `Hi. I'm ${BOT_DISPLAY_NAME} — ${desc}.\nTell me what you need: a task, reminder, question, or just think out loud.`;
 }
 
 const skill: SkillManifest = {

@@ -977,7 +977,7 @@ describe('CRUD skills', () => {
         const { default: skill } = await loadSkill<any>('./grounding.skill');
         const context = { chatId: 'chat-9', userId: '111' };
 
-        expect(await skill.handlers.grounding_status({}, context)).toContain('Скрепыш Office Coordination');
+        expect(await skill.handlers.grounding_status({}, context)).toContain('Office Coordination');
         expect(await skill.handlers.grounding_list_packs({}, context)).toContain('jeeves_personal');
         expect(
             await skill.handlers.grounding_add_override(

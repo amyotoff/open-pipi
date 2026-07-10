@@ -8,7 +8,7 @@ describe('core/grounding-loader', () => {
         expect(pack).not.toBeNull();
         expect(pack?.id).toBe('jeeves_personal');
         expect(pack?.source).toBe('installable');
-        expect(pack?.title).toBe('Скрепыш Office Coordination');
+        expect(pack?.title).toBe('Office Coordination');
         expect(pack?.memory_focus).toEqual(expect.arrayContaining(['commitments', 'preferences']));
         expect(pack?.attention_bias).toEqual(
             expect.arrayContaining(['conflicting instructions', 'forgotten promises'])

@@ -184,7 +184,7 @@ async function loadComposer(options?: { spacePolicyJson?: string; recentMessages
         [
             '[GROUNDING]',
             'Pack: jeeves_personal',
-            'Title: Скрепыш Office Coordination',
+            'Title: Office Coordination',
             'Memory focus: commitments, preferences',
             '',
             '[GROUNDING_OVERRIDES]',
@@ -277,7 +277,7 @@ describe('core/context-composer', () => {
         expect(result.systemPrompt).toContain('Pack: office');
         expect(result.systemPrompt).toContain('Persona: facilitator');
         expect(result.systemPrompt).toContain('[GROUNDING]');
-        expect(result.systemPrompt).toContain('Скрепыш Office Coordination');
+        expect(result.systemPrompt).toContain('Office Coordination');
         expect(result.systemPrompt).toContain('Alice is on leave this week');
         expect(result.systemPrompt).toContain('[CORE_TOOLBOX]');
         expect(result.systemPrompt).toContain('web: Internet access');
@@ -440,7 +440,7 @@ describe('core/context-composer', () => {
                     chat_jid: 'chat-1',
                     space_id: 'telegram:chat-1',
                     sender_tg_id: '111',
-                    content: 'скрепыш',
+                    content: 'пипи',
                     timestamp: '2026-03-25T09:00:05.000Z',
                     is_bot: 0,
                 },

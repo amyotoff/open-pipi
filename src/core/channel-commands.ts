@@ -11,7 +11,7 @@ import {
     updateSpacePolicy,
     upsertResident,
 } from '../db';
-import { RUNTIME_PLATFORM, isOwner } from '../config';
+import { BOT_DISPLAY_NAME, RUNTIME_PLATFORM, isOwner } from '../config';
 import { rememberWorkMemory } from './memory-write';
 import {
     applyJeevesDefaultsForSpace,
@@ -106,9 +106,9 @@ function buildStartMessage(spaceId: string): string {
 
     const description = grounding.description || grounding.title;
     if (isRussian) {
-        return `Привет. Я Скрепыш — ${description}.\nГовори что нужно: задача, напоминание, вопрос, мысль вслух.`;
+        return `Привет. Я ${BOT_DISPLAY_NAME} — ${description}.\nГовори что нужно: задача, напоминание, вопрос, мысль вслух.`;
     }
-    return `Hi. I'm Skrepysh — ${description}.\nTell me what you need: a task, reminder, question, or just think out loud.`;
+    return `Hi. I'm ${BOT_DISPLAY_NAME} — ${description}.\nTell me what you need: a task, reminder, question, or just think out loud.`;
 }
 const UNKNOWN_COMMAND_MESSAGE =
     'Supported commands: /start, /jeeves, /brief, /focus, /review, /audit, /plan, /research, /handoff, /resume, /today, /yesterday, /week, /status, /dashboard, /clear, /reset, /finish_onboarding, /onboarding_status';
