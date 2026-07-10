@@ -99,6 +99,7 @@ describe('channels/telegram', () => {
         expect(telegram.bot.command).toHaveBeenCalledWith('help', expect.any(Function));
         const action = telegram.bot.action as unknown as ReturnType<typeof vi.fn>;
         expect(action.mock.calls.some((call: unknown[]) => String(call[0]).includes('daily:'))).toBe(true);
+        expect(action.mock.calls.some((call: unknown[]) => String(call[0]).includes('tasks:'))).toBe(true);
         expect(launch).toHaveBeenCalledTimes(1);
     });
 
@@ -119,6 +120,27 @@ describe('channels/telegram', () => {
 
         expect(answerCbQuery).toHaveBeenCalledWith('Working…');
         expect(executeChannelCommand).toHaveBeenCalledWith(expect.objectContaining({ rawText: '/focus' }));
+    });
+
+    it('explains task creation in natural language from the task list', async () => {
+        const telegram = await import('./telegram');
+        const action = telegram.bot.action as unknown as ReturnType<typeof vi.fn>;
+        const registration = action.mock.calls.find((call: unknown[]) => String(call[0]).includes('tasks:'));
+        const handler = registration?.[1] as ((ctx: unknown) => Promise<void>) | undefined;
+        const answerCbQuery = vi.fn(async () => true);
+        const reply = vi.fn(async () => true);
+
+        expect(handler).toBeDefined();
+        await handler?.({
+            from: { id: 111 },
+            chat: { id: 222, type: 'private' },
+            match: ['tasks:add', 'add'],
+            answerCbQuery,
+            reply,
+        });
+
+        expect(answerCbQuery).toHaveBeenCalledOnce();
+        expect(reply).toHaveBeenCalledWith(expect.stringContaining('Every weekday at 9'));
     });
 
     it('sends formatted HTML with a plain-text fallback', async () => {

@@ -17,6 +17,11 @@ export const TELEGRAM_DAILY_ACTIONS = Object.freeze([
     { label: 'Review day', callbackData: 'daily:review' },
 ]);
 
+export const TELEGRAM_TASK_ACTIONS = Object.freeze([
+    { label: 'Show paused & all', callbackData: 'tasks:all' },
+    { label: 'How to add a task', callbackData: 'tasks:add' },
+]);
+
 export const TELEGRAM_SETUP_ACTIONS = Object.freeze([
     { label: 'Use recommended settings', callbackData: 'setup:apply' },
     { label: 'Technical status', callbackData: 'setup:status' },
