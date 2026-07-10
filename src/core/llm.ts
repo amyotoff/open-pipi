@@ -14,7 +14,7 @@ import { guardLLMCall, reportGeminiResult, isOllamaHealthy } from './healthcheck
 import { reportOperationalFailure, reportOperationalRecovery } from '../utils/failure-monitor';
 import { logError, logInfo, logWarn, summarizeError, summarizeText } from '../utils/logging';
 import { RuntimeExecutionContext } from './runtime-context';
-import { CORE_TOOLBOX_TOOL_DECLARATIONS, handleCoreToolboxTool } from './coretoolbox';
+import { CORE_TOOLBOX_TOOL_DECLARATIONS, handleCoreToolboxTool, isCorePrimitiveBackingTool } from './coretoolbox';
 import { executeToolCall } from './tool-executor';
 import {
     addSpanAttributes,
@@ -275,11 +275,15 @@ export async function processWithLLM(
 
                 const { getRegisteredToolsForContext, getRegisteredHandlersForContext } =
                     await import('../skills/_registry');
-                const skillTools = getRegisteredToolsForContext(context);
+                const registeredSkillTools = getRegisteredToolsForContext(context);
+                const skillTools = registeredSkillTools.filter((tool) => !isCorePrimitiveBackingTool(tool.name));
                 const allTools = advisorEnabled
                     ? [...skillTools, ...CORE_TOOLBOX_TOOL_DECLARATIONS, LIST_SKILLS_TOOL, ADVISOR_TOOL]
                     : [...skillTools, ...CORE_TOOLBOX_TOOL_DECLARATIONS, LIST_SKILLS_TOOL];
                 addSpanAttributes({ 'app.llm.tool_declarations': allTools.length });
+                addSpanAttributes({
+                    'app.llm.backing_tool_declarations_hidden': registeredSkillTools.length - skillTools.length,
+                });
 
                 const trackTokens = (model: string, resp: any) => {
                     const inputTokens = resp?.usageMetadata?.promptTokenCount || 0;
