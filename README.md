@@ -119,7 +119,8 @@ What happens next:
 
 You normally do not need commands: write what you want in a regular message. The visible Telegram menu keeps only everyday outcomes:
 
-- `/start`, `/help`, `/brief`, `/focus`, `/plan`, `/today`, `/tasks`, `/setup`
+- `/start`, `/today`, `/tasks`, `/help`, `/setup`
+- `/today` is the daily hub: timeline plus one-tap Brief, Focus, and Review actions
 - `/help advanced` reveals technical and owner-only commands when you need them
 
 Advanced setup and operator commands remain available for compatibility:

@@ -7,6 +7,7 @@ const pinChatMessage = vi.fn(async () => true);
 const unpinChatMessage = vi.fn(async () => true);
 const sendDocument = vi.fn(async () => ({ message_id: 43 }));
 const fromLocalFile = vi.fn((path: string, filename?: string) => ({ source: path, filename }));
+const executeChannelCommand = vi.fn(async () => true);
 
 vi.mock('telegraf', () => {
     class Telegraf {
@@ -50,7 +51,7 @@ vi.mock('../db', () => ({
 }));
 
 vi.mock('../core/channel-commands', () => ({
-    executeChannelCommand: vi.fn(),
+    executeChannelCommand,
 }));
 
 vi.mock('./members-command', () => ({
@@ -76,6 +77,7 @@ describe('channels/telegram', () => {
         unpinChatMessage.mockClear();
         sendDocument.mockClear();
         fromLocalFile.mockClear();
+        executeChannelCommand.mockClear();
         vi.resetModules();
     });
 
@@ -90,20 +92,33 @@ describe('channels/telegram', () => {
         expect(firstCall).toBeDefined();
 
         const commands = (firstCall?.[0] ?? []) as Array<{ command: string; description: string }>;
-        expect(commands.map((item) => item.command)).toEqual([
-            'start',
-            'help',
-            'brief',
-            'focus',
-            'plan',
-            'today',
-            'tasks',
-            'setup',
-        ]);
+        expect(commands.map((item) => item.command)).toEqual(['start', 'today', 'tasks', 'help', 'setup']);
         expect(commands.map((item) => item.command)).not.toContain('pack');
         expect(commands.map((item) => item.command)).not.toContain('backup');
+        expect(commands.map((item) => item.command)).not.toContain('brief');
         expect(telegram.bot.command).toHaveBeenCalledWith('help', expect.any(Function));
+        const action = telegram.bot.action as unknown as ReturnType<typeof vi.fn>;
+        expect(action.mock.calls.some((call: unknown[]) => String(call[0]).includes('daily:'))).toBe(true);
         expect(launch).toHaveBeenCalledTimes(1);
+    });
+
+    it('runs daily dashboard actions as their existing commands', async () => {
+        const telegram = await import('./telegram');
+        const action = telegram.bot.action as unknown as ReturnType<typeof vi.fn>;
+        const registration = action.mock.calls.find((call: unknown[]) => String(call[0]).includes('daily:'));
+        const handler = registration?.[1] as ((ctx: unknown) => Promise<void>) | undefined;
+        const answerCbQuery = vi.fn(async () => true);
+
+        expect(handler).toBeDefined();
+        await handler?.({
+            from: { id: 111 },
+            chat: { id: 222, type: 'private' },
+            match: ['daily:focus', 'focus'],
+            answerCbQuery,
+        });
+
+        expect(answerCbQuery).toHaveBeenCalledWith('Working…');
+        expect(executeChannelCommand).toHaveBeenCalledWith(expect.objectContaining({ rawText: '/focus' }));
     });
 
     it('sends formatted HTML with a plain-text fallback', async () => {
