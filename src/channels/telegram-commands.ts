@@ -13,6 +13,7 @@ import {
     ensureSpaceMembership,
     ensureTelegramSpace,
     getResident,
+    listTasks,
     upsertResident,
     logEvent,
 } from '../db';
@@ -23,6 +24,7 @@ import {
     revokeGoogleOAuthTokens,
 } from '../core/google-oauth';
 import { executeChannelCommand } from '../core/channel-commands';
+import { getRegisteredHandlers } from '../skills/_registry';
 import { MEMBERS_USAGE, parseMembersCommandRequest } from './members-command';
 import {
     runApprovalTelegramCommand,
@@ -40,6 +42,13 @@ import {
     TELEGRAM_TASK_ACTIONS,
 } from './telegram-menu';
 import { sendMessageToChat, sendTypingAction } from './telegram-send';
+import {
+    buildTelegramTaskLabel,
+    findTelegramTask,
+    formatTelegramTaskDetails,
+    telegramTaskToken,
+    type TelegramTask,
+} from './telegram-task-menu';
 
 type ReplyTarget = {
     personId: string;
@@ -59,10 +68,27 @@ function buildDailyKeyboard() {
     );
 }
 
-function buildTasksKeyboard() {
-    return Markup.inlineKeyboard(
-        TELEGRAM_TASK_ACTIONS.map((action) => Markup.button.callback(action.label, action.callbackData))
-    );
+function buildTasksKeyboard(tasks: readonly TelegramTask[] = [], selected?: TelegramTask) {
+    const rows = selected
+        ? [
+              selected.status === 'active'
+                  ? [
+                        Markup.button.callback('Run now', `tasks:run:${telegramTaskToken(selected.id)}`),
+                        Markup.button.callback('Pause', `tasks:pause:${telegramTaskToken(selected.id)}`),
+                    ]
+                  : [Markup.button.callback('Resume', `tasks:resume:${telegramTaskToken(selected.id)}`)],
+              [Markup.button.callback('Back to tasks', 'tasks:list')],
+          ]
+        : [
+              ...tasks
+                  .slice(0, 8)
+                  .map((task) => [
+                      Markup.button.callback(buildTelegramTaskLabel(task), `tasks:view:${telegramTaskToken(task.id)}`),
+                  ]),
+              TELEGRAM_TASK_ACTIONS.map((action) => Markup.button.callback(action.label, action.callbackData)),
+          ];
+
+    return Markup.inlineKeyboard(rows);
 }
 
 function getReplyTarget(message: any): ReplyTarget | null {
@@ -430,7 +456,7 @@ bot.action(/^atl:ticket:(\d+)$/, async (ctx) => {
         return;
     }
 
-    const handlers = require('../skills/_registry').getRegisteredHandlers();
+    const handlers = getRegisteredHandlers();
     if (!handlers.atelier_create_ticket) {
         await ctx.answerCbQuery('Создание тикета недоступно.');
         return;
@@ -512,7 +538,7 @@ bot.command('space', async (ctx) => {
 
     const text = ((ctx.message as any)?.text || '').trim();
     const parts = text.split(/\s+/).slice(1);
-    const handlers = require('../skills/_registry').getRegisteredHandlers();
+    const handlers = getRegisteredHandlers();
     const context = { chatId, userId: senderId };
 
     let result: string;
@@ -592,7 +618,6 @@ bot.command('project', async (ctx) => {
 
     const text = ((ctx.message as any)?.text || '').trim();
     const parts = text.split(/\s+/).slice(1);
-    const { getRegisteredHandlers } = require('../skills/_registry');
     const handlers = getRegisteredHandlers();
     const context = { chatId, userId: senderId };
 
@@ -675,7 +700,7 @@ bot.command('grounding', async (ctx) => {
 
     const text = ((ctx.message as any)?.text || '').trim();
     const parts = text.split(/\s+/).slice(1);
-    const handlers = require('../skills/_registry').getRegisteredHandlers();
+    const handlers = getRegisteredHandlers();
     const context = { chatId, userId: senderId };
 
     let result: string;
@@ -743,7 +768,7 @@ bot.command('tasks', async (ctx) => {
 
     const text = ((ctx.message as any)?.text || '').trim();
     const parts = text.split(/\s+/).slice(1);
-    const handlers = require('../skills/_registry').getRegisteredHandlers();
+    const handlers = getRegisteredHandlers();
     const context = { chatId, userId: senderId };
 
     let result: string;
@@ -796,10 +821,16 @@ bot.command('tasks', async (ctx) => {
 /tasks cancel <task_id>`;
     }
 
-    await ctx.reply(result.replace('[TOOL_RESULT] ', ''), parts.length === 0 ? buildTasksKeyboard() : undefined);
+    const visibleTasks = result.startsWith('[TOOL_RESULT] Active scheduled tasks:')
+        ? listTasks(buildTelegramSpaceId(chatId), 'active')
+        : [];
+    await ctx.reply(
+        result.replace('[TOOL_RESULT] ', ''),
+        parts.length === 0 ? buildTasksKeyboard(visibleTasks) : undefined
+    );
 });
 
-bot.action(/^tasks:(all|add)$/, async (ctx) => {
+bot.action(/^tasks:(all|add|list|view|run|pause|resume)(?::([A-Za-z0-9_-]+))?$/, async (ctx) => {
     const senderId = ctx.from?.id.toString();
     const chatId = ctx.chat?.id.toString();
     if (!senderId || !chatId || !isOwner(senderId)) {
@@ -808,18 +839,64 @@ bot.action(/^tasks:(all|add)$/, async (ctx) => {
     }
 
     const action = ctx.match[1];
+    const token = ctx.match[2];
     if (action === 'add') {
         await ctx.answerCbQuery();
         await ctx.reply('Just tell me naturally, for example:\n“Every weekday at 9, remind me to review the inbox.”');
         return;
     }
 
-    const handlers = require('../skills/_registry').getRegisteredHandlers();
-    const result = handlers.task_list
-        ? await handlers.task_list({ include_inactive: true, compact: true }, { chatId, userId: senderId })
+    const handlers = getRegisteredHandlers();
+    const context = { chatId, userId: senderId };
+    const spaceId = buildTelegramSpaceId(chatId);
+
+    if (action === 'all' || action === 'list') {
+        const includeInactive = action === 'all';
+        const result = handlers.task_list
+            ? await handlers.task_list({ include_inactive: includeInactive, compact: true }, context)
+            : '[TOOL_RESULT] Scheduled task management is not available.';
+        const expectedHeader = includeInactive
+            ? '[TOOL_RESULT] All scheduled tasks:'
+            : '[TOOL_RESULT] Active scheduled tasks:';
+        const visibleTasks = result.startsWith(expectedHeader)
+            ? listTasks(spaceId, includeInactive ? undefined : 'active')
+            : [];
+        await ctx.answerCbQuery(includeInactive ? 'Showing all tasks' : 'Showing active tasks');
+        await ctx.editMessageText(result.replace('[TOOL_RESULT] ', ''), buildTasksKeyboard(visibleTasks));
+        return;
+    }
+
+    const accessResult = handlers.task_list
+        ? await handlers.task_list({ include_inactive: true, compact: true }, context)
         : '[TOOL_RESULT] Scheduled task management is not available.';
-    await ctx.answerCbQuery('Showing all tasks');
-    await ctx.editMessageText(result.replace('[TOOL_RESULT] ', ''), buildTasksKeyboard());
+    if (!accessResult.startsWith('[TOOL_RESULT] All scheduled tasks:')) {
+        await ctx.answerCbQuery('Task management is not available here.');
+        return;
+    }
+
+    const task = token ? findTelegramTask(listTasks(spaceId), token) : undefined;
+    if (!task) {
+        await ctx.answerCbQuery('This task is no longer available.');
+        return;
+    }
+
+    if (action === 'view') {
+        await ctx.answerCbQuery();
+        await ctx.editMessageText(formatTelegramTaskDetails(task), buildTasksKeyboard([], task));
+        return;
+    }
+
+    const handler =
+        action === 'run' ? handlers.task_run_now : action === 'pause' ? handlers.task_pause : handlers.task_resume;
+    await ctx.answerCbQuery(action === 'run' ? 'Running task…' : 'Updating task…');
+    const result = handler
+        ? await handler({ task_id: task.id }, context)
+        : '[TOOL_RESULT] Scheduled task management is not available.';
+    const updatedTask = findTelegramTask(listTasks(spaceId), token) || task;
+    await ctx.editMessageText(
+        `${result.replace('[TOOL_RESULT] ', '')}\n\n${formatTelegramTaskDetails(updatedTask)}`,
+        buildTasksKeyboard([], updatedTask)
+    );
 });
 
 // /rituals — inspect or manage simple day/week rituals (owners only)
@@ -830,7 +907,7 @@ bot.command('rituals', async (ctx) => {
 
     const text = ((ctx.message as any)?.text || '').trim();
     const parts = text.split(/\s+/).slice(1);
-    const handlers = require('../skills/_registry').getRegisteredHandlers();
+    const handlers = getRegisteredHandlers();
     const context = { chatId, userId: senderId };
 
     let result: string;
@@ -900,7 +977,7 @@ bot.command('members', async (ctx) => {
         ensureReplyTargetMembership(chatId, ctx.chat?.type, replyTarget);
     }
 
-    const handlers = require('../skills/_registry').getRegisteredHandlers();
+    const handlers = getRegisteredHandlers();
     const context = { chatId, userId: senderId };
     const command = parseMembersCommandRequest(text, replyTarget?.personId);
 
@@ -947,7 +1024,7 @@ bot.command('artifacts', async (ctx) => {
     const chatId = ctx.chat?.id.toString();
     if (!senderId || !chatId || !isOwner(senderId)) return;
 
-    const handlers = require('../skills/_registry').getRegisteredHandlers();
+    const handlers = getRegisteredHandlers();
     const context = { chatId, userId: senderId };
 
     const result = handlers.artifacts_list
@@ -965,7 +1042,7 @@ bot.command('workspace', async (ctx) => {
 
     const text = ((ctx.message as any)?.text || '').trim();
     const parts = text.split(/\s+/).slice(1);
-    const handlers = require('../skills/_registry').getRegisteredHandlers();
+    const handlers = getRegisteredHandlers();
     const context = { chatId, userId: senderId };
 
     let result: string;
@@ -1033,7 +1110,7 @@ bot.command('workflow', async (ctx) => {
 
     const text = ((ctx.message as any)?.text || '').trim();
     const parts = text.split(/\s+/).slice(1);
-    const handlers = require('../skills/_registry').getRegisteredHandlers();
+    const handlers = getRegisteredHandlers();
     const context = { chatId, userId: senderId };
 
     let result: string;
@@ -1064,7 +1141,7 @@ bot.command('history', async (ctx) => {
 
     const text = ((ctx.message as any)?.text || '').trim();
     const raw = text.replace(/^\/history(?:@\w+)?\s*/i, '').trim();
-    const handlers = require('../skills/_registry').getRegisteredHandlers();
+    const handlers = getRegisteredHandlers();
     const context = { chatId, userId: senderId };
 
     let result: string;

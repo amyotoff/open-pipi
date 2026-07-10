@@ -8,6 +8,13 @@ const unpinChatMessage = vi.fn(async () => true);
 const sendDocument = vi.fn(async () => ({ message_id: 43 }));
 const fromLocalFile = vi.fn((path: string, filename?: string) => ({ source: path, filename }));
 const executeChannelCommand = vi.fn(async () => true);
+const listTasks = vi.fn(() => [] as any[]);
+const taskListHandler = vi.fn(async () => '[TOOL_RESULT] All scheduled tasks:\n• Weekly digest — weekdays at 08:00');
+const taskPauseHandler = vi.fn(async () => '[TOOL_RESULT] Task "Weekly digest" is now paused.');
+const taskRunHandler = vi.fn(async () => '[TOOL_RESULT] Task "Weekly digest" ran successfully.');
+const taskResumeHandler = vi.fn(async () => '[TOOL_RESULT] Task "Weekly digest" is now active again.');
+const inlineKeyboard = vi.fn((rows: unknown[]) => ({ reply_markup: { inline_keyboard: rows } }));
+const callbackButton = vi.fn((text: string, callbackData: string) => ({ text, callback_data: callbackData }));
 
 vi.mock('telegraf', () => {
     class Telegraf {
@@ -30,7 +37,7 @@ vi.mock('telegraf', () => {
 
     return {
         Telegraf,
-        Markup: {},
+        Markup: { inlineKeyboard, button: { callback: callbackButton } },
         Input: { fromLocalFile },
     };
 });
@@ -48,10 +55,20 @@ vi.mock('../db', () => ({
     getResident: vi.fn(() => null),
     upsertResident: vi.fn(),
     logEvent: vi.fn(),
+    listTasks,
 }));
 
 vi.mock('../core/channel-commands', () => ({
     executeChannelCommand,
+}));
+
+vi.mock('../skills/_registry', () => ({
+    getRegisteredHandlers: vi.fn(() => ({
+        task_list: taskListHandler,
+        task_pause: taskPauseHandler,
+        task_run_now: taskRunHandler,
+        task_resume: taskResumeHandler,
+    })),
 }));
 
 vi.mock('./members-command', () => ({
@@ -78,6 +95,14 @@ describe('channels/telegram', () => {
         sendDocument.mockClear();
         fromLocalFile.mockClear();
         executeChannelCommand.mockClear();
+        listTasks.mockReset();
+        listTasks.mockReturnValue([]);
+        taskListHandler.mockClear();
+        taskPauseHandler.mockClear();
+        taskRunHandler.mockClear();
+        taskResumeHandler.mockClear();
+        inlineKeyboard.mockClear();
+        callbackButton.mockClear();
         vi.resetModules();
     });
 
@@ -141,6 +166,42 @@ describe('channels/telegram', () => {
 
         expect(answerCbQuery).toHaveBeenCalledOnce();
         expect(reply).toHaveBeenCalledWith(expect.stringContaining('Every weekday at 9'));
+    });
+
+    it('selects and pauses a task without exposing its internal ID', async () => {
+        const telegram = await import('./telegram');
+        const { telegramTaskToken } = await import('./telegram-task-menu');
+        const action = telegram.bot.action as unknown as ReturnType<typeof vi.fn>;
+        const registration = action.mock.calls.find((call: unknown[]) => String(call[0]).includes('tasks:'));
+        const handler = registration?.[1] as ((ctx: unknown) => Promise<void>) | undefined;
+        const task = {
+            id: 'task:telegram:222:weekly-digest:1783710000000',
+            title: 'Weekly digest',
+            schedule_value: '0 8 * * 1-5',
+            status: 'active',
+            last_run_at: null,
+        };
+        const token = telegramTaskToken(task.id);
+        const answerCbQuery = vi.fn(async () => true);
+        const editMessageText = vi.fn(async () => true);
+        const baseContext = { from: { id: 111 }, chat: { id: 222, type: 'private' }, answerCbQuery, editMessageText };
+
+        listTasks.mockReturnValue([task]);
+        await handler?.({ ...baseContext, match: [`tasks:view:${token}`, 'view', token] });
+
+        expect(editMessageText).toHaveBeenCalledWith(
+            expect.stringContaining('Schedule: weekdays at 08:00'),
+            expect.any(Object)
+        );
+        expect(JSON.stringify(inlineKeyboard.mock.calls.at(-1))).not.toContain(task.id);
+
+        const pausedTask = { ...task, status: 'paused' };
+        listTasks.mockReset().mockReturnValueOnce([task]).mockReturnValueOnce([pausedTask]);
+        editMessageText.mockClear();
+        await handler?.({ ...baseContext, match: [`tasks:pause:${token}`, 'pause', token] });
+
+        expect(taskPauseHandler).toHaveBeenCalledWith({ task_id: task.id }, { chatId: '222', userId: '111' });
+        expect(editMessageText).toHaveBeenCalledWith(expect.stringContaining('Status: Paused'), expect.any(Object));
     });
 
     it('sends formatted HTML with a plain-text fallback', async () => {
