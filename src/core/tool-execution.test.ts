@@ -62,6 +62,8 @@ describe('core/tool-execution', () => {
             const spec = deriveToolExecutionSpec('web', { operation: 'browse' });
             expect(spec.run_mode).toBe('sidecar');
             expect(spec.approval).toBe('explicit');
+            expect(spec.approval_action).toBe('browse_web');
+            expect(spec.approval_reason).toContain('external web page');
             expect(spec.capabilities).toEqual(['web_browse', 'external_http']);
         });
 
@@ -94,11 +96,15 @@ describe('core/tool-execution', () => {
                 {
                     run_mode: 'sandbox',
                     approval: 'explicit',
+                    approval_action: 'custom_action',
+                    approval_reason: 'testing central approvals',
                     capabilities: ['workspace_read', 'artifact_write'],
                 }
             );
             expect(spec.run_mode).toBe('sandbox');
             expect(spec.approval).toBe('explicit');
+            expect(spec.approval_action).toBe('custom_action');
+            expect(spec.approval_reason).toBe('testing central approvals');
             expect(spec.capabilities).toEqual(['workspace_read', 'artifact_write']);
         });
     });

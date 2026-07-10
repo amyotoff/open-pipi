@@ -258,6 +258,8 @@ export function getToolExecutionSpecForContext(
         return deriveToolExecutionSpec(toolName, args, {
             run_mode: registration.meta.run_mode,
             approval: registration.meta.approval,
+            approval_action: registration.approvalAction,
+            approval_reason: registration.approvalReason,
             audit_default: 'errors',
         });
     }

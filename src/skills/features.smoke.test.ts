@@ -76,7 +76,6 @@ describe('feature smokes', () => {
 
     it('browsing smoke', async () => {
         const { default: skill } = await loadSkill<any>('./browsing.skill', () => {
-            vi.doMock('../utils/approvals', () => ({ requireToolApproval: () => null }));
             vi.doMock('../utils/search', () => ({ searchAndSummarize: vi.fn(async () => 'result') }));
             vi.doMock('../utils/browser', () => ({
                 assertSafeBrowserUrl: vi.fn(async (url: string) => url),
@@ -104,7 +103,6 @@ describe('feature smokes', () => {
             text: 'final',
         });
         const { default: skill } = await loadSkill<any>('./webrun.skill', () => {
-            vi.doMock('../utils/approvals', () => ({ requireToolApproval: () => null }));
             vi.doMock('../utils/search', () => ({ searchAndSummarize: vi.fn(async () => 'result') }));
             vi.doMock('../utils/browser', () => ({
                 assertSafeBrowserUrl: vi.fn(async (url: string) => url),

@@ -3,7 +3,7 @@ import { RuntimeExecutionContext, resolveSpaceIdFromExecutionContext } from '../
 const GRANT_TTL_MS = 2 * 60 * 1000;
 const PENDING_TTL_MS = 10 * 60 * 1000;
 
-export type ApprovalActionClass = 'browse_web' | 'deep_research';
+export type ApprovalActionClass = string;
 type ApprovalDecision = 'approve' | 'deny';
 type ApprovalContext = Partial<RuntimeExecutionContext> & { userId: string; chatId?: string };
 type ApprovalState = { prompt: string; expiresAt: number; actionClass: ApprovalActionClass; toolName: string };
@@ -16,8 +16,8 @@ const ACTION_CLASS_FOR_TOOL: Record<string, ApprovalActionClass | undefined> = {
     webrun_execute: 'deep_research',
 };
 
-export function getApprovalActionClass(toolName: string): ApprovalActionClass | null {
-    return ACTION_CLASS_FOR_TOOL[toolName] || null;
+export function getApprovalActionClass(toolName: string): ApprovalActionClass {
+    return ACTION_CLASS_FOR_TOOL[toolName] || toolName;
 }
 
 function approvalScope(context: ApprovalContext): string | null {
@@ -135,16 +135,14 @@ export function denyPendingAction(context: ApprovalContext, requestedActionClass
 export function requireToolApproval(
     toolName: string,
     context: ApprovalContext | undefined,
-    prompt: string
+    prompt: string,
+    requestedActionClass?: ApprovalActionClass
 ): string | null {
     if (!context?.userId) {
         return `[TOOL_RESULT] Действие "${toolName}" требует явного подтверждения пользователя, но контекст пользователя недоступен.`;
     }
 
-    const actionClass = getApprovalActionClass(toolName);
-    if (!actionClass) {
-        return null;
-    }
+    const actionClass = requestedActionClass || getApprovalActionClass(toolName);
 
     const scope = approvalScope(context);
     if (!scope) {

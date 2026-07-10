@@ -31,7 +31,6 @@ type TelegramOperatorContext = {
     text: string;
 };
 
-const APPROVAL_ACTIONS: ApprovalActionClass[] = ['browse_web', 'deep_research'];
 const CHANNEL_MODES: SpaceChannelMode[] = ['off', 'notify_only', 'inbox', 'full'];
 const EXTERNAL_GROUP_MODES = ['mention_only', 'auto', 'watch'] as const;
 type ExternalGroupMode = (typeof EXTERNAL_GROUP_MODES)[number];
@@ -368,37 +367,43 @@ Usage: /channel alias add <alias>, /channel alias remove <alias>, /channel alias
 /channel detach`;
 }
 
-function resolveRequestedApprovalAction(value: string | undefined): ApprovalActionClass | undefined | null {
+function resolveRequestedApprovalAction(
+    value: string | undefined,
+    pending: ApprovalActionClass[]
+): ApprovalActionClass | undefined | null {
     if (!value) return undefined;
-    return APPROVAL_ACTIONS.includes(value as ApprovalActionClass) ? (value as ApprovalActionClass) : null;
+    return pending.includes(value) ? value : null;
 }
 
 export function runApprovalTelegramCommand(command: 'approve' | 'deny', context: TelegramOperatorContext): string {
     ensureTelegramOperatorSpace(context);
 
+    const scope = { chatId: context.chatId, userId: context.userId, spaceId: buildTelegramSpaceId(context.chatId) };
+    const pending = listPendingApprovalActions(scope);
     const parts = parseSubcommand(context.text, command);
-    const requestedAction = resolveRequestedApprovalAction(parts[0]);
+    const requestedAction = resolveRequestedApprovalAction(parts[0], pending);
     if (requestedAction === null) {
-        return `[TOOL_RESULT] Usage: /${command} [browse_web|deep_research]`;
+        return pending.length > 0
+            ? `[TOOL_RESULT] Approval "${parts[0]}" is not pending. Pending: ${pending.join(', ')}.`
+            : '[TOOL_RESULT] No pending approvals for this space.';
     }
 
-    const scope = { chatId: context.chatId, userId: context.userId, spaceId: buildTelegramSpaceId(context.chatId) };
     const result =
         command === 'approve'
             ? approvePendingAction(scope, requestedAction)
             : denyPendingAction(scope, requestedAction);
 
     if (result.error) {
-        const pending = listPendingApprovalActions(scope);
-        if (pending.length === 0) {
+        const remaining = listPendingApprovalActions(scope);
+        if (remaining.length === 0) {
             return '[TOOL_RESULT] No pending approvals for this space.';
         }
 
-        if (!requestedAction && pending.length > 1) {
-            return `[TOOL_RESULT] More than one approval is pending: ${pending.join(', ')}. Use /${command} <action>.`;
+        if (!requestedAction && remaining.length > 1) {
+            return `[TOOL_RESULT] More than one approval is pending: ${remaining.join(', ')}. Use /${command} <action>.`;
         }
 
-        return `[TOOL_RESULT] ${result.error} Pending: ${pending.join(', ')}.`;
+        return `[TOOL_RESULT] ${result.error} Pending: ${remaining.join(', ')}.`;
     }
 
     const actions = command === 'approve' ? result.granted : result.denied;

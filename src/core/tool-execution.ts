@@ -21,6 +21,8 @@ export interface ToolExecutionSpec {
     run_mode: ToolRunMode;
     capabilities: ToolCapability[];
     approval: 'none' | 'explicit';
+    approval_action?: string;
+    approval_reason?: string;
     audit_default: AuditMode;
     sandbox?: SandboxExecutionSpec;
     mcp?: {
@@ -93,6 +95,8 @@ export function deriveToolExecutionSpec(
             tool_name: toolName,
             run_mode: operation === 'search' ? 'inline' : 'sidecar',
             approval: operation === 'search' ? 'none' : 'explicit',
+            approval_action: operation === 'search' ? undefined : 'browse_web',
+            approval_reason: operation === 'search' ? undefined : 'opening an external web page',
             audit_default: normalizeAuditMode(base?.audit_default, 'errors'),
             capabilities,
             sandbox: base?.sandbox,
@@ -106,6 +110,8 @@ export function deriveToolExecutionSpec(
             tool_name: toolName,
             run_mode: 'inline',
             approval: 'none',
+            approval_action: base?.approval_action,
+            approval_reason: base?.approval_reason,
             audit_default: normalizeAuditMode(base?.audit_default, 'errors'),
             capabilities,
             sandbox: base?.sandbox,
@@ -118,6 +124,8 @@ export function deriveToolExecutionSpec(
             tool_name: toolName,
             run_mode: 'inline',
             approval: 'none',
+            approval_action: base?.approval_action,
+            approval_reason: base?.approval_reason,
             audit_default: normalizeAuditMode(base?.audit_default, 'errors'),
             capabilities: ['artifact_write'],
             sandbox: base?.sandbox,
@@ -129,6 +137,8 @@ export function deriveToolExecutionSpec(
         tool_name: toolName,
         run_mode: base?.run_mode || 'inline',
         approval: base?.approval || 'none',
+        approval_action: base?.approval_action,
+        approval_reason: base?.approval_reason,
         audit_default: normalizeAuditMode(base?.audit_default, 'errors'),
         capabilities:
             normalizeToolCapabilities(base?.capabilities).length > 0

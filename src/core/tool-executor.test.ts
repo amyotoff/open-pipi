@@ -258,6 +258,60 @@ describe('core/tool-executor', () => {
         expect(rows[0].status).toBe('blocked');
     });
 
+    it('enforces explicit approvals before invoking a registered handler', async () => {
+        const { db, mod } = await loadExecutor(() => ({
+            tool_name: 'publish_report',
+            run_mode: 'inline',
+            approval: 'explicit',
+            approval_action: 'publish_report',
+            approval_reason: 'publishing a report to an external destination',
+            audit_default: 'all',
+            capabilities: ['shell_none'],
+        }));
+        const approvals = await import('../utils/approvals');
+        const context = { chatId: 'chat-approval', userId: '111', spaceId: 'telegram:chat-approval' };
+        const handler = vi.fn(async () => 'published');
+
+        db.upsertSpace({
+            id: context.spaceId,
+            kind: 'group_chat',
+            title: 'Approvals',
+            channel: 'telegram',
+            external_ref: context.chatId,
+            assistant_pack_id: 'jeeves',
+            policy_json: JSON.stringify({ audit_trail: 'all' }),
+        });
+
+        const blocked = await mod.executeToolCall({
+            toolName: 'publish_report',
+            toolArgs: {},
+            context,
+            handlers: { publish_report: handler },
+        });
+
+        expect(blocked).toContain('publish_report');
+        expect(blocked).toContain('publishing a report to an external destination');
+        expect(handler).not.toHaveBeenCalled();
+        expect(approvals.listPendingApprovalActions(context)).toEqual(['publish_report']);
+
+        approvals.approvePendingAction(context, 'publish_report');
+        await expect(
+            mod.executeToolCall({
+                toolName: 'publish_report',
+                toolArgs: {},
+                context,
+                handlers: { publish_report: handler },
+            })
+        ).resolves.toBe('published');
+        expect(handler).toHaveBeenCalledTimes(1);
+
+        const rows = db.getDb().prepare('SELECT status, error FROM tool_execution_log ORDER BY id').all() as any[];
+        expect(rows).toEqual([
+            { status: 'blocked', error: 'approval_required' },
+            { status: 'success', error: null },
+        ]);
+    });
+
     it('normalizes array arguments from the tool schema before invoking handlers', async () => {
         const { db, mod, getToolDeclarationForContext } = await loadExecutor();
 

@@ -141,6 +141,12 @@ describe('skills registry policy filtering', () => {
         expect(allowedNames).toContain('task_create');
         expect(allowedNames).toContain('shopping_add');
         expect(allowedNames).toContain('jeeves_focus_plan');
+        expect(
+            registry.getToolExecutionSpecForContext('web_search', {}, { chatId: 'chat-1', userId: '111' })
+        ).toMatchObject({ approval: 'none' });
+        expect(
+            registry.getToolExecutionSpecForContext('browse_web', {}, { chatId: 'chat-1', userId: '111' })
+        ).toMatchObject({ approval: 'explicit', approval_action: 'browse_web' });
     });
 
     it('shows space management tools only to members with can_change_policies', async () => {
