@@ -93,7 +93,7 @@ function buildStartMessage(spaceId: string): string {
     const settings = resolveSpaceOperationalSettings(getSpace(spaceId)?.policy_json);
 
     if (settings.onboarding_state === 'new') {
-        return 'Hi. This space is not configured yet.\nUse /setup or go straight to /setup apply.';
+        return `Hi. I'm ${BOT_DISPLAY_NAME}. Tell me what this chat is for and what you would like help with.\nWrite naturally, use /help for examples, or /setup for guided settings.`;
     }
 
     const grounding = materializeGroundingForSpace(spaceId);
@@ -110,8 +110,7 @@ function buildStartMessage(spaceId: string): string {
     }
     return `Hi. I'm ${BOT_DISPLAY_NAME} — ${description}.\nTell me what you need: a task, reminder, question, or just think out loud.`;
 }
-const UNKNOWN_COMMAND_MESSAGE =
-    'Supported commands: /start, /jeeves, /brief, /focus, /review, /audit, /plan, /research, /handoff, /resume, /today, /yesterday, /week, /status, /dashboard, /clear, /reset, /finish_onboarding, /onboarding_status';
+const UNKNOWN_COMMAND_MESSAGE = "I don't recognize that command. Use /help or just tell me what you need.";
 
 export function parseChannelCommand(rawText: string): ParsedChannelCommand | null {
     const text = rawText.trim();
