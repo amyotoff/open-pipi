@@ -3,6 +3,7 @@ import path from 'node:path';
 import { loadPackFromRootStrict } from './pack-loader';
 import { loadGroundingPackFromRootStrict } from './grounding-loader';
 import { validateReminderCron } from './reminder-schedule';
+import { isSafeContentId } from './content-id';
 
 export type ContentCheckStatus = 'pass' | 'fail';
 
@@ -17,8 +18,6 @@ export type ContentRoots = {
     packs: string;
     groundings: string;
 };
-
-const SAFE_ID_PATTERN = /^[a-z0-9][a-z0-9_-]*$/i;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -64,7 +63,7 @@ export function validatePackRoot(
         const pack = loadPackFromRootStrict(root);
         const errors: string[] = [];
 
-        if (!SAFE_ID_PATTERN.test(directoryId)) errors.push('directory name is not a safe pack ID');
+        if (!isSafeContentId(directoryId)) errors.push('directory name is not a safe pack ID');
         if (!isNonEmptyString(pack.id)) errors.push('agent id is required');
         else if (pack.id !== directoryId) errors.push(`agent id "${pack.id}" must match directory "${directoryId}"`);
         if (!isNonEmptyString(pack.persona_id)) errors.push('persona_id is required');
@@ -134,7 +133,7 @@ export function validateGroundingRoot(root: string, directoryId = path.basename(
         const grounding = loadGroundingPackFromRootStrict(root);
         const errors: string[] = [];
 
-        if (!SAFE_ID_PATTERN.test(directoryId)) errors.push('directory name is not a safe grounding ID');
+        if (!isSafeContentId(directoryId)) errors.push('directory name is not a safe grounding ID');
         if (!isNonEmptyString(grounding.id)) errors.push('grounding id is required');
         else if (grounding.id !== directoryId) {
             errors.push(`grounding id "${grounding.id}" must match directory "${directoryId}"`);
