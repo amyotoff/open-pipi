@@ -21,6 +21,7 @@ All notable changes to Open PiPi will be documented in this file.
 - Centralized risky-tool approvals and strengthened release, secret, dependency, container, and coverage gates.
 - Added read-only first-run diagnostics through `pnpm setup:check`.
 - Removed private deployment assumptions, documented contributor and release workflows, and aligned repository metadata.
+- Cleaned production build artifacts, excluded tests from `dist`, and blocked accidental npm publication.
 
 ## [2.1.0] — 2026-03-30
 

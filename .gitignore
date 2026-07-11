@@ -11,6 +11,11 @@ data/
 backups/
 .sandboxd/
 *.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-wal
+*.db-shm
 
 # Secrets
 .env
