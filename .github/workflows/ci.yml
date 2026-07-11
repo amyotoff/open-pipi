@@ -24,26 +24,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Check formatting
-        run: pnpm format:check
-
-      - name: Type check
-        run: pnpm typecheck
-
-      - name: Lint
-        run: pnpm lint
-
-      - name: Run tests
-        run: pnpm test
-
-      - name: Run feature smokes
-        run: pnpm test:smoke
-
-      - name: Enforce coverage gate
-        run: pnpm test:coverage
-
-      - name: Build
-        run: pnpm build
+      - name: Run the authoritative quality gate
+        run: pnpm verify
 
   security:
     runs-on: ubuntu-latest
