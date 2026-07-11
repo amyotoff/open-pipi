@@ -2,6 +2,26 @@
 
 All notable changes to Open PiPi will be documented in this file.
 
+## [Unreleased]
+
+### Product
+
+- Simplified the Telegram menu around `/today`, `/tasks`, `/help`, and `/setup`.
+- Added one-tap daily Brief, Focus, and Review actions plus safe task Run, Pause, and Resume controls.
+- Added a one-tap recommended setup flow and clearer natural-language onboarding.
+
+### Extensibility
+
+- Unified skill and pack-tool registration while reducing the model-facing tool surface.
+- Added strict pack and grounding validation through `pnpm content:check`.
+- Added non-destructive pack and grounding scaffolding through `pnpm content:new`.
+
+### Reliability And Open Source
+
+- Centralized risky-tool approvals and strengthened release, secret, dependency, container, and coverage gates.
+- Added read-only first-run diagnostics through `pnpm setup:check`.
+- Removed private deployment assumptions, documented contributor and release workflows, and aligned repository metadata.
+
 ## [2.1.0] — 2026-03-30
 
 ### Runtime

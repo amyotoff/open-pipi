@@ -20,7 +20,5 @@ Describe what you did to verify this works.
 
 ## Checklist
 
-- [ ] `pnpm test` passes
-- [ ] `pnpm typecheck` passes
-- [ ] `pnpm lint` passes
+- [ ] `pnpm verify` passes
 - [ ] Updated CHANGELOG.md (if user-facing change)
