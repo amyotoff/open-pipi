@@ -36,6 +36,8 @@ Groundings live in `src/groundings/<id>/` and require `grounding.md`, `people.md
 
 Run `pnpm content:check` after changing either type. It validates required files, JSON frontmatter, IDs, seeded task schedules, pack tool exports, and grounding metadata. The check is also part of `pnpm verify`.
 
+To start from a minimal valid structure, use `pnpm content:new -- pack <id>` or `pnpm content:new -- grounding <id>`. Add `--dry-run` to preview the file list. The scaffolder refuses to overwrite an existing directory.
+
 ## Testing
 
 - Use `pnpm` for this repo. Do not mix `npm` and `pnpm` in the same checkout.

@@ -244,6 +244,15 @@ pnpm content:check
 
 The same command is part of `pnpm verify`; use `pnpm content:check -- --json` when another tool needs structured diagnostics.
 
+Start a new extension from a valid, non-destructive scaffold:
+
+```bash
+pnpm content:new -- pack my_assistant
+pnpm content:new -- grounding my_world
+```
+
+Add `--dry-run` to preview the files. Existing content directories are never overwritten.
+
 ## Channels
 
 `Telegram` is still the richest surface. The others intentionally reuse the same kernel with lighter UX.
@@ -697,6 +706,7 @@ Useful scripts:
 | `pnpm release:check` | Quality gate plus critical production dependency audit |
 | `pnpm bootstrap` | Description to grounding bootstrap flow |
 | `pnpm content:check` | Validate installable packs and groundings |
+| `pnpm content:new` | Scaffold a pack or grounding without overwriting content |
 | `pnpm setup:check` | Read-only first-run and configuration diagnostics |
 | `pnpm backup:restore` | Restore a runtime backup by id, path, `latest`, or `latest-healthy` |
 
