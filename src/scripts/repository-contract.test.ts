@@ -39,6 +39,7 @@ describe('repository release contract', () => {
             scripts: Record<string, string>;
         };
         const buildConfig = JSON.parse(read('tsconfig.build.json')) as { exclude: string[] };
+        const dockerfile = read('Dockerfile');
         const ignoredPatterns = new Set(
             read('.gitignore')
                 .split(/\r?\n/)
@@ -51,6 +52,7 @@ describe('repository release contract', () => {
         expect(packageJson.files).toEqual(['dist', 'README.md', 'LICENSE', 'CHANGELOG.md']);
         expect(packageJson.scripts.prebuild).toBe('pnpm clean');
         expect(packageJson.scripts.build).toContain('tsc -p tsconfig.build.json');
+        expect(dockerfile).toContain('COPY tsconfig.json tsconfig.build.json ./');
         expect(buildConfig.exclude).toEqual(['src/**/*.test.ts', 'src/mocks/**', 'src/test-helpers/**']);
         for (const pattern of ['*.db', '*.db-wal', '*.db-shm', '*.sqlite', '*.sqlite-wal', '*.sqlite-shm']) {
             expect(ignoredPatterns.has(pattern)).toBe(true);
