@@ -1,6 +1,14 @@
-# Open PiPi
+# PiPi Agents
 
-> Telegram-first, owner-operated assistant runtime with spaces, structured memory, artifacts, installable packs, and safe tool execution.
+## Teach one. Share the pack.
+
+**Small, open-source agents for real teams.**
+
+Private memory. Shared know-how. Your hardware.
+
+[Install Open PiPi](#quickstart) · [Choose a Pack](#packs-and-plug-and-play) · [See the Flow](#telegram-flow)
+
+✓ **Team-native** · ✓ **Runs on Raspberry Pi 4** · ✓ **Token-frugal** · ✓ **Open source**
 
 [![CI](https://github.com/amyotoff/OPENPIPIFAMILY/actions/workflows/ci.yml/badge.svg)](https://github.com/amyotoff/OPENPIPIFAMILY/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/badge/version-2.5.0-informational.svg)](package.json)
