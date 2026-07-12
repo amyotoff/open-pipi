@@ -1,6 +1,7 @@
 # Releasing Open PiPi
 
 Keep releases small and reproducible. A release does not deploy any running instance.
+Open PiPi is distributed through GitHub Releases; `package.json` is intentionally private and npm publication is out of scope.
 
 ## Before tagging
 
