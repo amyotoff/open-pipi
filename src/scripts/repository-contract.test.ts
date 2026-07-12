@@ -40,6 +40,8 @@ describe('repository release contract', () => {
         };
         const buildConfig = JSON.parse(read('tsconfig.build.json')) as { exclude: string[] };
         const dockerfile = read('Dockerfile');
+        const sandboxDockerfile = read('Dockerfile.sandboxd');
+        const workflow = read('.github/workflows/ci.yml');
         const ignoredPatterns = new Set(
             read('.gitignore')
                 .split(/\r?\n/)
@@ -53,6 +55,10 @@ describe('repository release contract', () => {
         expect(packageJson.scripts.prebuild).toBe('pnpm clean');
         expect(packageJson.scripts.build).toContain('tsc -p tsconfig.build.json');
         expect(dockerfile).toContain('COPY tsconfig.json tsconfig.build.json ./');
+        expect(sandboxDockerfile).toContain('COPY package.json pnpm-lock.yaml ./');
+        expect(sandboxDockerfile).toContain('RUN pnpm install --frozen-lockfile --ignore-scripts');
+        expect(sandboxDockerfile).not.toContain('npm ci');
+        expect(workflow).toContain('docker build -f Dockerfile.sandboxd -t open-pipi-sandboxd:ci .');
         expect(buildConfig.exclude).toEqual(['src/**/*.test.ts', 'src/mocks/**', 'src/test-helpers/**']);
         for (const pattern of ['*.db', '*.db-wal', '*.db-shm', '*.sqlite', '*.sqlite-wal', '*.sqlite-shm']) {
             expect(ignoredPatterns.has(pattern)).toBe(true);
