@@ -17,6 +17,8 @@ Open PiPi is distributed through GitHub Releases; `package.json` is intentionall
    committed secrets, and critical container vulnerabilities.
 5. Update the version in `package.json` and the README badge when the release number changes.
 6. Review the diff for private paths, identities, hostnames, tokens, and generated runtime data.
+7. Smoke-test `/start`, `/setup`, `/today`, and `/tasks` with a non-production Telegram bot.
+8. Confirm the GitHub description and topics are public-facing before approving public visibility.
 
 ## Publish
 
