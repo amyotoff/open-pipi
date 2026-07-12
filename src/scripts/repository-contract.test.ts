@@ -26,10 +26,12 @@ describe('repository release contract', () => {
         const readme = read('README.md');
         const changelog = read('CHANGELOG.md');
         const pullRequestTemplate = read('.github/PULL_REQUEST_TEMPLATE.md');
+        const releaseHeading = `## [${packageJson.version}]`;
 
         expect(readme).toContain(`version-${packageJson.version}-informational`);
         expect(changelog.indexOf('## [Unreleased]')).toBeGreaterThan(-1);
-        expect(changelog.indexOf('## [Unreleased]')).toBeLessThan(changelog.indexOf('## [2.1.0]'));
+        expect(changelog).toContain(releaseHeading);
+        expect(changelog.indexOf('## [Unreleased]')).toBeLessThan(changelog.indexOf(releaseHeading));
         expect(pullRequestTemplate).toContain('`pnpm verify` passes');
     });
 

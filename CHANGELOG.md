@@ -4,6 +4,8 @@ All notable changes to Open PiPi will be documented in this file.
 
 ## [Unreleased]
 
+## [2.5.0] — 2026-07-12
+
 ### Product
 
 - Simplified the Telegram menu around `/today`, `/tasks`, `/help`, and `/setup`.
