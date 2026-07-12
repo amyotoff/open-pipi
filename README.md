@@ -10,7 +10,7 @@ Private memory. Shared know-how. Your hardware.
 
 ✓ **Team-native** · ✓ **Runs on Raspberry Pi 4** · ✓ **Token-frugal** · ✓ **Open source**
 
-[![CI](https://github.com/amyotoff/OPENPIPIFAMILY/actions/workflows/ci.yml/badge.svg)](https://github.com/amyotoff/OPENPIPIFAMILY/actions/workflows/ci.yml)
+[![CI](https://github.com/amyotoff/open-pipi/actions/workflows/ci.yml/badge.svg)](https://github.com/amyotoff/open-pipi/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/badge/version-2.5.0-informational.svg)](package.json)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D24-green.svg)](https://nodejs.org)
@@ -49,8 +49,8 @@ Optional:
 
 ```bash
 corepack enable
-git clone https://github.com/amyotoff/OPENPIPIFAMILY.git
-cd OPENPIPIFAMILY
+git clone https://github.com/amyotoff/open-pipi.git
+cd open-pipi
 cp .env.example .env
 pnpm install
 ```
