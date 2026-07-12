@@ -24,6 +24,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Smoke-test first-run setup
+        run: pnpm setup:check -- --json
+        env:
+          TELEGRAM_BOT_TOKEN: smoke-token
+          GEMINI_API_KEY: smoke-key
+          OWNER_TG_IDS: '1'
+          BOOTSTRAP_PACK: jeeves
+          BOOTSTRAP_GROUNDING: jeeves_personal
+          DATA_DIR: .tmp/onboarding-smoke
+          TZ: UTC
+
       - name: Run the authoritative quality gate
         run: pnpm verify
 

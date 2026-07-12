@@ -14,6 +14,7 @@ describe('repository release contract', () => {
         const workflow = read('.github/workflows/ci.yml');
 
         expect(workflow).toContain('run: pnpm verify');
+        expect(workflow).toContain('run: pnpm setup:check -- --json');
         expect(packageJson.scripts.verify).toContain('pnpm content:check');
         expect(packageJson.scripts.verify).toContain('pnpm test:coverage');
         expect(packageJson.scripts.verify).toContain('pnpm build');
