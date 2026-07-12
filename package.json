@@ -18,7 +18,7 @@
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
     "verify": "pnpm format:check && pnpm typecheck && pnpm lint && pnpm content:check && pnpm test && pnpm test:smoke && pnpm test:coverage && pnpm build",
-    "release:check": "pnpm verify && pnpm audit --prod --audit-level=critical",
+    "release:check": "pnpm verify && pnpm audit --prod --audit-level=high",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:smoke": "vitest run src/skills/features.smoke.test.ts",
@@ -53,13 +53,13 @@
   "dependencies": {
     "@google/genai": "^1.47.0",
     "@opentelemetry/api": "^1.9.1",
-    "@opentelemetry/instrumentation-express": "^0.62.0",
-    "@opentelemetry/instrumentation-http": "^0.214.0",
-    "@opentelemetry/exporter-metrics-otlp-proto": "^0.214.0",
-    "@opentelemetry/exporter-trace-otlp-proto": "^0.214.0",
-    "@opentelemetry/resources": "^2.6.1",
-    "@opentelemetry/sdk-metrics": "^2.6.1",
-    "@opentelemetry/sdk-node": "^0.214.0",
+    "@opentelemetry/instrumentation-express": "^0.68.0",
+    "@opentelemetry/instrumentation-http": "^0.220.0",
+    "@opentelemetry/exporter-metrics-otlp-proto": "^0.220.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "^0.220.0",
+    "@opentelemetry/resources": "^2.9.0",
+    "@opentelemetry/sdk-metrics": "^2.9.0",
+    "@opentelemetry/sdk-node": "^0.220.0",
     "better-sqlite3": "^12.8.0",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
@@ -69,8 +69,8 @@
   "optionalDependencies": {
     "@hapi/boom": "^10.0.1",
     "@whiskeysockets/baileys": "^7.0.0-rc13",
-    "discord.js": "^14.25.1",
-    "nodemailer": "^8.0.4",
+    "discord.js": "^14.26.5",
+    "nodemailer": "^9.0.3",
     "playwright-core": "^1.58.2"
   },
   "devDependencies": {
@@ -95,8 +95,12 @@
   },
   "pnpm": {
     "overrides": {
-      "protobufjs": "^7.5.5",
-      "undici": "^7.0.0"
+      "@grpc/grpc-js": "^1.14.4",
+      "@opentelemetry/core": "^2.9.0",
+      "protobufjs": "^7.6.3",
+      "qs": "^6.15.2",
+      "undici": "^7.28.0",
+      "ws": "^8.21.0"
     },
     "onlyBuiltDependencies": [
       "@whiskeysockets/baileys",

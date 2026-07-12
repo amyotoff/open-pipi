@@ -17,7 +17,7 @@ describe('repository release contract', () => {
         expect(packageJson.scripts.verify).toContain('pnpm content:check');
         expect(packageJson.scripts.verify).toContain('pnpm test:coverage');
         expect(packageJson.scripts.verify).toContain('pnpm build');
-        expect(packageJson.scripts['release:check']).toBe('pnpm verify && pnpm audit --prod --audit-level=critical');
+        expect(packageJson.scripts['release:check']).toBe('pnpm verify && pnpm audit --prod --audit-level=high');
     });
 
     it('keeps public version metadata and contributor guidance synchronized', () => {

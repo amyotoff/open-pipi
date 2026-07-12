@@ -703,7 +703,7 @@ Useful scripts:
 | `pnpm test:evaluator` | Minimal operational evaluator |
 | `pnpm test:watch` | Watch mode |
 | `pnpm verify` | Complete local quality gate |
-| `pnpm release:check` | Quality gate plus critical production dependency audit |
+| `pnpm release:check` | Quality gate plus high-severity production dependency audit |
 | `pnpm bootstrap` | Description to grounding bootstrap flow |
 | `pnpm content:check` | Validate installable packs and groundings |
 | `pnpm content:new` | Scaffold a pack or grounding without overwriting content |
