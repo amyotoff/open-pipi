@@ -23,6 +23,7 @@ All notable changes to Open PiPi will be documented in this file.
 - Removed private deployment assumptions, documented contributor and release workflows, and aligned repository metadata.
 - Cleaned production build artifacts, excluded tests from `dist`, and blocked accidental npm publication.
 - Made both production container images use the locked pnpm dependency graph.
+- Updated vulnerable production dependencies and made high-severity advisories fail the release gate.
 
 ## [2.1.0] — 2026-03-30
 
