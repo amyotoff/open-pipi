@@ -14,6 +14,7 @@ async function loadRouter(options?: {
     approval?: { granted: string[]; denied: string[] };
     authorityGuard?: { allow: boolean; reason?: string };
     spacePolicyJson?: string | null;
+    groupRelevant?: boolean;
 }) {
     vi.resetModules();
 
@@ -68,6 +69,9 @@ async function loadRouter(options?: {
     }));
     vi.doMock('./core/authority-guard', () => ({
         evaluateAuthorityGuard,
+    }));
+    vi.doMock('./core/local-triage', () => ({
+        shouldJoinGroupConversation: vi.fn(async () => options?.groupRelevant ?? false),
     }));
 
     const router = await import('./router');
@@ -168,7 +172,7 @@ describe('router.handleIncomingMessage', () => {
         });
     });
 
-    it('stays passive in household groups until every fifth non-trigger message', async () => {
+    it('stays passive in household groups when the local relevance gate says no', async () => {
         const { handleIncomingMessage, mocks } = await loadRouter({ isOwner: true, isHouseholdChat: true });
 
         for (let index = 1; index <= 5; index += 1) {
@@ -180,14 +184,48 @@ describe('router.handleIncomingMessage', () => {
             await handleIncomingMessage(ctx as any);
         }
 
-        expect(mocks.handleButlerMessage).toHaveBeenCalledTimes(1);
+        expect(mocks.handleButlerMessage).not.toHaveBeenCalled();
+    });
+
+    it('joins a household group when the local relevance gate finds concrete value', async () => {
+        const { handleIncomingMessage, mocks } = await loadRouter({
+            isOwner: true,
+            isHouseholdChat: true,
+            groupRelevant: true,
+        });
+        const ctx = createContext({
+            chat: { id: 999, type: 'group' },
+            message: { message_id: 8, text: 'The delivery deadline moved to tomorrow' },
+        });
+
+        await handleIncomingMessage(ctx as any);
+
         expect(mocks.handleButlerMessage).toHaveBeenCalledWith({
             channel: 'telegram',
             channelRef: '999',
             senderId: '111',
-            text: 'ок',
+            text: 'The delivery deadline moved to tomorrow',
             spaceId: 'telegram:999',
         });
+    });
+
+    it('applies a cooldown after a passive relevance-based group reply', async () => {
+        const { handleIncomingMessage, mocks } = await loadRouter({
+            isOwner: true,
+            isHouseholdChat: true,
+            groupRelevant: true,
+        });
+
+        for (const [messageId, text] of [
+            [18, 'The delivery deadline moved to tomorrow'],
+            [19, 'The brief also changed'],
+        ] as const) {
+            await handleIncomingMessage(
+                createContext({ chat: { id: 998, type: 'group' }, message: { message_id: messageId, text } }) as any
+            );
+        }
+
+        expect(mocks.handleButlerMessage).toHaveBeenCalledTimes(1);
     });
 
     it('does not treat a generic group question as an explicit trigger', async () => {

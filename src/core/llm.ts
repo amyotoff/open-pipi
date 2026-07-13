@@ -25,7 +25,7 @@ import {
 } from '../observability';
 
 // Tools that take a long time and warrant a "working on it" heads-up
-const LONG_RUNNING_TOOLS = new Set(['groceries_search', 'browse_web', 'webrun_execute', 'web']);
+const LONG_RUNNING_TOOLS = new Set(['groceries_search', 'browse_web', 'webrun_execute', 'web', 'family_delegate']);
 
 const LONG_TASK_MESSAGES = [
     '🔍 Looking into it now...',

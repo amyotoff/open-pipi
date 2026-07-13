@@ -18,6 +18,9 @@ describe('core/pack-loader', () => {
             expect.arrayContaining(['briefing_morning', 'consideration_afternoon', 'wrapup_evening', 'atelier_review'])
         );
         expect(pack?.system_prompt).toContain('You are Jeeves');
+        expect(pack?.character_doc).toContain('decision-making reference');
+        expect(pack?.system_prompt).toContain('[BEHAVIOR_CALIBRATION]');
+        expect(pack?.system_prompt).toContain('Do not imitate quotations');
         expect(pack?.tools_doc).toContain('jeeves_brief_note');
         expect(pack?.pack_tools.map((tool) => tool.id)).toEqual(
             expect.arrayContaining(['jeeves_brief_note', 'jeeves_focus_plan', 'jeeves_review_note'])
@@ -38,6 +41,12 @@ describe('core/pack-loader', () => {
             expect.arrayContaining(['briefing_morning', 'followup_digest', 'atelier_review'])
         );
         expect(pack?.system_prompt).toContain('calm office facilitator');
+        expect(pack?.family_members).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({ id: 'researcher', role: 'Researcher', character: 'Sherlock Holmes' }),
+            ])
+        );
+        expect(pack?.character_doc).toContain('not as a roleplay costume');
         expect(pack?.tools_doc).toContain('office_focus_note');
         expect(pack?.tools_doc).toContain('office_kanban_board');
         expect(pack?.tools_doc).toContain('office_read_google_doc');

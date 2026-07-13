@@ -46,6 +46,10 @@ describe('core/assistant-pack', () => {
         expect(office.enabled_capabilities).toContain('workspace');
         expect(office.enabled_capabilities).toContain('grounding');
         expect(office.enabled_capabilities).toContain('projects');
+        expect(office.enabled_capabilities).toContain('family');
+        expect(office.family_members).toEqual(
+            expect.arrayContaining([expect.objectContaining({ id: 'researcher', character: 'Sherlock Holmes' })])
+        );
         expect(officeSeeds.map((task: any) => task.template_id)).toEqual(
             expect.arrayContaining(['briefing_morning', 'followup_digest', 'atelier_review'])
         );

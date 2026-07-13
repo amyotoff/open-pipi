@@ -5,6 +5,37 @@ let ollamaAvailable: boolean | null = null;
 let lastCheck = 0;
 const CHECK_INTERVAL_MS = 60_000; // Re-check availability every 60s
 
+/** Fast local generation for routing decisions. Never falls back to a paid model. */
+export async function classifyWithOllama(prompt: string, timeoutMs: number = 2000): Promise<string | null> {
+    try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        const res = await fetch(`${OLLAMA_URL}/api/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: OLLAMA_MODEL,
+                prompt,
+                stream: false,
+                options: { temperature: 0 },
+            }),
+            signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        if (!res.ok) return null;
+
+        const data = await res.json();
+        const inputTokens = data.prompt_eval_count || 0;
+        const outputTokens = data.eval_count || 0;
+        if (inputTokens > 0 || outputTokens > 0) {
+            logTokenUsage(`ollama:${OLLAMA_MODEL}:triage`, inputTokens, outputTokens);
+        }
+        return typeof data.response === 'string' ? data.response.trim() : null;
+    } catch {
+        return null;
+    }
+}
+
 export async function isOllamaAvailable(): Promise<boolean> {
     const now = Date.now();
     if (ollamaAvailable !== null && now - lastCheck < CHECK_INTERVAL_MS) {

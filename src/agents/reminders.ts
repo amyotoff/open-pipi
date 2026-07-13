@@ -13,6 +13,30 @@ type ReminderRow = {
     schedule_value: string | null;
 };
 
+function claimDueReminders(db: ReturnType<typeof getDb>, now: string): ReminderRow[] {
+    return db.transaction(() => {
+        const due = db
+            .prepare(
+                `
+                SELECT * FROM reminders
+                WHERE status = 'pending' AND remind_at <= ?
+                ORDER BY remind_at ASC
+            `
+            )
+            .all(now) as ReminderRow[];
+        const claimed: ReminderRow[] = [];
+        const claim = db.prepare("UPDATE reminders SET status = 'processing' WHERE id = ? AND status = 'pending'");
+
+        for (const reminder of due) {
+            if (claim.run(reminder.id).changes === 1) {
+                claimed.push(reminder);
+            }
+        }
+
+        return claimed;
+    })();
+}
+
 function reminderLabel(language: string, assistantPackId: string | null): string {
     const isRussian = language.startsWith('ru');
 
@@ -55,14 +79,7 @@ export async function checkReminders(): Promise<void> {
     const db = getDb();
     const now = new Date().toISOString();
 
-    const dueReminders = db
-        .prepare(
-            `
-        SELECT * FROM reminders 
-        WHERE status = 'pending' AND remind_at <= ?
-    `
-        )
-        .all(now) as ReminderRow[];
+    const dueReminders = claimDueReminders(db, now);
 
     if (dueReminders.length === 0) return;
 
@@ -121,6 +138,8 @@ export async function checkReminders(): Promise<void> {
             logEvent('reminder_fired', { id: r.id, space_id: resolvedSpaceId, channel_ref: r.chat_jid });
         } catch (err) {
             console.error(`[REMINDERS] Failed to send reminder #${r.id}:`, err);
+            db.prepare("UPDATE reminders SET status = 'pending' WHERE id = ? AND status = 'processing'").run(r.id);
+            logEvent('reminder_delivery_failed', { id: r.id, space_id: r.space_id, channel_ref: r.chat_jid });
         }
     }
 }

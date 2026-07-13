@@ -34,6 +34,7 @@ import onboardingSkill from './onboarding.skill';
 import helperSkill from './helper.skill';
 import helperStatusSkill from './helper_status.skill';
 import brainSkill from './brain.skill';
+import familySkill from './family.skill';
 
 const ALL_SKILLS: SkillManifest[] = [
     memorySkill,
@@ -60,6 +61,7 @@ const ALL_SKILLS: SkillManifest[] = [
     helperSkill,
     helperStatusSkill,
     brainSkill,
+    familySkill,
 ];
 
 const DEFAULT_CAPABILITY_META: CapabilityMeta = {
@@ -171,7 +173,8 @@ export function getRegisteredToolsForContext(context?: RuntimeExecutionContext):
         .map((registration) => registration.declaration);
 
     const packTools = getPackToolsForContext(context).map((tool) => tool.declaration);
-    return [...skillTools, ...packTools];
+    const disabled = new Set(context.disabledTools || []);
+    return [...skillTools, ...packTools].filter((tool) => !disabled.has(tool.name || ''));
 }
 
 export function getRegisteredHandlers(): Record<
@@ -192,6 +195,10 @@ export function getRegisteredHandlersForContext(
           )
         : getRegisteredHandlers();
     if (!context) return handlers;
+
+    for (const toolName of context.disabledTools || []) {
+        delete handlers[toolName];
+    }
 
     for (const tool of getPackToolsForContext(context)) {
         handlers[tool.id] = async (args: any, runtimeContext?: RuntimeExecutionContext) =>

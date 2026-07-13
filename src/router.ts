@@ -19,8 +19,11 @@ import { logInfo, logWarn, summarizeText } from './utils/logging';
 import { evaluateAuthorityGuard } from './core/authority-guard';
 import { addSpanAttributes, addSpanEvent, recordInboundMessage, withSpan } from './observability';
 import { parseSpacePolicyRecord, resolveSpaceOperationalSettings } from './core/space-preferences';
+import { shouldJoinGroupConversation } from './core/local-triage';
 
-const groupMessageCounters: Record<string, number> = {};
+const PASSIVE_GROUP_COOLDOWN_MS = 10 * 60_000;
+const lastPassiveGroupReplyAt = new Map<string, number>();
+
 function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -188,23 +191,15 @@ function injectApprovalContext(spaceId: string, channelRef: string, personId: st
     return text;
 }
 
-function consumePassiveGroupTurn(channelRef: string): boolean {
-    groupMessageCounters[channelRef] = (groupMessageCounters[channelRef] || 0) + 1;
-    const isPassiveTurn = groupMessageCounters[channelRef] >= 5;
-    if (isPassiveTurn) {
-        groupMessageCounters[channelRef] = 0;
-    }
-    return isPassiveTurn;
-}
-
 /**
  * Group chats stay mostly passive: answer on explicit invitations, obvious
- * requests, emotionally salient messages, or every few turns to stay present.
+ * requests, emotionally salient messages, or when a cheap local relevance
+ * check finds concrete value. The assistant never speaks merely to stay visible.
  */
-function shouldHandlePrimaryGroupMessage(
+async function shouldHandlePrimaryGroupMessage(
     message: IncomingChannelMessage,
     options?: { allowRequestTriggers?: boolean; allowPassiveTurns?: boolean }
-): boolean {
+): Promise<boolean> {
     const lowerText = message.text.toLowerCase();
     const isMentioned = message.botUsername ? lowerText.includes(`@${message.botUsername.toLowerCase()}`) : false;
     const isReplyToBot = !!(
@@ -215,9 +210,15 @@ function shouldHandlePrimaryGroupMessage(
     );
     const hasTrigger = options?.allowRequestTriggers === false ? false : hasPrimaryGroupTrigger(message.text);
     const isEmotional = isEmotionalOrPersonal(message.text);
-    const isPassiveTurn = options?.allowPassiveTurns === false ? false : consumePassiveGroupTurn(message.channelRef);
+    if (isMentioned || isReplyToBot || hasTrigger || isEmotional) return true;
 
-    return isMentioned || isReplyToBot || hasTrigger || isEmotional || isPassiveTurn;
+    if (options?.allowPassiveTurns === false) return false;
+    const lastReplyAt = lastPassiveGroupReplyAt.get(message.channelRef) || 0;
+    if (Date.now() - lastReplyAt < PASSIVE_GROUP_COOLDOWN_MS) return false;
+
+    const relevant = await shouldJoinGroupConversation(message.text);
+    if (relevant) lastPassiveGroupReplyAt.set(message.channelRef, Date.now());
+    return relevant;
 }
 
 export async function handleIncomingMessage(ctx: Context) {
@@ -520,7 +521,7 @@ export async function handleIncomingChannelMessage(message: IncomingChannelMessa
             }
 
             if (!message.isPrimaryGroup) return;
-            const shouldHandle = shouldHandlePrimaryGroupMessage(message, {
+            const shouldHandle = await shouldHandlePrimaryGroupMessage(message, {
                 allowPassiveTurns: message.groupMode !== 'external',
                 allowRequestTriggers: message.groupMode !== 'external' || message.externalGroupMode === 'auto',
             });

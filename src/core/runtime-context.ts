@@ -8,6 +8,8 @@ export interface RuntimeExecutionContext {
     channelRef?: string;
     taskId?: string;
     toolExecutionId?: number;
+    /** Tools hidden from a nested model run, for example to prevent recursive delegation. */
+    disabledTools?: string[];
 }
 
 type PartialRuntimeExecutionContext = Partial<RuntimeExecutionContext>;

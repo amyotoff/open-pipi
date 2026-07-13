@@ -31,6 +31,14 @@ export interface AssistantPack {
     default_policies: Record<string, unknown>;
     authority_presets: Record<string, { base_authority: number; trust_flags: TrustFlag[] }>;
     onboarding_hints?: string[];
+    family_members?: FamilyMemberDefinition[];
+}
+
+export interface FamilyMemberDefinition {
+    id: string;
+    role: string;
+    character: string;
+    instructions: string[];
 }
 
 export interface PackToolDescriptor {
@@ -48,6 +56,7 @@ export interface MaterializedAgent extends AssistantPack {
     system_prompt: string;
     skills_doc: string;
     tools_doc: string;
+    character_doc: string;
     core_toolbox: MaterializedCoreToolbox;
     pack_tools: PackToolDescriptor[];
     source: 'installable' | 'static';
@@ -62,6 +71,7 @@ export interface InstallableAgentMeta {
     authority_presets: Record<string, { base_authority: number; trust_flags: TrustFlag[] }>;
     seeded_tasks: SeededTaskTemplate[];
     onboarding_hints?: string[];
+    family_members?: FamilyMemberDefinition[];
 }
 
 export interface InstallableSkillsMeta {

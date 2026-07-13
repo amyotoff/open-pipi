@@ -89,6 +89,12 @@ async function loadButler(options: { task?: any; briefUrl?: string | null } = {}
     }));
     vi.doMock('../core/llm', () => ({ processWithLLM, processWithVision }));
     vi.doMock('../core/ollama', () => ({ processWithOllama }));
+    vi.doMock('../core/local-triage', () => ({
+        classifyMessageRoute: vi.fn(async (value: string) => ({
+            route: value === 'Спасибо' ? 'simple' : 'complex',
+            source: value === 'Спасибо' ? 'rule_simple' : 'rule_complex',
+        })),
+    }));
     vi.doMock('../channels/telegram', () => ({
         sendMessageToChat,
         sendFileToChat,

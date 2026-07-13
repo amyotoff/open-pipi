@@ -53,6 +53,7 @@ export const PIPI_ADVISOR_ENABLED = readBooleanEnv('PIPI_ADVISOR_ENABLED', true)
 export const PIPI_ADVISOR_MAX_CALLS_PER_TURN = readPositiveIntEnv('PIPI_ADVISOR_MAX_CALLS_PER_TURN', 1);
 export const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 export const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:1.5b';
+export const PIPI_LOCAL_ROUTING_ENABLED = readBooleanEnv('PIPI_LOCAL_ROUTING_ENABLED', true);
 export const HOUSEHOLD_CHAT_ID = process.env.HOUSEHOLD_CHAT_ID || '';
 export const BOOTSTRAP_OWNER_MODE = process.env.BOOTSTRAP_OWNER_MODE === 'true';
 export type PlatformSetting = 'auto' | 'raspberry_pi' | 'generic';

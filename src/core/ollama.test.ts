@@ -55,6 +55,12 @@ afterEach(() => {
 });
 
 describe('core/ollama', () => {
+    it('runs local classification without a Gemini fallback', async () => {
+        const mod = await loadOllama({ available: true, generateOk: true });
+        await expect(mod.classifyWithOllama('Return SIMPLE')).resolves.toBe('Ollama says hello');
+        expect(mod.processWithLLM).not.toHaveBeenCalled();
+    });
+
     it('returns Ollama output when available', async () => {
         const mod = await loadOllama({ available: true, generateOk: true });
         const result = await mod.processWithOllama('Hello');
