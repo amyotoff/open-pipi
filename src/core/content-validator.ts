@@ -89,6 +89,7 @@ export function validatePackRoot(
                 if (!isNonEmptyString(member.role)) errors.push(`${label}.role is required`);
                 if (!isNonEmptyString(member.character)) errors.push(`${label}.character is required`);
                 validateStringArray(member.instructions, `${label}.instructions`, errors);
+                validateStringArray(member.allowed_tools, `${label}.allowed_tools`, errors);
             }
         }
 

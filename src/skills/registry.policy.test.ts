@@ -262,4 +262,36 @@ describe('skills registry policy filtering', () => {
         expect(withOfficePack.map((tool) => tool.name)).toContain('office_standup_note');
         expect(withOfficePack.map((tool) => tool.name)).not.toContain('jeeves_brief_note');
     });
+
+    it('honors an exact nested-run tool allowlist for declarations and handlers', async () => {
+        const { db, registry } = await loadRegistryWithDb();
+
+        db.upsertResident({ tg_id: '111', username: 'alice', display_name: 'Alice', role: 'owner' });
+        db.upsertSpace({
+            id: db.buildTelegramSpaceId('chat-5'),
+            kind: 'group_chat',
+            title: 'Office',
+            channel: 'telegram',
+            external_ref: 'chat-5',
+            assistant_pack_id: 'office',
+            policy_json: JSON.stringify({ browser: true, workspace_path: '/tmp/project' }),
+        });
+        packBySpace.set(db.buildTelegramSpaceId('chat-5'), 'office');
+        db.ensureSpaceMembership(db.buildTelegramSpaceId('chat-5'), '111', 'owner');
+
+        const context = {
+            chatId: 'chat-5',
+            userId: '111',
+            allowedTools: ['web_search', 'workspace_read_text', 'office_read_google_doc'],
+        };
+        const tools = registry.getRegisteredToolsForContext(context);
+        const handlers = registry.getRegisteredHandlersForContext(context);
+
+        expect(tools.map((tool) => tool.name)).toEqual(['web_search', 'workspace_read_text', 'office_read_google_doc']);
+        expect(handlers.web_search).toBeTypeOf('function');
+        expect(handlers.workspace_read_text).toBeTypeOf('function');
+        expect(handlers.office_read_google_doc).toBeTypeOf('function');
+        expect(handlers.reminder_set).toBeUndefined();
+        expect(handlers.workspace_save_artifact).toBeUndefined();
+    });
 });

@@ -225,6 +225,7 @@ src/packs/my_pack/
 What each file does:
 
 - `agent.md`: JSON frontmatter plus the actual system prompt
+- `family_members` in `agent.md`: optional delegated roles; each role declares its exact `allowed_tools` allowlist
 - `character.md`: optional decision-making calibration; keep speech imitation and fictional roleplay out of it
 - `skills.md`: JSON frontmatter describing enabled capabilities and optional hints
 - `tools.md`: human-readable notes for pack-specific tools

@@ -276,10 +276,17 @@ export async function processWithLLM(
                 const { getRegisteredToolsForContext, getRegisteredHandlersForContext } =
                     await import('../skills/_registry');
                 const registeredSkillTools = getRegisteredToolsForContext(context);
-                const skillTools = registeredSkillTools.filter((tool) => !isCorePrimitiveBackingTool(tool.name));
-                const allTools = advisorEnabled
-                    ? [...skillTools, ...CORE_TOOLBOX_TOOL_DECLARATIONS, LIST_SKILLS_TOOL, ADVISOR_TOOL]
-                    : [...skillTools, ...CORE_TOOLBOX_TOOL_DECLARATIONS, LIST_SKILLS_TOOL];
+                const hasExplicitToolAllowlist = Array.isArray(context.allowedTools);
+                const skillTools = hasExplicitToolAllowlist
+                    ? registeredSkillTools
+                    : registeredSkillTools.filter((tool) => !isCorePrimitiveBackingTool(tool.name));
+                const defaultTools = advisorEnabled
+                    ? [...CORE_TOOLBOX_TOOL_DECLARATIONS, LIST_SKILLS_TOOL, ADVISOR_TOOL]
+                    : [...CORE_TOOLBOX_TOOL_DECLARATIONS, LIST_SKILLS_TOOL];
+                const additionalTools = hasExplicitToolAllowlist
+                    ? defaultTools.filter((tool) => !!tool.name && context.allowedTools!.includes(tool.name))
+                    : defaultTools;
+                const allTools = [...skillTools, ...additionalTools];
                 addSpanAttributes({ 'app.llm.tool_declarations': allTools.length });
                 addSpanAttributes({
                     'app.llm.backing_tool_declarations_hidden': registeredSkillTools.length - skillTools.length,

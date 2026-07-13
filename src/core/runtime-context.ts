@@ -8,6 +8,8 @@ export interface RuntimeExecutionContext {
     channelRef?: string;
     taskId?: string;
     toolExecutionId?: number;
+    /** Exact tool names exposed to a restricted nested model run. */
+    allowedTools?: string[];
     /** Tools hidden from a nested model run, for example to prevent recursive delegation. */
     disabledTools?: string[];
 }

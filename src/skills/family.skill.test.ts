@@ -20,6 +20,7 @@ vi.mock('../core/agent-kernel', () => ({
                 role: 'Researcher',
                 character: 'Sherlock Holmes',
                 instructions: ['Separate evidence from inference.'],
+                allowed_tools: ['web_search', 'chat_search'],
             },
         ],
     })),
@@ -32,7 +33,7 @@ vi.mock('../core/runtime-context', async (importOriginal) => {
 beforeEach(() => processWithLLM.mockClear());
 
 describe('skills/family', () => {
-    it('delegates a bounded contract and disables recursive delegation', async () => {
+    it('delegates a bounded contract with only the member allowlist', async () => {
         const { default: skill } = await import('./family.skill');
         const result = await skill.handlers.family_delegate(
             { member_id: 'researcher', goal: 'Compare options', must_collect: ['evidence'] },
@@ -43,7 +44,7 @@ describe('skills/family', () => {
         expect(result).toContain('Compared the options');
         expect(processWithLLM).toHaveBeenCalledWith(
             expect.any(Array),
-            expect.objectContaining({ disabledTools: ['family_delegate'] })
+            expect.objectContaining({ allowedTools: ['web_search', 'chat_search'], disabledTools: ['family_delegate'] })
         );
     });
 

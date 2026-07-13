@@ -114,6 +114,9 @@ const skill: SkillManifest = {
                 {
                     ...context,
                     spaceId,
+                    allowedTools: member.allowed_tools.filter(
+                        (toolName) => !context.allowedTools || context.allowedTools.includes(toolName)
+                    ),
                     disabledTools: [...new Set([...(context.disabledTools || []), 'family_delegate'])],
                 }
             );

@@ -39,6 +39,7 @@ export interface FamilyMemberDefinition {
     role: string;
     character: string;
     instructions: string[];
+    allowed_tools: string[];
 }
 
 export interface PackToolDescriptor {

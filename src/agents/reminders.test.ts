@@ -210,6 +210,21 @@ describe('agents/reminders', () => {
         expect((db.prepare('SELECT status FROM reminders WHERE id = 1').get() as any).status).toBe('done');
     });
 
+    it('retries claims left by an interrupted process', async () => {
+        db.prepare(
+            `
+            INSERT INTO reminders (chat_jid, sender_tg_id, content, remind_at, status, created_at)
+            VALUES (?, ?, ?, ?, 'processing', ?)
+        `
+        ).run('chat-1', '111', 'Recover me', new Date(Date.now() - 60_000).toISOString(), new Date().toISOString());
+
+        const mod = await loadModule();
+        await mod.checkReminders();
+
+        expect(mod.sendMessageToChat).toHaveBeenCalledTimes(1);
+        expect((db.prepare('SELECT status FROM reminders WHERE id = 1').get() as any).status).toBe('done');
+    });
+
     it('releases a failed reminder claim for retry', async () => {
         const mod = await loadModule();
         mod.sendMessageToChat.mockRejectedValueOnce(new Error('network down'));

@@ -13,6 +13,14 @@ type ReminderRow = {
     schedule_value: string | null;
 };
 
+let interruptedClaimsRecovered = false;
+
+function recoverInterruptedReminderClaims(db: ReturnType<typeof getDb>): void {
+    if (interruptedClaimsRecovered) return;
+    db.prepare("UPDATE reminders SET status = 'pending' WHERE status = 'processing'").run();
+    interruptedClaimsRecovered = true;
+}
+
 function claimDueReminders(db: ReturnType<typeof getDb>, now: string): ReminderRow[] {
     return db.transaction(() => {
         const due = db
@@ -77,6 +85,9 @@ function buildReminderNotification(
  */
 export async function checkReminders(): Promise<void> {
     const db = getDb();
+    // A fresh process owns no in-flight deliveries, so claims left by a prior
+    // process are safe to retry. This runs once and stays out of overlapping checks.
+    recoverInterruptedReminderClaims(db);
     const now = new Date().toISOString();
 
     const dueReminders = claimDueReminders(db, now);

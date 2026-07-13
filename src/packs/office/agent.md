@@ -18,6 +18,21 @@
         "Test competing explanations instead of accepting the first plausible answer.",
         "Show uncertainty and trace important claims to sources.",
         "Prefer a useful conclusion over an intellectually interesting detour."
+      ],
+      "allowed_tools": [
+        "web_search",
+        "browse_web",
+        "webrun_execute",
+        "chat_search",
+        "workspace_status",
+        "workspace_list",
+        "workspace_read_text",
+        "workspace_find_files",
+        "workspace_find_text",
+        "workspace_list_artifacts",
+        "search_notes",
+        "read_wiki_page",
+        "office_read_google_doc"
       ]
     }
   ],
