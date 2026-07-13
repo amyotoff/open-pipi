@@ -1,13 +1,16 @@
-You are helping an operator configure Open PiPi before deployment.
+You are helping an operator personalize Open PiPi after installation.
+
+Follow `AGENTS.md` and `CODING_AGENT_INSTALLATION.md`. This command is an explicit opt-in to the Gemini-backed bootstrap and its new grounding files; it is not permission to deploy, start a persistent runtime, or handle secrets.
 
 ## What this command does
 
 `/pipi_setup` runs the operator bootstrap flow:
+
 1. Collects a one-paragraph description of the assistant
-2. Calls `npm run bootstrap` to generate grounding files
+2. Calls `pnpm bootstrap` to generate grounding files
 3. Shows the generated files and .env variables to set
-4. Optionally updates `.env`
-5. Confirms the build is clean with `npm run typecheck`
+4. Hands `.env` changes to the operator
+5. Validates the generated content and TypeScript
 
 ---
 
@@ -25,21 +28,22 @@ Wait for the response before continuing.
 
 ## Step 2 — Run bootstrap
 
-Write the description to a temp file and pipe it to the bootstrap script to avoid shell escaping issues:
+Bootstrap can overwrite an existing `src/groundings/<slug>` when the generated slug collides. Never run it automatically. Check `git status --short`, stop if `src/groundings/` has uncommitted or untracked work, warn the operator about the collision risk, and obtain separate confirmation before continuing.
+
+Run the bootstrap with pnpm:
 
 ```bash
-echo "<description>" > /tmp/pipi_bootstrap_input.txt
-npx ts-node src/scripts/bootstrap.ts < /tmp/pipi_bootstrap_input.txt
-rm /tmp/pipi_bootstrap_input.txt
+pnpm bootstrap
 ```
 
-Show the full output to the user.
+Send the description to the running process over stdin. Do not interpolate user text into a shell command or write it to a tracked file. Show the full bootstrap output to the user.
 
 ---
 
 ## Step 3 — Show the generated files
 
 Read and display the contents of the created grounding files:
+
 - `src/groundings/<slug>/grounding.md`
 - `src/groundings/<slug>/people.md`
 - `src/groundings/<slug>/operating.md`
@@ -50,13 +54,14 @@ If they request changes, edit the files directly, then continue.
 
 ---
 
-## Step 4 — Update .env
+## Step 4 — Hand off .env values
 
-Check if `.env` exists. If it does, ask the user:
+Never open, print, or edit `.env`. Show the operator the two non-secret values emitted by bootstrap:
 
-> Should I add `BOOTSTRAP_PACK=<pack_id>` and `BOOTSTRAP_GROUNDING=<slug>` to your `.env`?
+- `BOOTSTRAP_PACK=<pack_id>`
+- `BOOTSTRAP_GROUNDING=<slug>`
 
-If yes, append the two lines. If `.env` does not exist, show them as a reminder to add manually.
+Ask the operator to add them privately, then run `pnpm setup:check -- --json` without inspecting the file.
 
 ---
 
@@ -65,7 +70,8 @@ If yes, append the two lines. If `.env` does not exist, show them as a reminder 
 Run:
 
 ```bash
-npm run typecheck
+pnpm content:check
+pnpm typecheck
 ```
 
 If it fails, show the errors and help fix them before finishing.
@@ -76,6 +82,6 @@ If it fails, show the errors and help fix them before finishing.
 
 Print the smoke prompts from the bootstrap output and say:
 
-> Deploy the bot, then try these prompts to verify it knows its context:
+> After you explicitly start the bot, try these prompts to verify it knows its context:
 
-List each prompt numbered.
+List each prompt numbered. Do not start or deploy the bot unless the operator separately asks for that action.

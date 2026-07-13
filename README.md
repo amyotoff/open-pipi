@@ -6,7 +6,7 @@
 
 Private memory. Shared know-how. Your hardware.
 
-[Install Open PiPi](#quickstart) · [Choose a Pack](#packs-and-plug-and-play) · [See the Flow](#telegram-flow)
+[Install Open PiPi](#quickstart) · [Install with a coding agent](CODING_AGENT_INSTALLATION.md) · [Choose a Pack](#packs-and-plug-and-play) · [See the Flow](#telegram-flow)
 
 ✓ **Team-native** · ✓ **Runs on Raspberry Pi 4** · ✓ **Token-frugal** · ✓ **Open source**
 
@@ -32,10 +32,12 @@ Private memory. Shared know-how. Your hardware.
 
 This repo is `pnpm`-first.
 
+Using a coding agent? Give it the [non-destructive, machine-checkable installation runbook](CODING_AGENT_INSTALLATION.md).
+
 ### 1. Requirements
 
 - Node.js 24+
-- `pnpm` 10 via Corepack
+- `pnpm` 10 (the repo pins `10.26.2`; Corepack is optional and is not bundled with every Node release)
 - a Telegram bot token
 - a Gemini API key
 - at least one owner ID
@@ -48,12 +50,13 @@ Optional:
 ### 2. Install
 
 ```bash
-corepack enable
 git clone https://github.com/amyotoff/open-pipi.git
 cd open-pipi
 cp .env.example .env
 pnpm install
 ```
+
+If `pnpm` is missing and your Node distribution includes Corepack, run `corepack enable` before the install block. Otherwise install pnpm 10 using your normal toolchain manager.
 
 Lean Telegram-only install:
 
