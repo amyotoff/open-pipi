@@ -34,6 +34,7 @@ import onboardingSkill from './onboarding.skill';
 import helperSkill from './helper.skill';
 import helperStatusSkill from './helper_status.skill';
 import brainSkill from './brain.skill';
+import familySkill from './family.skill';
 
 const ALL_SKILLS: SkillManifest[] = [
     memorySkill,
@@ -60,6 +61,7 @@ const ALL_SKILLS: SkillManifest[] = [
     helperSkill,
     helperStatusSkill,
     brainSkill,
+    familySkill,
 ];
 
 const DEFAULT_CAPABILITY_META: CapabilityMeta = {
@@ -92,10 +94,18 @@ export function getRegisteredTools(): FunctionDeclaration[] {
     return [...REGISTERED_TOOLS];
 }
 
+function isToolAllowedByRuntimeContext(toolName: string, context?: RuntimeExecutionContext): boolean {
+    if (!context) return true;
+    if (context.allowedTools && !context.allowedTools.includes(toolName)) return false;
+    return !(context.disabledTools || []).includes(toolName);
+}
+
 export function getToolDeclarationForContext(
     toolName: string,
     context?: RuntimeExecutionContext
 ): FunctionDeclaration | undefined {
+    if (!isToolAllowedByRuntimeContext(toolName, context)) return undefined;
+
     const packTool = getPackToolsForContext(context).find((tool) => tool.id === toolName);
     if (packTool) {
         return packTool.declaration;
@@ -171,7 +181,9 @@ export function getRegisteredToolsForContext(context?: RuntimeExecutionContext):
         .map((registration) => registration.declaration);
 
     const packTools = getPackToolsForContext(context).map((tool) => tool.declaration);
-    return [...skillTools, ...packTools];
+    return [...skillTools, ...packTools].filter(
+        (tool) => !!tool.name && isToolAllowedByRuntimeContext(tool.name, context)
+    );
 }
 
 export function getRegisteredHandlers(): Record<
@@ -187,13 +199,18 @@ export function getRegisteredHandlersForContext(
     const handlers = context
         ? Object.fromEntries(
               Array.from(SKILL_TOOL_REGISTRY.values())
-                  .filter((registration) => isSkillAllowedForContext(registration.skill, context))
+                  .filter(
+                      (registration) =>
+                          isSkillAllowedForContext(registration.skill, context) &&
+                          isToolAllowedByRuntimeContext(registration.name, context)
+                  )
                   .map((registration) => [registration.name, registration.handler])
           )
         : getRegisteredHandlers();
     if (!context) return handlers;
 
     for (const tool of getPackToolsForContext(context)) {
+        if (!isToolAllowedByRuntimeContext(tool.id, context)) continue;
         handlers[tool.id] = async (args: any, runtimeContext?: RuntimeExecutionContext) =>
             executePackTool(tool.id, args, runtimeContext || context);
     }

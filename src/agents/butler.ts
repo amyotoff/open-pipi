@@ -8,22 +8,7 @@ import { composeConversationContext } from '../core/context-composer';
 import { BRIEF_PIN_HOURS, createBriefPage, shouldCreateDailyBriefPage } from '../core/brief-pages';
 import { logError, logInfo, summarizeError, summarizeText } from '../utils/logging';
 import { addSpanAttributes, addSpanEvent, recordActiveSpanException, withSpan } from '../observability';
-
-function isSimpleMessage(text: string): boolean {
-    const t = text.toLowerCase().trim();
-    if (/^(привет|здравствуй|хай|хей|добр(ое|ый|ой)|салют|здоров|йо)(?:$|[\s.!?,])/i.test(t)) return true;
-    if (/^(спасибо|благодар|мерси|thx|thanks|спс|пасиб)(?:$|[\s.!?,])/i.test(t)) return true;
-    if (
-        /^(ок|окей|ладно|понял|ясно|хорошо|отлично|супер|класс|круто|ага|угу|да|нет|не надо|не нужно|ну ок)\s*[.!]?$/i.test(
-            t
-        )
-    )
-        return true;
-    if (/^(пока|спокойной|до завтра|good night|доброй ночи|сладких снов)(?:$|[\s.!?,])/i.test(t)) return true;
-    if (/^(который час|сколько время|какой день|какое число)\s*\??$/i.test(t)) return true;
-    if (/^(как дела|что нового|как ты)\s*\??$/i.test(t)) return true;
-    return false;
-}
+import { classifyMessageRoute } from '../core/local-triage';
 
 function isNoSendSentinel(text: string): boolean {
     const normalized = text
@@ -148,7 +133,8 @@ export async function handleButlerMessage(
             },
         },
         async () => {
-            const simple = isSimpleMessage(input.text);
+            const routing = await classifyMessageRoute(input.text);
+            const simple = routing.route === 'simple';
             const spaceId = input.spaceId;
             addSpanAttributes({ 'app.butler.simple': simple });
             logInfo('BUTLER', 'triage_start', {
@@ -156,6 +142,7 @@ export async function handleButlerMessage(
                 ref: input.channelRef,
                 sender: input.senderId,
                 simple,
+                routing_source: routing.source,
                 ...summarizeText(input.text),
             });
 
@@ -177,7 +164,7 @@ export async function handleButlerMessage(
                 const result = await processWithOllama(prompt, systemPrompt);
                 responseText = result.text;
                 addSpanAttributes({ 'app.butler.engine': result.fromOllama ? 'ollama' : 'gemini_fallback' });
-                logEvent('triage', { simple: true, ollama: result.fromOllama });
+                logEvent('triage', { simple: true, ollama: result.fromOllama, routing_source: routing.source });
                 logInfo('BUTLER', 'triage_complete', {
                     engine: result.fromOllama ? 'ollama' : 'gemini_fallback',
                     ...summarizeText(responseText),
@@ -198,7 +185,7 @@ export async function handleButlerMessage(
                 });
                 responseText = response.text;
                 addSpanAttributes({ 'app.butler.engine': 'gemini' });
-                logEvent('triage', { simple: false, ollama: false });
+                logEvent('triage', { simple: false, ollama: false, routing_source: routing.source });
                 logInfo('BUTLER', 'triage_complete', {
                     engine: 'gemini',
                     ...summarizeText(responseText),

@@ -25,7 +25,7 @@ import {
 } from '../observability';
 
 // Tools that take a long time and warrant a "working on it" heads-up
-const LONG_RUNNING_TOOLS = new Set(['groceries_search', 'browse_web', 'webrun_execute', 'web']);
+const LONG_RUNNING_TOOLS = new Set(['groceries_search', 'browse_web', 'webrun_execute', 'web', 'family_delegate']);
 
 const LONG_TASK_MESSAGES = [
     '🔍 Looking into it now...',
@@ -276,10 +276,17 @@ export async function processWithLLM(
                 const { getRegisteredToolsForContext, getRegisteredHandlersForContext } =
                     await import('../skills/_registry');
                 const registeredSkillTools = getRegisteredToolsForContext(context);
-                const skillTools = registeredSkillTools.filter((tool) => !isCorePrimitiveBackingTool(tool.name));
-                const allTools = advisorEnabled
-                    ? [...skillTools, ...CORE_TOOLBOX_TOOL_DECLARATIONS, LIST_SKILLS_TOOL, ADVISOR_TOOL]
-                    : [...skillTools, ...CORE_TOOLBOX_TOOL_DECLARATIONS, LIST_SKILLS_TOOL];
+                const hasExplicitToolAllowlist = Array.isArray(context.allowedTools);
+                const skillTools = hasExplicitToolAllowlist
+                    ? registeredSkillTools
+                    : registeredSkillTools.filter((tool) => !isCorePrimitiveBackingTool(tool.name));
+                const defaultTools = advisorEnabled
+                    ? [...CORE_TOOLBOX_TOOL_DECLARATIONS, LIST_SKILLS_TOOL, ADVISOR_TOOL]
+                    : [...CORE_TOOLBOX_TOOL_DECLARATIONS, LIST_SKILLS_TOOL];
+                const additionalTools = hasExplicitToolAllowlist
+                    ? defaultTools.filter((tool) => !!tool.name && context.allowedTools!.includes(tool.name))
+                    : defaultTools;
+                const allTools = [...skillTools, ...additionalTools];
                 addSpanAttributes({ 'app.llm.tool_declarations': allTools.length });
                 addSpanAttributes({
                     'app.llm.backing_tool_declarations_hidden': registeredSkillTools.length - skillTools.length,

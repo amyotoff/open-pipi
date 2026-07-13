@@ -182,4 +182,29 @@ describe('core/llm advisor strategy', () => {
         expect(names).toContain('project_create');
         expect(names).not.toContain('web_search');
     });
+
+    it('does not add broad core or meta tools to an exact nested-run allowlist', async () => {
+        const generateContent = vi.fn().mockResolvedValue({
+            usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 10 },
+            functionCalls: [],
+            text: 'Done',
+        });
+        const mod = await loadLlm({
+            generateContent,
+            registeredTools: [{ name: 'web_search' }],
+            coreTools: [{ name: 'web' }, { name: 'automations' }],
+            backingToolNames: ['web_search'],
+        });
+
+        await mod.processWithLLM([{ role: 'user', content: 'Research this' }], {
+            chatId: 'chat-1',
+            userId: '111',
+            allowedTools: ['web_search'],
+        });
+
+        const names = generateContent.mock.calls[0][0].config.tools[0].functionDeclarations.map(
+            (tool: any) => tool.name
+        );
+        expect(names).toEqual(['web_search']);
+    });
 });

@@ -202,6 +202,8 @@ Each pack can define:
 - default policies
 - authority presets
 - seeded scheduled tasks
+- optional literary-character behavioral calibration
+- optional family members for bounded delegation
 - optional pack-local tools
 
 ### What makes it plug-and-play
@@ -213,6 +215,7 @@ Minimal layout:
 ```text
 src/packs/my_pack/
   agent.md
+  character.md              # optional behavior-only calibration
   skills.md
   tools.md                  # optional
   tools/
@@ -222,6 +225,8 @@ src/packs/my_pack/
 What each file does:
 
 - `agent.md`: JSON frontmatter plus the actual system prompt
+- `family_members` in `agent.md`: optional delegated roles; each role declares its exact `allowed_tools` allowlist
+- `character.md`: optional decision-making calibration; keep speech imitation and fictional roleplay out of it
 - `skills.md`: JSON frontmatter describing enabled capabilities and optional hints
 - `tools.md`: human-readable notes for pack-specific tools
 - `tools/*.tool.js` or `*.tool.ts`: pack-local executable tools
@@ -486,6 +491,7 @@ Useful env vars:
 - `PIPI_ADVISOR_MAX_CALLS_PER_TURN`
 - `OLLAMA_URL`
 - `OLLAMA_MODEL`
+- `PIPI_LOCAL_ROUTING_ENABLED` (defaults to `true`; safe fallback routes uncertain messages to Gemini)
 
 OpenTelemetry is opt-in. It starts only if one of the OTLP env vars is configured:
 
@@ -582,6 +588,7 @@ The OAuth callback is intentionally public so Google can redirect to it, but it 
 | `GEMINI_ADVISOR_MODEL` | Stronger Gemini model used only for internal strategy consultations (default: `gemini-3-pro-preview`) |
 | `PIPI_ADVISOR_ENABLED` | Enables the internal advisor consultation tool for the executor |
 | `PIPI_ADVISOR_MAX_CALLS_PER_TURN` | Hard cap on advisor consultations during one user turn |
+| `PIPI_LOCAL_ROUTING_ENABLED` | Uses a fast local classifier for ambiguous routing and relevance-based group participation |
 | `OWNER_TG_IDS` | Comma-separated Telegram owner IDs |
 | `OWNER_IDENTITIES` | Comma-separated channel-qualified owner IDs |
 | `BOT_DISPLAY_NAME` | Name the assistant introduces itself with (default: `PiPi`) |

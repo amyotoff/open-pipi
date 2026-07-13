@@ -22,7 +22,8 @@
     "onboarding",
     "helper",
     "helper_status",
-    "brain"
+    "brain",
+    "family"
   ],
   "skill_hints": {
     "shopping": "Use for office supplies, groceries, and straightforward buy-later requests instead of reminders.",
@@ -30,6 +31,7 @@
     "projects": "Use when a task, follow-up, or artifact belongs to a longer-running initiative.",
     "history": "Use when the exact wording of a prior instruction or commitment matters.",
     "brain": "Use notebook notes for working observations and wiki pages for curated team knowledge.",
+    "family": "Use family_delegate when a bounded research subtask benefits from the Researcher role; pass a clear work contract and review the returned result.",
     "journal": "Use when the team needs a compact day-by-day chronology of what changed.",
     "rituals": "Use when the team wants simple recurring morning, evening, or weekly rituals without dealing with raw cron.",
     "tasks": "Use for recurring coordination and scheduled team reminders.",

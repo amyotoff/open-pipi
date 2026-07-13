@@ -79,6 +79,20 @@ export function validatePackRoot(
         if (!isRecord(pack.default_policies)) errors.push('default_policies must be an object');
         if (!isRecord(pack.authority_presets)) errors.push('authority_presets must be an object');
 
+        if (pack.family_members) {
+            const memberIds = new Set<string>();
+            for (const [index, member] of pack.family_members.entries()) {
+                const label = `family_members[${index}]`;
+                if (!isNonEmptyString(member.id)) errors.push(`${label}.id is required`);
+                else if (memberIds.has(member.id)) errors.push(`duplicate family member "${member.id}"`);
+                else memberIds.add(member.id);
+                if (!isNonEmptyString(member.role)) errors.push(`${label}.role is required`);
+                if (!isNonEmptyString(member.character)) errors.push(`${label}.character is required`);
+                validateStringArray(member.instructions, `${label}.instructions`, errors);
+                validateStringArray(member.allowed_tools, `${label}.allowed_tools`, errors);
+            }
+        }
+
         if (!Array.isArray(pack.seeded_tasks)) {
             errors.push('seeded_tasks must be an array');
         } else {

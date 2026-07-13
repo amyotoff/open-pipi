@@ -23,6 +23,7 @@ function materializeMissingPackShim(id: string): MaterializedAgent {
         ].join('\n'),
         skills_doc: '',
         tools_doc: '',
+        character_doc: '',
         core_toolbox: materializeCoreToolbox([]),
         pack_tools: [],
         source: 'static',
@@ -51,6 +52,7 @@ export function getAssistantPack(id: string = DEFAULT_INSTALLABLE_PACK_ID): Assi
         default_policies: agent.default_policies,
         authority_presets: agent.authority_presets,
         onboarding_hints: agent.onboarding_hints,
+        family_members: agent.family_members,
     };
 }
 

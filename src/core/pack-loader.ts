@@ -93,6 +93,7 @@ function materializePackFromRoot(root: string, strictTools: boolean): Materializ
     const agentPath = path.join(root, 'agent.md');
     const skillsPath = path.join(root, 'skills.md');
     const toolsPath = path.join(root, 'tools.md');
+    const characterPath = path.join(root, 'character.md');
 
     if (!fs.existsSync(agentPath)) throw new Error(`Missing required pack file ${agentPath}.`);
     if (!fs.existsSync(skillsPath)) throw new Error(`Missing required pack file ${skillsPath}.`);
@@ -100,6 +101,7 @@ function materializePackFromRoot(root: string, strictTools: boolean): Materializ
     const agentDoc = readJsonFrontmatter<InstallableAgentMeta>(agentPath);
     const skillsDoc = readJsonFrontmatter<InstallableSkillsMeta>(skillsPath);
     const toolsDoc = fs.existsSync(toolsPath) ? fs.readFileSync(toolsPath, 'utf-8').trim() : '';
+    const characterDoc = fs.existsSync(characterPath) ? fs.readFileSync(characterPath, 'utf-8').trim() : '';
     const packTools = loadPackTools(root, strictTools);
 
     return {
@@ -111,10 +113,14 @@ function materializePackFromRoot(root: string, strictTools: boolean): Materializ
         default_policies: agentDoc.meta.default_policies || {},
         authority_presets: agentDoc.meta.authority_presets || {},
         onboarding_hints: agentDoc.meta.onboarding_hints,
+        family_members: agentDoc.meta.family_members || [],
         system_prompt_path: agentPath,
-        system_prompt: agentDoc.body,
+        system_prompt: [agentDoc.body, characterDoc ? `[BEHAVIOR_CALIBRATION]\n${characterDoc}` : '']
+            .filter(Boolean)
+            .join('\n\n'),
         skills_doc: skillsDoc.body,
         tools_doc: toolsDoc,
+        character_doc: characterDoc,
         core_toolbox: materializeCoreToolbox(skillsDoc.meta.enabled_capabilities || []),
         pack_tools: packTools,
         source: 'installable',
