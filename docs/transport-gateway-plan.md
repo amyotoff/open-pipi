@@ -477,21 +477,33 @@ repo, and a fixture runs on every CI job rather than once by hand; re-running is
 integrity check passes; packs, groundings, memberships, and pre-`space_id` history all
 survive; no old data removed.
 
-### Phase 3 — Telegram normalizer + gateway
-*Behavior-preserving refactor. The largest and riskiest phase.*
+### Phase 3 — Telegram normalizer + gateway — **in progress**
+*Behavior-preserving refactor. The largest and riskiest phase, so it lands in pieces that
+each keep `pnpm verify` green.*
 
-- Telegram normalization moves `router.ts` → `transports/telegram/normalizer.ts`
+**Done:**
+
+- `transports/telegram/normalizer.ts` — typed structurally rather than against telegraf, so
+  it needs no SDK import and tests from plain fixtures. Decides two things Core would
+  otherwise have to: chat type collapsed into the shared closed set (unknown → `group`,
+  never `direct`), and whether a message was addressed to the assistant.
+- `gateway/binding-resolver.ts` and `gateway/participant-resolver.ts`, with the legacy
+  fallbacks intact and bootstrap policy per transport.
+- `ensureSpace` now binds inline — writing the resolver tests surfaced that a space created
+  at runtime had no binding until the next restart, the same hole the identity work had.
+
+**Remaining:**
+
+- `gateway/message-gateway.ts` + `gateway/participation.ts`; `router.ts` becomes a shim
+- `transports/telegram/adapter.ts` owning the bot, calling the normalizer and the gateway
 - Photo path: `bot.telegram.getFile()` moves into the adapter; butler receives a resolved
   attachment and stops importing telegraf
-- `router.ts` splits into `gateway/message-gateway.ts` + `gateway/participation.ts`;
-  `router.ts` remains a re-export shim
-- Binding and participant resolvers go live, legacy fallback intact
-- Inbound dedup via the `inserted` flag
-- The four parse sites from §1 are removed
-- Boundary allowlist shrinks to `transports/telegram/**`
+- Inbound dedup wired to the `inserted` flag
+- The remaining space-id parse sites removed
+- Boundary allowlist shrinks to `transports/telegram/**` and the size pin drops to 5
 
 **Done when:** Telegram behaves identically (commands, groups, DMs, photos, external groups);
-new test asserts a duplicate update runs the agent exactly once and replies once.
+a test asserts a duplicate update runs the agent exactly once and replies once.
 
 ### Phase 4 — Outbox and delivery worker
 
