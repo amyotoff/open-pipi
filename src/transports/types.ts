@@ -75,11 +75,22 @@ export interface IncomingMessage {
     endpoint: {
         id: string;
         type: TransportEndpointType;
+        title?: string | null;
     };
 
     threadId?: string;
 
     sender: IncomingSender;
+
+    /**
+     * The transport's judgement that this message was aimed at the assistant —
+     * an @mention, a reply to its own message, a direct channel.
+     *
+     * Only the transport can answer this: mentions are Telegram entities,
+     * Discord snowflakes, or email recipients. Core needs the answer, not the
+     * mechanism, so it gets a boolean instead of a bot username to match against.
+     */
+    addressedToAssistant?: boolean;
 
     content: {
         text?: string;
