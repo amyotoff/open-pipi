@@ -12,6 +12,20 @@
  */
 
 // ==========================================
+// Endpoints
+// ==========================================
+
+/**
+ * A closed set on purpose. Two independent producers have to agree on this
+ * value — the adapter that normalizes a live event, and the migration that
+ * backfills a binding from historical data — and a free-form string guarantees
+ * they eventually disagree. Adapters map their native type into this set
+ * (Telegram `private` -> `direct`, `supergroup` -> `group`) and keep the
+ * native value in `metadata` when it matters.
+ */
+export type TransportEndpointType = 'direct' | 'group' | 'channel' | 'thread';
+
+// ==========================================
 // Inbound
 // ==========================================
 
@@ -60,7 +74,7 @@ export interface IncomingMessage {
 
     endpoint: {
         id: string;
-        type: string;
+        type: TransportEndpointType;
     };
 
     threadId?: string;
@@ -136,7 +150,7 @@ export interface OutgoingMessage {
 
 export interface TransportDestination {
     endpointId: string;
-    endpointType: string;
+    endpointType: TransportEndpointType;
     threadId?: string;
 }
 

@@ -450,20 +450,32 @@ runtime in a half-migrated state.
 *new* violation — verified by temporarily adding both a `telegraf` import and a
 `channels/telegram` import to a core module and confirming each rule fires.
 
-### Phase 2 — Schema and migration
-*No behavior change. Nothing reads the new tables yet.*
+### Phase 2 — Schema and migration — **done** (`pnpm verify` green, 511 tests)
+*No behavior change at runtime. Nothing routes through the new tables yet.*
 
 - The tables and columns in §4
 - Backfill: one binding per existing space; one identity per existing resident (D3)
-- Backfill `messages.space_id = 'telegram:' || chat_jid WHERE space_id IS NULL` — this is
-  what makes the `COALESCE` fallback in `getRecentMessagesForSpace` removable in Phase 3
-  without orphaning legacy history
-- Migration report: counts written, ambiguous rows named, nothing merged heuristically
-- `storeMessage` returns `{ inserted: boolean }`
+- Migration report surfaced at boot, naming spaces and participants that need a human
+- `storeMessage` returns `{ inserted: boolean }` and records `transport` /
+  `transport_message_id`
 
-**Done when:** migration runs clean on an empty DB **and** on a copy of a real DB; re-running
-is a no-op; backfill unit-tested; no old data removed; legacy messages still load for their
-spaces.
+Two things the implementation found that the plan had wrong:
+
+- **`messages.space_id` was already backfilled** by an existing migration, so that item
+  was struck. The `COALESCE` fallback in the readers is therefore already redundant for any
+  migrated database and can go in Phase 3.
+- **The startup backfill alone leaves a hole.** A participant created *after* boot — anyone
+  who first writes to the bot today — would have no identity until the next restart, so the
+  Phase 3 resolver would miss them. `upsertResident` now ensures the identity inline, which
+  makes "every participant has at least one identity" continuously true instead of true
+  only after a restart. `splitLegacyPersonId` is the single place that knows the old
+  string convention, so retiring it later is a one-function change.
+
+**Done when:** migration runs clean on an empty DB and on a **synthetic pre-transport
+database** built from the shipped v2.5.0 schema — a real operator file cannot live in the
+repo, and a fixture runs on every CI job rather than once by hand; re-running is a no-op;
+integrity check passes; packs, groundings, memberships, and pre-`space_id` history all
+survive; no old data removed.
 
 ### Phase 3 — Telegram normalizer + gateway
 *Behavior-preserving refactor. The largest and riskiest phase.*

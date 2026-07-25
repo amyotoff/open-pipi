@@ -350,6 +350,76 @@ function createSchema(database: Database.Database): void {
             ON timeline_events(space_id, day, happened_at DESC);
         CREATE INDEX IF NOT EXISTS idx_timeline_events_space_happened
             ON timeline_events(space_id, happened_at DESC);
+
+        -- Which external endpoint routes into which space. A space may hold
+        -- several bindings (Telegram and Web at once); an endpoint holds one.
+        CREATE TABLE IF NOT EXISTS transport_bindings (
+            id TEXT PRIMARY KEY,
+            transport TEXT NOT NULL,
+            endpoint_id TEXT NOT NULL,
+            endpoint_type TEXT NOT NULL,
+            thread_id TEXT,
+            -- SQLite treats NULLs as distinct in unique indexes, so "no thread"
+            -- has to be a concrete value for the endpoint index to mean anything.
+            normalized_thread_id TEXT NOT NULL DEFAULT '',
+            space_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        -- Uniqueness spans every status: a disabled binding still owns its
+        -- endpoint, and re-enabling it is an UPDATE rather than a race.
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_transport_bindings_endpoint
+            ON transport_bindings(transport, endpoint_id, normalized_thread_id);
+        CREATE INDEX IF NOT EXISTS idx_transport_bindings_space
+            ON transport_bindings(space_id, status);
+
+        -- One person, many external accounts. participant_id points at
+        -- residents.tg_id, which stays the person id everything else uses.
+        CREATE TABLE IF NOT EXISTS participant_identities (
+            id TEXT PRIMARY KEY,
+            participant_id TEXT NOT NULL,
+            transport TEXT NOT NULL,
+            external_user_id TEXT NOT NULL,
+            username TEXT,
+            display_name TEXT,
+            verified_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_participant_identities_external
+            ON participant_identities(transport, external_user_id);
+        CREATE INDEX IF NOT EXISTS idx_participant_identities_participant
+            ON participant_identities(participant_id);
+
+        -- Durable outbound queue. Entries are written before any send is
+        -- attempted, so a crash mid-delivery loses nothing.
+        CREATE TABLE IF NOT EXISTS outbox (
+            id TEXT PRIMARY KEY,
+            idempotency_key TEXT NOT NULL,
+            space_id TEXT,
+            message_id TEXT,
+            transport TEXT NOT NULL,
+            endpoint_id TEXT NOT NULL,
+            endpoint_type TEXT NOT NULL DEFAULT '',
+            thread_id TEXT,
+            payload_json TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued',
+            attempts INTEGER NOT NULL DEFAULT 0,
+            next_retry_at TEXT,
+            last_error TEXT,
+            claimed_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            sent_at TEXT
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_outbox_idempotency
+            ON outbox(idempotency_key);
+        CREATE INDEX IF NOT EXISTS idx_outbox_status_next_retry
+            ON outbox(status, next_retry_at);
+        -- Delivery is FIFO per endpoint, so the worker reads in this order.
+        CREATE INDEX IF NOT EXISTS idx_outbox_endpoint_created
+            ON outbox(transport, endpoint_id, created_at);
     `);
 }
 
@@ -433,6 +503,22 @@ function runMigrations(database: Database.Database): void {
     } catch {}
     try {
         database.exec("ALTER TABLE spaces ADD COLUMN grounding_pack_id TEXT DEFAULT 'jeeves_personal'");
+    } catch {}
+    // Human-facing space identity, so Web routes never have to expose or parse
+    // a space id (which still carries a transport prefix for historical rows).
+    try {
+        database.exec('ALTER TABLE spaces ADD COLUMN slug TEXT');
+    } catch {}
+    try {
+        database.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_spaces_slug ON spaces(slug) WHERE slug IS NOT NULL');
+    } catch {}
+    // Which transport a message came from, and its id on that transport —
+    // needed to reply in-thread once delivery is asynchronous.
+    try {
+        database.exec('ALTER TABLE messages ADD COLUMN transport TEXT');
+    } catch {}
+    try {
+        database.exec('ALTER TABLE messages ADD COLUMN transport_message_id TEXT');
     } catch {}
     try {
         database.exec('ALTER TABLE projects ADD COLUMN active_pack_id TEXT');
@@ -771,6 +857,87 @@ function runMigrations(database: Database.Database): void {
         WHERE space_id IS NULL
           AND 1 = (SELECT COUNT(*) FROM spaces);
     `);
+
+    backfillTransportTopology(database);
+}
+
+/**
+ * Give every pre-existing space a transport binding and every pre-existing
+ * resident a transport identity, so routing can stop reading `spaces.channel`
+ * and person ids can stop being parsed for their transport prefix.
+ *
+ * Purely additive and safe to re-run: nothing is dropped, and every statement
+ * is a conditional insert. Existing Telegram chats keep working without the
+ * operator reconnecting anything.
+ */
+function backfillTransportTopology(database: Database.Database): void {
+    // A legacy space stores exactly one endpoint, in `channel` + `external_ref`.
+    // `spaces` already enforces UNIQUE(channel, external_ref), so this can never
+    // collide with the binding endpoint index.
+    database.exec(`
+        INSERT INTO transport_bindings (
+            id, transport, endpoint_id, endpoint_type, thread_id,
+            normalized_thread_id, space_id, status, created_at, updated_at
+        )
+        SELECT
+            'binding:' || s.id,
+            s.channel,
+            s.external_ref,
+            CASE WHEN s.kind LIKE '%group%' THEN 'group' ELSE 'direct' END,
+            NULL,
+            '',
+            s.id,
+            CASE WHEN UPPER(COALESCE(s.status, 'ACTIVE')) = 'ACTIVE' THEN 'active' ELSE 'disabled' END,
+            COALESCE(s.created_at, datetime('now')),
+            datetime('now')
+        FROM spaces s
+        WHERE COALESCE(s.channel, '') != ''
+          -- An endpoint-less space cannot be routed to. Inventing a binding for
+          -- it would hide that; leaving it out surfaces it in the topology
+          -- report for a human to look at.
+          AND COALESCE(s.external_ref, '') != ''
+          AND NOT EXISTS (
+              SELECT 1 FROM transport_bindings b
+              WHERE b.transport = s.channel
+                AND b.endpoint_id = s.external_ref
+                AND b.normalized_thread_id = ''
+          );
+    `);
+
+    // Person ids carry their transport by string convention: a bare id is
+    // Telegram, anything else is "<transport>:<external id>". Splitting on the
+    // first colon recovers the pair without guessing.
+    //
+    // OR IGNORE, not merge: if two residents somehow claim one external
+    // account, the first keeps it and the mismatch surfaces in the topology
+    // report rather than silently fusing two people.
+    database.exec(`
+        INSERT OR IGNORE INTO participant_identities (
+            id, participant_id, transport, external_user_id,
+            username, display_name, created_at, updated_at
+        )
+        SELECT
+            'identity:' || r.tg_id,
+            r.tg_id,
+            CASE
+                WHEN INSTR(r.tg_id, ':') > 0 THEN SUBSTR(r.tg_id, 1, INSTR(r.tg_id, ':') - 1)
+                ELSE 'telegram'
+            END,
+            CASE
+                WHEN INSTR(r.tg_id, ':') > 0 THEN SUBSTR(r.tg_id, INSTR(r.tg_id, ':') + 1)
+                ELSE r.tg_id
+            END,
+            r.username,
+            r.display_name,
+            COALESCE(r.joined_at, datetime('now')),
+            datetime('now')
+        FROM residents r
+        WHERE r.tg_id IS NOT NULL
+          AND r.tg_id != ''
+          AND NOT EXISTS (
+              SELECT 1 FROM participant_identities pi WHERE pi.participant_id = r.tg_id
+          );
+    `);
 }
 
 export function initDatabase(): void {
@@ -826,8 +993,42 @@ export function getResident(tg_id: string): Resident | undefined {
         | undefined;
 }
 
+/**
+ * Recover the (transport, external account) pair a legacy person id encodes.
+ *
+ * Person ids carry their transport by string convention: a bare id is Telegram,
+ * anything else is "<transport>:<external id>". This is the one place that
+ * knows it, so the convention can be retired by changing a single function once
+ * every person id has an identity row.
+ */
+export function splitLegacyPersonId(personId: string): { transport: string; externalUserId: string } {
+    const separator = personId.indexOf(':');
+    if (separator <= 0) return { transport: 'telegram', externalUserId: personId };
+
+    return {
+        transport: personId.slice(0, separator),
+        externalUserId: personId.slice(separator + 1),
+    };
+}
+
 export function upsertResident(r: Partial<Resident> & { tg_id: string }): void {
     const existing = getResident(r.tg_id);
+    // Every participant keeps at least one identity from the moment it exists.
+    // Leaving that to the startup backfill would make the invariant hold only
+    // after a restart, and the resolver would silently miss anyone who joined
+    // since boot.
+    const legacy = splitLegacyPersonId(r.tg_id);
+    const ensureIdentity = () => {
+        if (!r.tg_id) return;
+        ensureParticipantIdentity({
+            participantId: r.tg_id,
+            transport: legacy.transport,
+            externalUserId: legacy.externalUserId,
+            username: r.username ?? existing?.username ?? null,
+            displayName: r.display_name ?? existing?.display_name ?? null,
+        });
+    };
+
     if (existing) {
         const toUpdate = { ...existing, ...r };
         getDb()
@@ -858,6 +1059,8 @@ export function upsertResident(r: Partial<Resident> & { tg_id: string }): void {
                 habits: r.habits || '',
             });
     }
+
+    ensureIdentity();
 }
 
 export function updateResidentHabits(tg_id: string, habits: string): void {
@@ -1667,6 +1870,240 @@ export function ensureTelegramSpace(chatJid: string, chatType: string = 'private
         title: title || chatJid,
         status: 'ACTIVE',
     });
+}
+
+// ==========================================
+// Transport bindings and participant identities
+// ==========================================
+
+export interface TransportBinding {
+    id: string;
+    transport: string;
+    endpoint_id: string;
+    endpoint_type: string;
+    thread_id: string | null;
+    normalized_thread_id: string;
+    space_id: string;
+    status: string;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface ParticipantIdentity {
+    id: string;
+    participant_id: string;
+    transport: string;
+    external_user_id: string;
+    username: string | null;
+    display_name: string | null;
+    verified_at: string | null;
+    created_at: string;
+    updated_at: string;
+}
+
+/** Empty string, not NULL — see the note on the endpoint unique index. */
+export function normalizeBindingThreadId(threadId?: string | null): string {
+    return threadId ? String(threadId) : '';
+}
+
+export function getTransportBinding(
+    transport: string,
+    endpointId: string,
+    threadId?: string | null
+): TransportBinding | undefined {
+    return getDb()
+        .prepare(
+            `
+        SELECT * FROM transport_bindings
+        WHERE transport = ? AND endpoint_id = ? AND normalized_thread_id = ?
+        LIMIT 1
+    `
+        )
+        .get(transport, endpointId, normalizeBindingThreadId(threadId)) as TransportBinding | undefined;
+}
+
+export function listTransportBindingsForSpace(
+    spaceId: string,
+    options?: { includeDisabled?: boolean }
+): TransportBinding[] {
+    const where = options?.includeDisabled ? 'space_id = ?' : "space_id = ? AND status = 'active'";
+
+    return getDb()
+        .prepare(`SELECT * FROM transport_bindings WHERE ${where} ORDER BY created_at ASC, id ASC`)
+        .all(spaceId) as TransportBinding[];
+}
+
+/**
+ * Bind an endpoint to a space, or return the binding that already owns it.
+ *
+ * An endpoint belongs to one space. Re-binding it elsewhere is a deliberate
+ * move rather than a side effect of a message arriving, so this never steals an
+ * endpoint from another space — callers that mean to re-point one say so.
+ */
+export function ensureTransportBinding(input: {
+    transport: string;
+    endpointId: string;
+    endpointType: string;
+    threadId?: string | null;
+    spaceId: string;
+}): TransportBinding {
+    const existing = getTransportBinding(input.transport, input.endpointId, input.threadId);
+    if (existing) return existing;
+
+    const normalizedThreadId = normalizeBindingThreadId(input.threadId);
+    const now = nowIso();
+    const id = `binding:${input.transport}:${input.endpointId}${normalizedThreadId ? `:${normalizedThreadId}` : ''}`;
+
+    getDb()
+        .prepare(
+            `
+        INSERT INTO transport_bindings (
+            id, transport, endpoint_id, endpoint_type, thread_id,
+            normalized_thread_id, space_id, status, created_at, updated_at
+        )
+        VALUES (@id, @transport, @endpoint_id, @endpoint_type, @thread_id,
+                @normalized_thread_id, @space_id, 'active', @created_at, @updated_at)
+    `
+        )
+        .run({
+            id,
+            transport: input.transport,
+            endpoint_id: input.endpointId,
+            endpoint_type: input.endpointType,
+            thread_id: input.threadId ?? null,
+            normalized_thread_id: normalizedThreadId,
+            space_id: input.spaceId,
+            created_at: now,
+            updated_at: now,
+        });
+
+    return getTransportBinding(input.transport, input.endpointId, input.threadId)!;
+}
+
+export function getParticipantIdentity(transport: string, externalUserId: string): ParticipantIdentity | undefined {
+    return getDb()
+        .prepare('SELECT * FROM participant_identities WHERE transport = ? AND external_user_id = ? LIMIT 1')
+        .get(transport, externalUserId) as ParticipantIdentity | undefined;
+}
+
+export function listParticipantIdentities(participantId: string): ParticipantIdentity[] {
+    return getDb()
+        .prepare('SELECT * FROM participant_identities WHERE participant_id = ? ORDER BY created_at ASC, id ASC')
+        .all(participantId) as ParticipantIdentity[];
+}
+
+/**
+ * Attach an external account to a participant, refreshing the display fields.
+ *
+ * An external account already claimed by someone else is left alone: merging
+ * two people is a decision a human makes, never a side effect of a login.
+ */
+export function ensureParticipantIdentity(input: {
+    participantId: string;
+    transport: string;
+    externalUserId: string;
+    username?: string | null;
+    displayName?: string | null;
+}): ParticipantIdentity {
+    const existing = getParticipantIdentity(input.transport, input.externalUserId);
+    const now = nowIso();
+
+    if (existing) {
+        if (existing.participant_id !== input.participantId) return existing;
+
+        getDb()
+            .prepare(
+                `
+            UPDATE participant_identities
+            SET username = COALESCE(@username, username),
+                display_name = COALESCE(@display_name, display_name),
+                updated_at = @updated_at
+            WHERE id = @id
+        `
+            )
+            .run({
+                id: existing.id,
+                username: input.username ?? null,
+                display_name: input.displayName ?? null,
+                updated_at: now,
+            });
+
+        return getParticipantIdentity(input.transport, input.externalUserId)!;
+    }
+
+    getDb()
+        .prepare(
+            `
+        INSERT INTO participant_identities (
+            id, participant_id, transport, external_user_id,
+            username, display_name, created_at, updated_at
+        )
+        VALUES (@id, @participant_id, @transport, @external_user_id,
+                @username, @display_name, @created_at, @updated_at)
+    `
+        )
+        .run({
+            id: `identity:${input.transport}:${input.externalUserId}`,
+            participant_id: input.participantId,
+            transport: input.transport,
+            external_user_id: input.externalUserId,
+            username: input.username ?? null,
+            display_name: input.displayName ?? null,
+            created_at: now,
+            updated_at: now,
+        });
+
+    return getParticipantIdentity(input.transport, input.externalUserId)!;
+}
+
+export interface TransportTopologyReport {
+    spaces: number;
+    bindings: number;
+    /** Spaces with no binding at all — these would fall back to legacy routing. */
+    spaces_without_binding: string[];
+    participants: number;
+    identities: number;
+    /** Participants whose external account was already claimed by someone else. */
+    participants_without_identity: string[];
+}
+
+/**
+ * Describe what the topology backfill produced, so an operator can see whether
+ * anything needs a human decision instead of discovering it during a rollout.
+ */
+export function getTransportTopologyReport(): TransportTopologyReport {
+    const database = getDb();
+    const countOf = (table: string): number =>
+        (database.prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as { count: number }).count;
+
+    const spacesWithoutBinding = database
+        .prepare(
+            `
+        SELECT s.id FROM spaces s
+        WHERE NOT EXISTS (SELECT 1 FROM transport_bindings b WHERE b.space_id = s.id)
+        ORDER BY s.id
+    `
+        )
+        .all() as Array<{ id: string }>;
+
+    const participantsWithoutIdentity = database
+        .prepare(
+            `
+        SELECT r.tg_id FROM residents r
+        WHERE NOT EXISTS (SELECT 1 FROM participant_identities pi WHERE pi.participant_id = r.tg_id)
+        ORDER BY r.tg_id
+    `
+        )
+        .all() as Array<{ tg_id: string }>;
+
+    return {
+        spaces: countOf('spaces'),
+        bindings: countOf('transport_bindings'),
+        spaces_without_binding: spacesWithoutBinding.map((row) => row.id),
+        participants: countOf('residents'),
+        identities: countOf('participant_identities'),
+        participants_without_identity: participantsWithoutIdentity.map((row) => row.tg_id),
+    };
 }
 
 export function listGroundingOverrides(
@@ -2561,6 +2998,10 @@ export interface Message {
     is_bot: number;
     chat_jid?: string;
     sender_tg_id?: string | null;
+    /** Transport the message travelled on, independent of the space id. */
+    transport?: string | null;
+    /** Id on that transport, used to reply in-thread after async delivery. */
+    transport_message_id?: string | null;
 }
 
 export interface MessageSearchHit {
@@ -2612,6 +3053,9 @@ function normalizeStoredMessage(
         throw new Error('storeMessage requires channel_ref (or legacy chat_jid).');
     }
 
+    // TODO(phase-3): the space_id fallback parses a transport out of a space id.
+    // Once every caller passes `channel` explicitly it can go, and with it the
+    // last assumption that a space id means anything.
     const inferredChannel = msg.channel || msg.space_id?.split(':', 1)[0] || 'telegram';
     const senderId = msg.sender_id ?? msg.sender_tg_id ?? null;
 
@@ -2622,6 +3066,8 @@ function normalizeStoredMessage(
         space_id: msg.space_id || buildSpaceId(inferredChannel, channelRef),
         chat_jid: channelRef,
         sender_tg_id: senderId,
+        transport: msg.transport ?? inferredChannel,
+        transport_message_id: msg.transport_message_id ?? null,
     };
 }
 
@@ -2640,16 +3086,32 @@ function listRecentMessagesByWhere(whereClause: string, values: SqlFilterValue[]
         .reverse() as Message[];
 }
 
-export function storeMessage(msg: Message): void {
-    getDb()
+/**
+ * Persist a message, reporting whether it was new.
+ *
+ * `inserted: false` means this exact message id is already stored — a replayed
+ * transport event. The gateway relies on that signal to run the agent exactly
+ * once per message, so the return value is the deduplication guarantee, not a
+ * convenience.
+ */
+export function storeMessage(msg: Message): { inserted: boolean } {
+    const result = getDb()
         .prepare(
             `
-        INSERT INTO messages (id, space_id, chat_jid, sender_tg_id, content, timestamp, is_bot)
-        VALUES (@id, @space_id, @chat_jid, @sender_tg_id, @content, @timestamp, @is_bot)
+        INSERT INTO messages (
+            id, space_id, chat_jid, sender_tg_id, content, timestamp, is_bot,
+            transport, transport_message_id
+        )
+        VALUES (
+            @id, @space_id, @chat_jid, @sender_tg_id, @content, @timestamp, @is_bot,
+            @transport, @transport_message_id
+        )
         ON CONFLICT(id) DO NOTHING
     `
         )
         .run(normalizeStoredMessage(msg));
+
+    return { inserted: result.changes > 0 };
 }
 
 export function getRecentMessages(chat_jid: string, limit: number = 30): Message[] {

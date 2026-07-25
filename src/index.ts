@@ -102,6 +102,21 @@ async function bootstrap() {
         );
     }
 
+    const topology = db.getTransportTopologyReport();
+    console.log(
+        `[BOOT] Transport topology: ${topology.bindings} binding(s) for ${topology.spaces} space(s), ${topology.identities} identity(ies) for ${topology.participants} participant(s)`
+    );
+    if (topology.spaces_without_binding.length > 0) {
+        console.warn(
+            `[BOOT] ${topology.spaces_without_binding.length} space(s) have no transport binding and fall back to legacy routing: ${topology.spaces_without_binding.join(', ')}`
+        );
+    }
+    if (topology.participants_without_identity.length > 0) {
+        console.warn(
+            `[BOOT] ${topology.participants_without_identity.length} participant(s) have no transport identity: ${topology.participants_without_identity.join(', ')}`
+        );
+    }
+
     scheduler.startTaskScheduler();
     await api.startApiServer();
     closeApiServerRef = () => api.stopApiServer();
