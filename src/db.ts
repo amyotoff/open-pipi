@@ -1864,6 +1864,19 @@ export function ensureSpace(
         grounding_pack_id: options?.grounding_pack_id,
         policy_json: options?.policy_json,
     });
+
+    // Every space keeps a binding from the moment it exists. Leaving this to the
+    // startup backfill would make the invariant hold only after a restart, and
+    // a space created today would route through the legacy columns until then.
+    // ensureTransportBinding returns early when the endpoint is already bound,
+    // so this stays a single indexed read on the inbound path.
+    ensureTransportBinding({
+        transport: channel,
+        endpointId: externalRef,
+        endpointType: (options?.kind || 'direct_chat') === 'direct_chat' ? 'direct' : 'group',
+        spaceId: id,
+    });
+
     return getSpace(id)!;
 }
 

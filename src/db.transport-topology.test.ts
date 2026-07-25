@@ -419,6 +419,20 @@ describe('transport bindings and identities', () => {
         });
     });
 
+    it('binds a space created at runtime without waiting for a restart', async () => {
+        await withFreshDbModule((dbModule) => {
+            // The startup backfill has already run by now, so if ensureSpace did
+            // not bind, this space would route through the legacy columns until
+            // the next boot.
+            dbModule.ensureSpace('telegram', '-2002', { kind: 'group_chat', title: 'Fresh' });
+
+            const binding = dbModule.getTransportBinding('telegram', '-2002');
+            expect(binding?.space_id).toBe('telegram:-2002');
+            expect(binding?.endpoint_type).toBe('group');
+            expect(dbModule.getTransportTopologyReport().spaces_without_binding).toEqual([]);
+        });
+    });
+
     it('gives a backfilled binding the same id the runtime would have chosen', async () => {
         await withFreshDbModule((dbModule) => {
             dbModule.ensureSpace('telegram', '-1001234', { kind: 'group_chat' });
