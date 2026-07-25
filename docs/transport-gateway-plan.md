@@ -216,14 +216,25 @@ is exactly the spec's "must support a third without touching Core" bar.
 
 ### D11 — The boundary is enforced by a test, not by discipline.
 
-[repository-contract.test.ts](../src/scripts/repository-contract.test.ts) already reads source
-files and asserts invariants. A new case there asserts that `telegraf`, `discord.js`,
-`@whiskeysockets/baileys`, and `nodemailer` are imported **only** from an explicit file
-allowlist.
+Following the source-reading assertion pattern already used by
+[repository-contract.test.ts](../src/scripts/repository-contract.test.ts),
+[boundary.test.ts](../src/transports/boundary.test.ts) asserts two rules. It lives beside
+the boundary it protects rather than with the release invariants, because an adapter author
+is the person who needs to find it.
 
-The allowlist ships in Phase 1 **already containing the current violations**, each marked
-`// TODO(phase-3)`. Debt that is visible and prevented from growing beats debt that is
-invisible. Phase 3 shrinks the list; the test guarantees it never grows.
+1. **SDK rule:** `telegraf`, `discord.js`, `@whiskeysockets/baileys`, `@hapi/boom`, and
+   `nodemailer` are importable only from an explicit per-package file allowlist.
+2. **Runtime rule:** modules holding a live transport connection (the Telegram bot
+   singleton and its senders) are importable only from composition roots and the
+   transport's own siblings — never from core, agents, or skills. This is the rule that
+   catches the indirect leak, where a module imports `channels/telegram` for `bot` instead
+   of importing `telegraf` itself.
+
+Both allowlists ship in Phase 1 **already containing the current violations**, each marked
+`// TODO(phase-3)`, plus an assertion pinning their exact size. Debt that is visible and
+prevented from growing beats debt that is invisible. Phase 3 shrinks the lists; the test
+guarantees they never grow, and the size pin forces the allowlist entry to be deleted in
+the same PR that removes the violation.
 
 ### D12 — `pipi.local` / mDNS is deferred.
 
@@ -424,15 +435,20 @@ ALTER TABLE messages ADD COLUMN transport_message_id TEXT;   -- reply threading
 Seven phases. **Each merges independently with `pnpm verify` green.** No phase leaves the
 runtime in a half-migrated state.
 
-### Phase 1 — Contracts and the boundary test
+### Phase 1 — Contracts and the boundary test — **done** (`pnpm verify` green, 497 tests)
 *No behavior change. Nothing imports the new types yet.*
 
-- `src/transports/types.ts`, `src/transports/registry.ts`
-- Contract test: transport SDKs importable only from an explicit allowlist, seeded with
-  today's four violations marked `// TODO(phase-3)` (D11)
+- `src/transports/types.ts` — the narrow waist, plus `buildIncomingMessageId` (D7) and
+  `normalizeThreadId` (§4), and the full `AgentOutputEvent` union including the
+  not-yet-produced `text_delta` (D9)
+- `src/transports/registry.ts` — lifecycle owner; optional transports fail soft, required
+  ones abort and unwind the transports that already started
+- `src/transports/boundary.test.ts` — both rules from D11, seeded with today's violations
+  and a size pin
 
 **Done when:** types compile, registry unit-tested, allowlist test green and failing on any
-*new* violation.
+*new* violation — verified by temporarily adding both a `telegraf` import and a
+`channels/telegram` import to a core module and confirming each rule fires.
 
 ### Phase 2 — Schema and migration
 *No behavior change. Nothing reads the new tables yet.*
