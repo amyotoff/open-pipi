@@ -880,7 +880,10 @@ function backfillTransportTopology(database: Database.Database): void {
             normalized_thread_id, space_id, status, created_at, updated_at
         )
         SELECT
-            'binding:' || s.id,
+            -- Built from the endpoint, not the space id, so this agrees with
+            -- ensureTransportBinding by construction rather than by coincidence
+            -- of legacy space ids happening to be "<channel>:<external ref>".
+            'binding:' || s.channel || ':' || s.external_ref,
             s.channel,
             s.external_ref,
             CASE WHEN s.kind LIKE '%group%' THEN 'group' ELSE 'direct' END,
@@ -2011,20 +2014,27 @@ export function ensureParticipantIdentity(input: {
     if (existing) {
         if (existing.participant_id !== input.participantId) return existing;
 
+        // upsertResident sits on a hot path — every command resolves a sender —
+        // so an unconditional UPDATE here would write to disk on each one and
+        // churn updated_at for nothing. Only write when something actually moved.
+        const nextUsername = input.username ?? existing.username;
+        const nextDisplayName = input.displayName ?? existing.display_name;
+        if (nextUsername === existing.username && nextDisplayName === existing.display_name) {
+            return existing;
+        }
+
         getDb()
             .prepare(
                 `
             UPDATE participant_identities
-            SET username = COALESCE(@username, username),
-                display_name = COALESCE(@display_name, display_name),
-                updated_at = @updated_at
+            SET username = @username, display_name = @display_name, updated_at = @updated_at
             WHERE id = @id
         `
             )
             .run({
                 id: existing.id,
-                username: input.username ?? null,
-                display_name: input.displayName ?? null,
+                username: nextUsername,
+                display_name: nextDisplayName,
                 updated_at: now,
             });
 
@@ -3066,7 +3076,11 @@ function normalizeStoredMessage(
         space_id: msg.space_id || buildSpaceId(inferredChannel, channelRef),
         chat_jid: channelRef,
         sender_tg_id: senderId,
-        transport: msg.transport ?? inferredChannel,
+        // Deliberately not inferred from the space id. That guess is right only
+        // while every space id happens to start with its channel, and it would
+        // start writing nonsense the moment one does not. An unrecorded
+        // transport is honest; a wrong one is a trap.
+        transport: msg.transport ?? msg.channel ?? null,
         transport_message_id: msg.transport_message_id ?? null,
     };
 }

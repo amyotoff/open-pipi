@@ -387,6 +387,57 @@ describe('transport bindings and identities', () => {
         });
     });
 
+    it('does not write when re-resolving an unchanged identity', async () => {
+        await withFreshDbModule((dbModule) => {
+            dbModule.upsertResident({ tg_id: '777', username: 'alex', display_name: 'Alex' });
+            const before = dbModule.getParticipantIdentity('telegram', '777')!;
+
+            // Jump the clock a minute, so a write cannot land on the same
+            // timestamp by accident: comparing real timestamps would let this
+            // pass spuriously whenever both calls fall in one millisecond.
+            vi.useFakeTimers();
+            vi.setSystemTime(new Date(Date.parse(before.updated_at) + 60_000));
+            try {
+                // Every command resolves its sender through upsertResident, so
+                // a write here would mean disk traffic on each one.
+                dbModule.upsertResident({ tg_id: '777', username: 'alex', display_name: 'Alex' });
+                dbModule.upsertResident({ tg_id: '777', role: 'owner' });
+            } finally {
+                vi.useRealTimers();
+            }
+
+            expect(dbModule.getParticipantIdentity('telegram', '777')!.updated_at).toBe(before.updated_at);
+        });
+    });
+
+    it('records a changed display name on the identity', async () => {
+        await withFreshDbModule((dbModule) => {
+            dbModule.upsertResident({ tg_id: '777', username: 'alex', display_name: 'Alex' });
+            dbModule.upsertResident({ tg_id: '777', username: 'alex', display_name: 'Alexander' });
+
+            expect(dbModule.getParticipantIdentity('telegram', '777')?.display_name).toBe('Alexander');
+        });
+    });
+
+    it('gives a backfilled binding the same id the runtime would have chosen', async () => {
+        await withFreshDbModule((dbModule) => {
+            dbModule.ensureSpace('telegram', '-1001234', { kind: 'group_chat' });
+        });
+
+        await withFreshDbModule((dbModule) => {
+            const backfilled = dbModule.getTransportBinding('telegram', '-1001234')!;
+            const viaRuntime = dbModule.ensureTransportBinding({
+                transport: 'telegram',
+                endpointId: '-1001234',
+                endpointType: 'group',
+                spaceId: 'telegram:-1001234',
+            });
+
+            expect(viaRuntime.id).toBe(backfilled.id);
+            expect(dbModule.getTransportTopologyReport().bindings).toBe(1);
+        });
+    });
+
     it('never reassigns an external account already claimed by another participant', async () => {
         await withFreshDbModule((dbModule) => {
             dbModule.upsertResident({ tg_id: '777', display_name: 'Alex' });
