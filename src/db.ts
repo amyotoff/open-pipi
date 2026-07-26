@@ -1844,6 +1844,20 @@ export function updateSpaceGroundingPack(spaceId: string, groundingPackId: strin
     });
 }
 
+/**
+ * Archive a space, or bring it back.
+ *
+ * Archiving hides it: the Web client lists only `ACTIVE` spaces, and so do the
+ * background passes that sweep every space looking for work. Nothing is
+ * deleted — history, memory and bindings all stay where they are.
+ */
+export function updateSpaceStatus(spaceId: string, status: 'ACTIVE' | 'ARCHIVED'): void {
+    const existing = getSpace(spaceId);
+    if (!existing) return;
+
+    upsertSpace({ ...existing, status });
+}
+
 export function updateSpacePolicy(spaceId: string, patch: Record<string, unknown>): void {
     const existing = getSpace(spaceId);
     if (!existing) return;

@@ -157,12 +157,25 @@ ever wanted, that is its own design, not a side effect of a dashboard.
 
 ### Delivery order
 
-- **8a — read-only dashboard**: all five views, zero writes. Smallest reviewable slice,
-  already useful (today the only window into the runtime is `sqlite3` and logs).
-- **8b — writes**: the table above. Each write gets an access test (non-owner → 404) and a
-  log assertion.
+- **8a — read-only dashboard** *(shipped)*: all five views, zero writes. Smallest reviewable
+  slice, already useful (today the only window into the runtime is `sqlite3` and logs).
+- **8b — writes** *(shipped)*: the table above, as two routes rather than five —
+  `PATCH /api/admin/spaces/:id` for anything about a space, and
+  `POST /api/admin/delivery/:id/requeue`. Every value is checked against the same list the
+  client is offered, so a hand-written request cannot reach a state the UI could not.
 - **8c — deliberately excluded**: killswitch toggle, env editing, wiki editing, memory
   editing, user management. Each is listed so its absence reads as a decision.
+
+Two things the implementation settled that the plan had left open:
+
+- **Archiving has to mean "stop here".** Status alone only hides a space from the lists;
+  the assistant would go on answering in it. Archiving therefore also sets `channel_mode`
+  to `off`. Restoring does not turn it back on — which mode to come back in is the owner's
+  call, and the dropdown is right there.
+- **A space can vanish under the person reading it.** Archiving one that is open in the
+  chat pane used to leave its history on screen with a live composer. The client now drops
+  the active space whenever it disappears from the list, which covers removed membership
+  as well.
 
 **Done when:** an owner can see health, spaces, delivery, wiki, and memory from a browser;
 a member sees no trace of `/api/admin`; every write is logged; `pnpm verify` green.

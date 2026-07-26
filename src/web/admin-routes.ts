@@ -8,29 +8,44 @@
  * than 403 — the same rule the space routes follow, because telling someone an
  * admin surface exists is itself a disclosure.
  *
- * Settings that live in `.env` — tokens, owners, hosts — are shown read-only
- * and edited in the file. A dashboard that edits credentials is an attack
- * surface, not a convenience.
+ * The few writes it does have change only what already lives in the database:
+ * how a space behaves, and whether a failed delivery gets another go. Settings
+ * that live in `.env` — tokens, owners, hosts — are edited in the file. A
+ * dashboard that edits credentials is an attack surface, not a convenience.
  */
 
-import type { Express, NextFunction, Response } from 'express';
+import type { Express, NextFunction, RequestHandler, Response } from 'express';
 import {
     getDb,
     getMemoryEntries,
     getResident,
+    getSpace,
     getTransportTopologyReport,
     listSpaces,
     listTransportBindingsForSpace,
+    logEvent,
+    updateSpaceAssistantPack,
+    updateSpaceGroundingPack,
+    updateSpacePolicy,
+    updateSpaceStatus,
     type Space,
 } from '../db';
-import { countOutboxByStatus } from '../gateway/outbox';
+import { countOutboxByStatus, getOutboxEntry, requeueDelivery } from '../gateway/outbox';
 import { getHealthState, getSystemMetrics } from '../core/healthcheck';
 import { listTransports } from '../transports/registry';
-import { resolveSpaceOperationalSettings } from '../core/space-preferences';
+import { listInstallablePackIds } from '../core/pack-loader';
+import { listInstallableGroundingIds } from '../core/grounding-loader';
+import { resolveSpaceOperationalSettings, type SpaceChannelMode } from '../core/space-preferences';
+import { logInfo } from '../utils/logging';
 import { countSubscribers } from './events';
 import type { AuthedRequest } from './routes';
 
 const NOT_FOUND = { ok: false, error: 'Not found.' };
+
+const CHANNEL_MODES: SpaceChannelMode[] = ['off', 'notify_only', 'inbox', 'full'];
+const SPACE_STATUSES = ['ACTIVE', 'ARCHIVED'] as const;
+
+type SpaceStatus = (typeof SPACE_STATUSES)[number];
 
 /**
  * Owner-only, and silent about it.
@@ -70,8 +85,16 @@ function describeSpace(space: Space) {
 
 export type SessionGuard = (req: AuthedRequest, res: Response, next: NextFunction) => void;
 
-export function mountAdminRoutes(app: Express, requireSession: SessionGuard): void {
-    const guard = [requireSession, requireOwner];
+export interface AdminRouteDependencies {
+    requireSession: SessionGuard;
+    /** The same JSON-only rule the rest of the client's writes follow. */
+    requireJsonBody: RequestHandler;
+    jsonBody: RequestHandler;
+}
+
+export function mountAdminRoutes(app: Express, deps: AdminRouteDependencies): void {
+    const guard = [deps.requireSession, requireOwner];
+    const writeGuard = [...guard, deps.requireJsonBody, deps.jsonBody];
 
     /** Is the assistant healthy, and is anything stuck? */
     app.get('/api/admin/overview', guard, (_req: AuthedRequest, res: Response) => {
@@ -95,9 +118,77 @@ export function mountAdminRoutes(app: Express, requireSession: SessionGuard): vo
         });
     });
 
-    /** Every space, with the things that decide how it behaves. */
+    /**
+     * Every space, with the things that decide how it behaves — and the values
+     * those things may take, so the client offers choices rather than a text
+     * box that can be typed wrong.
+     */
     app.get('/api/admin/spaces', guard, (_req: AuthedRequest, res: Response) => {
-        res.json({ ok: true, spaces: listSpaces().map(describeSpace) });
+        res.json({
+            ok: true,
+            spaces: listSpaces().map(describeSpace),
+            choices: {
+                channel_mode: CHANNEL_MODES,
+                pack: listInstallablePackIds(),
+                grounding: listInstallableGroundingIds(),
+                status: SPACE_STATUSES,
+            },
+        });
+    });
+
+    /**
+     * Change how a space behaves.
+     *
+     * Every field is optional and every value is checked against the same list
+     * the client is offered, so a hand-written request cannot put a space into
+     * a state the UI could not.
+     */
+    app.patch('/api/admin/spaces/:spaceId', writeGuard, (req: AuthedRequest, res: Response) => {
+        const spaceId = String(req.params.spaceId);
+        if (!getSpace(spaceId)) {
+            res.status(404).json(NOT_FOUND);
+            return;
+        }
+
+        const body = (req.body ?? {}) as Record<string, unknown>;
+        const changes: Record<string, string> = {};
+
+        for (const [field, allowed] of [
+            ['channel_mode', CHANNEL_MODES as readonly string[]],
+            ['pack', listInstallablePackIds()],
+            ['grounding', listInstallableGroundingIds()],
+            ['status', SPACE_STATUSES as readonly string[]],
+        ] as const) {
+            const value = body[field];
+            if (value === undefined) continue;
+            if (typeof value !== 'string' || !allowed.includes(value)) {
+                res.status(400).json({ ok: false, error: `${field} must be one of: ${allowed.join(', ')}.` });
+                return;
+            }
+            changes[field] = value;
+        }
+
+        if (Object.keys(changes).length === 0) {
+            res.status(400).json({ ok: false, error: 'Nothing to change.' });
+            return;
+        }
+
+        if (changes.pack) updateSpaceAssistantPack(spaceId, changes.pack);
+        if (changes.grounding) updateSpaceGroundingPack(spaceId, changes.grounding);
+        if (changes.status) {
+            updateSpaceStatus(spaceId, changes.status as SpaceStatus);
+            // Archiving has to mean "stop here". Status alone only hides the
+            // space from lists; the assistant would go on answering in it,
+            // which is exactly what someone archiving it does not expect.
+            if (changes.status === 'ARCHIVED' && changes.channel_mode === undefined) changes.channel_mode = 'off';
+        }
+        if (changes.channel_mode) updateSpacePolicy(spaceId, { channel_mode: changes.channel_mode });
+
+        const by = req.session!.participantId;
+        logEvent('admin_space_update', { space_id: spaceId, by, changes });
+        logInfo('WEB', 'admin_space_update', { space_id: spaceId, by, ...changes });
+
+        res.json({ ok: true, space: describeSpace(getSpace(spaceId)!) });
     });
 
     /** What is stuck, and why. */
@@ -115,6 +206,33 @@ export function mountAdminRoutes(app: Express, requireSession: SessionGuard): vo
             .all();
 
         res.json({ ok: true, counts: countOutboxByStatus(), entries });
+    });
+
+    /**
+     * Try a given-up delivery again.
+     *
+     * The delivery worker polls, so a re-queued entry goes out on its next
+     * pass — there is nothing to kick.
+     */
+    app.post('/api/admin/delivery/:id/requeue', writeGuard, (req: AuthedRequest, res: Response) => {
+        const id = String(req.params.id);
+        const entry = requeueDelivery(id);
+
+        if (!entry) {
+            // Either it does not exist or it is not failed. Both mean the same
+            // thing to the person clicking: there is nothing here to retry.
+            res.status(getOutboxEntry(id) ? 409 : 404).json({
+                ok: false,
+                error: getOutboxEntry(id) ? 'That delivery is not failed.' : 'Not found.',
+            });
+            return;
+        }
+
+        const by = req.session!.participantId;
+        logEvent('admin_delivery_requeue', { outbox_id: id, transport: entry.transport, by });
+        logInfo('WEB', 'admin_delivery_requeue', { outbox_id: id, transport: entry.transport, by });
+
+        res.json({ ok: true, entry: { id: entry.id, status: entry.status, attempts: entry.attempts } });
     });
 
     /**

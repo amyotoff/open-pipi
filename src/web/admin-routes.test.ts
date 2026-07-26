@@ -67,6 +67,16 @@ async function get(routePath: string, cookie?: string) {
     return { status: response.status, body: parseJson(text) };
 }
 
+async function write(method: 'PATCH' | 'POST', routePath: string, body: unknown, cookie?: string) {
+    const response = await fetch(`${baseUrl}${routePath}`, {
+        method,
+        headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
+        body: JSON.stringify(body),
+    });
+    const text = await response.text();
+    return { status: response.status, body: parseJson(text) };
+}
+
 const ADMIN_ROUTES = [
     '/api/admin/overview',
     '/api/admin/spaces',
@@ -193,6 +203,17 @@ describe('dashboard views', () => {
         expect(missing.status).toBe(400);
     });
 
+    it('offers only the values a space may actually be set to', async () => {
+        await startServer();
+        const cookie = await signIn('alex');
+
+        const { body } = await get('/api/admin/spaces', cookie);
+
+        expect(body.choices.channel_mode).toEqual(['off', 'notify_only', 'inbox', 'full']);
+        expect(body.choices.pack).toContain('jeeves');
+        expect(body.choices.status).toEqual(['ACTIVE', 'ARCHIVED']);
+    });
+
     it('returns memory newest first', async () => {
         await startServer();
         const cookie = await signIn('alex');
@@ -207,5 +228,150 @@ describe('dashboard views', () => {
         const { body } = await get('/api/admin/memory', cookie);
 
         expect(body.entries.some((entry: { content: string }) => entry.content === 'the kettle is broken')).toBe(true);
+    });
+});
+
+async function loggedEvents(type: string): Promise<Array<Record<string, unknown>>> {
+    const db = await import('../db');
+    const rows = db
+        .getDb()
+        .prepare('SELECT details FROM event_log WHERE event_type = ? ORDER BY id ASC')
+        .all(type) as Array<{ details: string }>;
+    return rows.map((row) => JSON.parse(row.details));
+}
+
+describe('changing how a space behaves', () => {
+    it('is closed to anyone who is not an owner', async () => {
+        await startServer();
+        const member = await signIn('sam');
+
+        expect((await write('PATCH', '/api/admin/spaces/telegram:-100', { channel_mode: 'off' }, member)).status).toBe(
+            404
+        );
+        expect((await write('PATCH', '/api/admin/spaces/telegram:-100', { channel_mode: 'off' })).status).toBe(401);
+
+        // And it really did nothing.
+        const db = await import('../db');
+        expect(db.getSpace('telegram:-100')!.policy_json || '').not.toContain('"channel_mode":"off"');
+    });
+
+    it('changes mode, pack and grounding, and writes down who did it', async () => {
+        const { db } = await startServer();
+        const cookie = await signIn('alex');
+
+        const response = await write(
+            'PATCH',
+            '/api/admin/spaces/telegram:-100',
+            { channel_mode: 'inbox', pack: 'tutor' },
+            cookie
+        );
+
+        expect(response.status).toBe(200);
+        expect(response.body.space.channel_mode).toBe('inbox');
+        expect(db.getSpace('telegram:-100')!.assistant_pack_id).toBe('tutor');
+
+        const [event] = await loggedEvents('admin_space_update');
+        expect(event).toMatchObject({ space_id: 'telegram:-100', by: '777' });
+    });
+
+    it('refuses a value the UI would never offer, and changes nothing', async () => {
+        const { db } = await startServer();
+        const cookie = await signIn('alex');
+        const before = db.getSpace('telegram:-100')!.assistant_pack_id;
+
+        const badMode = await write('PATCH', '/api/admin/spaces/telegram:-100', { channel_mode: 'loud' }, cookie);
+        const badPack = await write('PATCH', '/api/admin/spaces/telegram:-100', { pack: '../../etc' }, cookie);
+        const nothing = await write('PATCH', '/api/admin/spaces/telegram:-100', {}, cookie);
+
+        expect([badMode.status, badPack.status, nothing.status]).toEqual([400, 400, 400]);
+        expect(db.getSpace('telegram:-100')!.assistant_pack_id).toBe(before);
+        expect(await loggedEvents('admin_space_update')).toHaveLength(0);
+    });
+
+    it('silences a space when it is archived, so archiving means what it says', async () => {
+        const { db } = await startServer();
+        const cookie = await signIn('alex');
+
+        await write('PATCH', '/api/admin/spaces/telegram:-100', { status: 'ARCHIVED' }, cookie);
+
+        const { resolveSpaceOperationalSettings } = await import('../core/space-preferences');
+        const archived = db.getSpace('telegram:-100')!;
+        expect(archived.status).toBe('ARCHIVED');
+        expect(resolveSpaceOperationalSettings(archived.policy_json).channel_mode).toBe('off');
+
+        // It is hidden, not deleted: the history and the membership are intact.
+        expect(db.listSpacesForParticipant('777').map((space) => space.id)).not.toContain('telegram:-100');
+        expect(db.isSpaceMember('telegram:-100', '777')).toBe(true);
+
+        await write('PATCH', '/api/admin/spaces/telegram:-100', { status: 'ACTIVE', channel_mode: 'full' }, cookie);
+        expect(db.listSpacesForParticipant('777').map((space) => space.id)).toContain('telegram:-100');
+    });
+
+    it('does not invent a space that is not there', async () => {
+        await startServer();
+        const cookie = await signIn('alex');
+
+        expect((await write('PATCH', '/api/admin/spaces/telegram:-999', { channel_mode: 'off' }, cookie)).status).toBe(
+            404
+        );
+    });
+});
+
+describe('retrying a failed delivery', () => {
+    async function failedEntryId(): Promise<string> {
+        const { enqueueDelivery, markDeliveryFailed } = await import('../gateway/outbox');
+        const entry = enqueueDelivery({
+            transport: 'telegram',
+            destination: { endpointId: '-100', endpointType: 'group' },
+            payload: { id: 'm1', content: { text: 'hi' } },
+        });
+        markDeliveryFailed(entry.id, 'chat not found', { permanent: true });
+        return entry.id;
+    }
+
+    it('is closed to anyone who is not an owner', async () => {
+        await startServer();
+        const id = await failedEntryId();
+        const member = await signIn('sam');
+
+        expect((await write('POST', `/api/admin/delivery/${id}/requeue`, {}, member)).status).toBe(404);
+        expect((await write('POST', `/api/admin/delivery/${id}/requeue`, {})).status).toBe(401);
+
+        const { getOutboxEntry } = await import('../gateway/outbox');
+        expect(getOutboxEntry(id)!.status).toBe('failed');
+    });
+
+    it('gives the entry its attempts back and writes down who did it', async () => {
+        await startServer();
+        const id = await failedEntryId();
+        const cookie = await signIn('alex');
+
+        const response = await write('POST', `/api/admin/delivery/${id}/requeue`, {}, cookie);
+
+        expect(response.status).toBe(200);
+
+        const { getOutboxEntry } = await import('../gateway/outbox');
+        const entry = getOutboxEntry(id)!;
+        expect(entry.status).toBe('queued');
+        expect(entry.attempts).toBe(0);
+        expect(entry.last_error).toBeNull();
+
+        const [event] = await loggedEvents('admin_delivery_requeue');
+        expect(event).toMatchObject({ outbox_id: id, by: '777' });
+    });
+
+    it('will not re-queue something that is still on its way', async () => {
+        await startServer();
+        const cookie = await signIn('alex');
+        const { enqueueDelivery } = await import('../gateway/outbox');
+        const queued = enqueueDelivery({
+            transport: 'telegram',
+            destination: { endpointId: '-100', endpointType: 'group' },
+            payload: { id: 'm2', content: { text: 'hi' } },
+        });
+
+        expect((await write('POST', `/api/admin/delivery/${queued.id}/requeue`, {}, cookie)).status).toBe(409);
+        expect((await write('POST', '/api/admin/delivery/nope/requeue', {}, cookie)).status).toBe(404);
+        expect(await loggedEvents('admin_delivery_requeue')).toHaveLength(0);
     });
 });

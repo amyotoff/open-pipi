@@ -312,6 +312,22 @@ Then open `http://<host>:3000`. You see the spaces you are a member of and nothi
 
 `PIPI_WEB_HOST` stays on `127.0.0.1` unless you mean to reach the assistant from other devices. Binding wider requires an account to exist first — otherwise startup refuses rather than publishing an open assistant to your network.
 
+### The owner dashboard
+
+An owner signing in gets extra sections in the sidebar. Everyone else does not — and the API behind them answers `404`, not `403`, so its existence stays quiet.
+
+| View | Shows | Lets you change |
+| --- | --- | --- |
+| Overview | Health, queue depth, and how spaces, bindings and participants are wired together | — |
+| Spaces | Every space with its pack, grounding, mode, and the transports it is reachable from | Mode, pack, grounding; archive and restore |
+| Delivery | What is still queued or has been given up on, with the error | Retry a failed delivery |
+| Wiki | The Brain Layer's curated pages and notes, as plain text | — |
+| Memory | What the assistant remembers, newest first | — |
+
+Archiving a space hides it and sets its mode to `off`; nothing is deleted, and Restore brings it back. Retrying a failed delivery hands back its attempt budget — useful once the reason it failed is fixed. Both are written to the event log with who did it.
+
+Settings that live in `.env` — tokens, owners, hosts — are edited in `.env`. A dashboard that edits credentials is an attack surface, not a convenience. For the same reason the wiki and memory are readable but not editable here: the assistant maintains those through its own skills, where a change carries provenance.
+
 ### Channel modes
 
 Every space gets one simple runtime mode, applied across its transports:

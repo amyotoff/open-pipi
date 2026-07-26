@@ -152,7 +152,7 @@ export async function mountWebClient(app: Express, options: MountWebClientOption
 
     // Owner-only views live behind the same session, checked one layer deeper.
     const { mountAdminRoutes } = await import('./admin-routes');
-    mountAdminRoutes(app, requireSession);
+    mountAdminRoutes(app, { requireSession, requireJsonBody, jsonBody });
 
     app.get('/api/me', requireSession, (req: AuthedRequest, res: Response) => {
         const participant = getResident(req.session!.participantId);

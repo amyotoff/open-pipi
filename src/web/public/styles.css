@@ -501,6 +501,22 @@ td.wrap {
     font-size: 0.87rem;
 }
 
+/* A setting changed in place: it should read as the value, not as a form. */
+.choice {
+    padding: 0.25rem 0.4rem;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+.choice:hover {
+    border-color: var(--accent);
+}
+
 /* A table cell that opens something, styled as a link rather than a button. */
 .link {
     margin: 0;

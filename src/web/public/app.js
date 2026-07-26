@@ -76,6 +76,37 @@ function pill(text, tone) {
     return node('span', `pill${tone ? ` is-${tone}` : ''}`, text);
 }
 
+/**
+ * A dropdown of the values the server said are allowed.
+ *
+ * The current value is kept in the list even when the server no longer offers
+ * it — a space pointing at a pack that was removed should say so, not silently
+ * appear to be set to something else.
+ */
+function choice(value, options, onChange) {
+    const values = (options || []).includes(value) ? options : [value ?? '', ...(options || [])];
+    const select = document.createElement('select');
+    select.className = 'choice';
+
+    for (const option of values) {
+        const element = node('option', null, option || '—');
+        element.value = option ?? '';
+        element.selected = option === value;
+        select.append(element);
+    }
+
+    select.addEventListener('change', () => void onChange(select.value));
+    return select;
+}
+
+/** A button that reads as an action in a table cell. */
+function action(label, onClick) {
+    const button = node('button', 'link', label);
+    button.type = 'button';
+    button.addEventListener('click', () => void onClick());
+    return button;
+}
+
 /** A card with a table inside, or a plain line when there is nothing to show. */
 function table(title, columns, rows) {
     const card = node('section', 'card');
@@ -239,6 +270,16 @@ async function refreshSpaceList() {
     const { ok, body } = await api('/api/spaces');
     if (!ok || !body?.ok) return;
     state.spaces = body.spaces;
+
+    // A space can go away underneath the person reading it — archived, or
+    // membership removed. Leaving it on screen with a live composer invites
+    // typing into somewhere that no longer answers.
+    if (state.activeSpaceId && !state.spaces.some((space) => space.id === state.activeSpaceId)) {
+        state.activeSpaceId = null;
+        el('composer').hidden = true;
+        renderMessages(null, []);
+    }
+
     renderSpaces();
 }
 
@@ -311,10 +352,12 @@ function renderOverview(body, data) {
 }
 
 function renderSpacesView(body, data) {
+    const choices = data.choices || {};
+
     body.append(
         table(
             'Spaces',
-            ['Space', 'Pack', 'Grounding', 'Mode', 'Reachable from'],
+            ['Space', 'Pack', 'Grounding', 'Mode', 'Reachable from', ''],
             (data.spaces || []).map((space) => {
                 const bindings = node('span');
                 for (const binding of space.bindings) {
@@ -323,10 +366,53 @@ function renderSpacesView(body, data) {
                 }
                 if (space.bindings.length === 0) bindings.append(pill('none', 'bad'));
 
-                return [space.title, space.pack, space.grounding, space.channel_mode, bindings];
+                const archived = space.status === 'ARCHIVED';
+                const title = node('span');
+                title.append(node('span', null, space.title));
+                if (archived) {
+                    title.append(document.createTextNode(' '));
+                    title.append(pill('archived'));
+                }
+
+                return [
+                    title,
+                    choice(space.pack, choices.pack, (value) => patchSpace(space.id, { pack: value })),
+                    choice(space.grounding, choices.grounding, (value) => patchSpace(space.id, { grounding: value })),
+                    choice(space.channel_mode, choices.channel_mode, (value) =>
+                        patchSpace(space.id, { channel_mode: value })
+                    ),
+                    bindings,
+                    action(archived ? 'Restore' : 'Archive', () =>
+                        patchSpace(space.id, { status: archived ? 'ACTIVE' : 'ARCHIVED' })
+                    ),
+                ];
             })
         )
     );
+
+    body.append(
+        node(
+            'p',
+            'muted',
+            'Archiving hides a space and stops the assistant answering in it. Nothing is deleted, and Restore brings it back.'
+        )
+    );
+}
+
+async function patchSpace(spaceId, patch) {
+    const { ok, body } = await api(`/api/admin/spaces/${encodeURIComponent(spaceId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+    });
+
+    await openAdminView('spaces');
+    if (!ok || !body?.ok) {
+        setAdminNotice(body?.error || 'That change did not stick.');
+        return;
+    }
+
+    // Archiving takes a space out of the chat list, so it has to be re-read.
+    await refreshSpaceList();
 }
 
 function renderDelivery(body, data) {
@@ -340,16 +426,29 @@ function renderDelivery(body, data) {
     body.append(
         table(
             'Not delivered yet',
-            ['Status', 'Transport', 'Endpoint', 'Tries', 'Last error'],
+            ['Status', 'Transport', 'Endpoint', 'Tries', 'Last error', ''],
             (data.entries || []).map((entry) => [
                 pill(entry.status, entry.status === 'failed' ? 'bad' : undefined),
                 entry.transport,
                 entry.endpoint_id,
                 entry.attempts,
                 entry.last_error || '',
+                // Only a given-up entry has anything to retry; the rest are
+                // still on their way.
+                entry.status === 'failed' ? action('Retry', () => requeueDelivery(entry.id)) : '',
             ])
         )
     );
+}
+
+async function requeueDelivery(id) {
+    const { ok, body } = await api(`/api/admin/delivery/${encodeURIComponent(id)}/requeue`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+    });
+
+    await openAdminView('delivery');
+    setAdminNotice(ok && body?.ok ? 'Queued again. It goes out on the next pass.' : body?.error || 'Could not retry that.');
 }
 
 async function renderBrain(body, data) {
@@ -410,12 +509,19 @@ const RENDERERS = {
     memory: renderMemory,
 };
 
+function setAdminNotice(text) {
+    const notice = el('admin-notice');
+    notice.textContent = text || '';
+    notice.hidden = !text;
+}
+
 async function openAdminView(view) {
     const config = ADMIN_VIEWS[view];
     if (!config) return;
 
     el('admin-title').textContent = config.title;
     el('admin-subtitle').textContent = config.subtitle;
+    setAdminNotice('');
 
     const body = el('admin-body');
     body.replaceChildren(node('p', 'empty', 'Loading…'));

@@ -255,6 +255,33 @@ export function recoverStuckDeliveries(options?: { all?: boolean }): number {
     return result.changes;
 }
 
+/**
+ * Give a failed entry its attempt budget back.
+ *
+ * The retry budget exists so a broken destination cannot spin forever, which
+ * means a delivery that failed for a reason since fixed — a bot re-added to a
+ * group, a network back up — has no way back on its own. This is that way, and
+ * it is deliberately a human decision.
+ *
+ * Only `failed` entries qualify: re-queueing something still in flight would
+ * hand the same message to two attempts.
+ */
+export function requeueDelivery(id: string): OutboxEntry | undefined {
+    const now = nowIso();
+    const result = getDb()
+        .prepare(
+            `
+        UPDATE outbox
+        SET status = 'queued', attempts = 0, last_error = NULL,
+            next_retry_at = @now, claimed_at = NULL, updated_at = @now
+        WHERE id = @id AND status = 'failed'
+    `
+        )
+        .run({ id, now });
+
+    return result.changes > 0 ? getOutboxEntry(id) : undefined;
+}
+
 export function countOutboxByStatus(): Record<string, number> {
     const rows = getDb().prepare('SELECT status, COUNT(*) as count FROM outbox GROUP BY status').all() as Array<{
         status: string;
