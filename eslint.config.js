@@ -25,6 +25,16 @@ module.exports = tseslint.config(
         },
     },
     {
+        // The web client runs in a browser, not in node: it has document and
+        // fetch, and none of node's globals.
+        files: ['src/web/public/**/*.js'],
+        languageOptions: {
+            globals: {
+                ...globals.browser,
+            },
+        },
+    },
+    {
         ignores: ['dist/', 'node_modules/', 'coverage/', '*.config.js', '*.config.ts'],
     }
 );

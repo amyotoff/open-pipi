@@ -1,0 +1,217 @@
+/* Deliberately plain: no framework, no build step. This has to stay editable
+   by anyone who can read CSS, on a machine that may be a Raspberry Pi. */
+
+:root {
+    --bg: #12131a;
+    --panel: #1b1d27;
+    --line: #2b2e3d;
+    --text: #e6e7ee;
+    --muted: #9aa0b4;
+    --accent: #6ea8fe;
+    --danger: #ff8080;
+}
+
+@media (prefers-color-scheme: light) {
+    :root {
+        --bg: #f5f6fa;
+        --panel: #ffffff;
+        --line: #dfe2ec;
+        --text: #1c1e27;
+        --muted: #5f6478;
+        --accent: #2b6cb0;
+        --danger: #b3261e;
+    }
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+.panel {
+    max-width: 24rem;
+    margin: 4rem auto;
+    padding: 1.5rem;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+}
+
+h1 {
+    margin: 0 0 1rem;
+    font-size: 1.25rem;
+}
+
+form {
+    display: grid;
+    gap: 0.35rem;
+}
+
+label {
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+
+input {
+    padding: 0.55rem 0.7rem;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font: inherit;
+}
+
+button {
+    margin-top: 0.75rem;
+    padding: 0.55rem 0.9rem;
+    background: var(--accent);
+    color: #fff;
+    border: 0;
+    border-radius: 8px;
+    font: inherit;
+    cursor: pointer;
+}
+
+.error {
+    margin: 0.5rem 0 0;
+    color: var(--danger);
+    font-size: 0.9rem;
+}
+
+.workspace {
+    display: grid;
+    grid-template-columns: minmax(14rem, 20rem) 1fr;
+    min-height: 100vh;
+}
+
+.sidebar {
+    border-right: 1px solid var(--line);
+    background: var(--panel);
+    display: flex;
+    flex-direction: column;
+}
+
+.sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--line);
+    font-size: 0.9rem;
+}
+
+.sidebar-header button {
+    margin: 0;
+    padding: 0.3rem 0.6rem;
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    font-size: 0.8rem;
+}
+
+.spaces {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+}
+
+.spaces button {
+    width: 100%;
+    margin: 0;
+    padding: 0.7rem 1rem;
+    text-align: left;
+    background: transparent;
+    color: inherit;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+}
+
+.spaces button[aria-current='true'] {
+    background: var(--bg);
+    border-left: 3px solid var(--accent);
+}
+
+.space-title {
+    display: block;
+    font-weight: 600;
+}
+
+.space-preview {
+    display: block;
+    color: var(--muted);
+    font-size: 0.82rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.conversation {
+    display: flex;
+    flex-direction: column;
+    padding: 1rem 1.25rem;
+    min-width: 0;
+}
+
+h2 {
+    margin: 0 0 0.75rem;
+    font-size: 1.05rem;
+}
+
+.messages {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.message {
+    max-width: 46rem;
+    padding: 0.6rem 0.8rem;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.message.from-assistant {
+    border-left: 3px solid var(--accent);
+}
+
+.message-meta {
+    display: block;
+    margin-bottom: 0.2rem;
+    color: var(--muted);
+    font-size: 0.78rem;
+}
+
+.notice {
+    margin: 0.75rem 0 0;
+    color: var(--muted);
+    font-size: 0.82rem;
+}
+
+@media (max-width: 720px) {
+    .workspace {
+        grid-template-columns: 1fr;
+    }
+
+    .sidebar {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+        max-height: 40vh;
+    }
+}

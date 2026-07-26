@@ -1120,6 +1120,8 @@ export interface Chat {
 export interface Space {
     id: string;
     kind: string;
+    /** Human-facing identity for web routes; null for spaces that never got one. */
+    slug: string | null;
     title: string | null;
     channel: string;
     external_ref: string;
@@ -1768,6 +1770,42 @@ export function listSpaces(status?: string): Space[] {
     `
         )
         .all() as Space[];
+}
+
+export interface SpaceSummary extends Space {
+    last_message_at: string | null;
+    last_message_preview: string | null;
+}
+
+/**
+ * The spaces one participant belongs to, most recently active first.
+ *
+ * Membership is the whole access rule for the Web client: a person sees the
+ * conversations they are part of and nothing else, which is the same rule that
+ * already governs every other surface.
+ */
+export function listSpacesForParticipant(participantId: string, limit: number = 100): SpaceSummary[] {
+    return getDb()
+        .prepare(
+            `
+        SELECT
+            s.*,
+            (SELECT MAX(m.timestamp) FROM messages m WHERE m.space_id = s.id) AS last_message_at,
+            (SELECT m.content FROM messages m WHERE m.space_id = s.id
+             ORDER BY m.timestamp DESC, m.rowid DESC LIMIT 1) AS last_message_preview
+        FROM spaces s
+        JOIN memberships mem ON mem.space_id = s.id
+        WHERE mem.person_id = ?
+          AND s.status = 'ACTIVE'
+        ORDER BY COALESCE(last_message_at, s.created_at) DESC, s.id ASC
+        LIMIT ?
+    `
+        )
+        .all(participantId, clampLimit(limit, 100, 1, 500)) as SpaceSummary[];
+}
+
+export function isSpaceMember(spaceId: string, participantId: string): boolean {
+    return Boolean(getMembership(spaceId, participantId));
 }
 
 export function getSpaceByChannelRef(channel: string, externalRef: string): Space | undefined {

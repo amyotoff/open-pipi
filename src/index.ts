@@ -99,6 +99,7 @@ async function bootstrap() {
     db.initDatabase();
     console.log('Database initialized.');
 
+    const webAuth = await import('./web/auth');
     const googleOAuth = await import('./core/google-oauth');
     googleOAuth.initGoogleOAuthMigrations();
     googleOAuth.onGoogleOAuthSuccess(async (spaceId) => {
@@ -136,6 +137,10 @@ async function bootstrap() {
             `[BOOT] ${topology.participants_without_identity.length} participant(s) have no transport identity: ${topology.participants_without_identity.join(', ')}`
         );
     }
+
+    // Checked after the database opens, because accounts live there: binding
+    // the web client beyond loopback with no way to sign in must not start.
+    config.assertSafeWebConfig(webAuth.countWebAccounts());
 
     scheduler.startTaskScheduler();
     await api.startApiServer();
