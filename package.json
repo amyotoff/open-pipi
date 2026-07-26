@@ -77,7 +77,8 @@
         "@whiskeysockets/baileys": "^7.0.0-rc13",
         "discord.js": "^14.26.5",
         "nodemailer": "^9.0.3",
-        "playwright-core": "^1.58.2"
+        "playwright-core": "^1.58.2",
+        "sharp": "^0.35.3"
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",
