@@ -151,10 +151,17 @@ export async function handleIncoming(message: IncomingMessage, options?: HandleI
                 ...summarizeText(text),
             });
 
-            // A transport that authenticated its sender has already proven who
-            // they are; the owner allowlist is the trust anchor only where the
-            // transport cannot. Membership then carries the authorization.
-            const senderIsOwner =
+            // May this person talk to the assistant here at all?
+            //
+            // Two ways to qualify, and they are not the same thing: a transport
+            // that authenticated its sender has proven who they are and checked
+            // their membership, while the owner allowlist is the trust anchor
+            // where the transport cannot prove anything.
+            //
+            // Deliberately not called "is owner" — an authenticated web member
+            // passes this and is not one. Anything that must be owner-only
+            // should ask the participant's role, not reuse this.
+            const senderIsAuthorized =
                 message.senderAuthenticated === true || isOwner(message.sender.transportUserId, message.transport);
             const isDirect = message.endpoint.type === 'direct';
 
@@ -162,7 +169,7 @@ export async function handleIncoming(message: IncomingMessage, options?: HandleI
             // direct chat, which has always registered its sender so a refusal
             // can be recorded — may cause a space to come into existence.
             let binding = resolveTransportBinding(message, { allowBootstrap: false });
-            if (!binding.space && (senderIsOwner || isDirect)) {
+            if (!binding.space && (senderIsAuthorized || isDirect)) {
                 binding = resolveTransportBinding(message);
             }
 
@@ -172,7 +179,7 @@ export async function handleIncoming(message: IncomingMessage, options?: HandleI
                 logWarn('GATEWAY', 'binding_unresolved', {
                     transport: message.transport,
                     endpoint: message.endpoint.id,
-                    sender_is_owner: senderIsOwner,
+                    sender_authorized: senderIsAuthorized,
                 });
                 return;
             }
@@ -206,7 +213,7 @@ export async function handleIncoming(message: IncomingMessage, options?: HandleI
                 participation.groupMode === 'external' &&
                 !image;
 
-            if (!senderIsOwner && !isExternalTelegramGroup) {
+            if (!senderIsAuthorized && !isExternalTelegramGroup) {
                 addSpanAttributes({ 'app.access': 'denied' });
                 logWarn('GATEWAY', 'ignored_non_owner', {
                     transport: message.transport,
