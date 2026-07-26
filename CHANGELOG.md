@@ -4,6 +4,35 @@ All notable changes to Open PiPi will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Transport gateway: Telegram, Web, and future channels are replaceable transports behind one
+  narrow waist, enforced by a test that reads the source tree.
+- `transport_bindings` and `participant_identities`: a space can be reached from several places at
+  once, and one person can hold an account on each of them.
+- Durable outbox with an in-process delivery worker — retries with backoff, bounded attempts, FIFO
+  per conversation, and resumption after a restart.
+- Local web client (`PIPI_WEB_ENABLED`): sign in, read the spaces you belong to, send. Accounts are
+  linked to an existing participant with `pnpm web:account`, so a web login arrives as the same
+  person as their Telegram account. Off by default, loopback-only unless an account exists.
+- `docs/transports.md`: how to write an adapter without touching Core.
+
+### Fixed
+
+- Replies longer than Telegram's 4096-character limit were lost entirely; they are now split, with
+  each piece measured after formatting.
+- A redelivered Telegram update ran the agent twice and answered twice.
+- Attachments were downloaded before the sender's permissions were checked.
+- A stranger writing in an unknown group could cause a space to be created.
+- Shutdown stopped the Telegram bot twice, logging an error on every clean exit.
+
+### Changed
+
+- `SendResult.success` now means *accepted for delivery* rather than *delivered*; delivery outcomes
+  are in the outbox and the delivery logs.
+- Replies address the space rather than the endpoint a question arrived on, so a conversation open
+  on two surfaces stays in sync on both.
+
 ## [2.5.0] — 2026-07-12
 
 ### Product

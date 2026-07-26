@@ -25,6 +25,7 @@ export interface OutboxEntry {
     endpoint_type: string;
     thread_id: string | null;
     payload_json: string;
+    correlation_id: string | null;
     status: OutboxStatus;
     attempts: number;
     next_retry_at: string | null;
@@ -63,6 +64,8 @@ export interface EnqueueDeliveryInput {
      * even if the scheduler runs again. Callers without one get a fresh id.
      */
     idempotencyKey?: string;
+    /** The inbound turn this delivery answers, for end-to-end tracing. */
+    correlationId?: string | null;
 }
 
 export function getOutboxEntry(id: string): OutboxEntry | undefined {
@@ -94,12 +97,12 @@ export function enqueueDelivery(input: EnqueueDeliveryInput): OutboxEntry {
             `
         INSERT INTO outbox (
             id, idempotency_key, space_id, message_id, transport,
-            endpoint_id, endpoint_type, thread_id, payload_json,
+            endpoint_id, endpoint_type, thread_id, payload_json, correlation_id,
             status, attempts, next_retry_at, created_at, updated_at
         )
         VALUES (
             @id, @idempotency_key, @space_id, @message_id, @transport,
-            @endpoint_id, @endpoint_type, @thread_id, @payload_json,
+            @endpoint_id, @endpoint_type, @thread_id, @payload_json, @correlation_id,
             'queued', 0, @next_retry_at, @created_at, @updated_at
         )
         ON CONFLICT(idempotency_key) DO NOTHING
@@ -115,6 +118,7 @@ export function enqueueDelivery(input: EnqueueDeliveryInput): OutboxEntry {
             endpoint_type: input.destination.endpointType,
             thread_id: input.destination.threadId ?? null,
             payload_json: JSON.stringify(input.payload),
+            correlation_id: input.correlationId ?? null,
             next_retry_at: now,
             created_at: now,
             updated_at: now,

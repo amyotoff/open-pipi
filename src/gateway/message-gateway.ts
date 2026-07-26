@@ -276,6 +276,7 @@ export async function handleIncoming(message: IncomingMessage, options?: HandleI
                     senderId: participant.participantId,
                     caption: text,
                     image: resolved,
+                    correlationId: message.correlationId,
                 });
                 return;
             }
@@ -311,6 +312,7 @@ export async function handleIncoming(message: IncomingMessage, options?: HandleI
                     senderId: participant.participantId,
                     text: content,
                     spaceId: space.id,
+                    correlationId: message.correlationId,
                 });
                 return;
             }
@@ -338,6 +340,7 @@ export async function handleIncoming(message: IncomingMessage, options?: HandleI
                 senderId: participant.participantId,
                 text: content,
                 spaceId: space.id,
+                correlationId: message.correlationId,
                 ...(participation.groupMode === 'external' ? { suppressNoSend: true } : {}),
             });
         }

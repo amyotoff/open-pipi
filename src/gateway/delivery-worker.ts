@@ -67,6 +67,7 @@ export async function processNextDelivery(): Promise<boolean> {
                 outbox_id: entry.id,
                 transport: entry.transport,
                 endpoint: entry.endpoint_id,
+                correlation_id: entry.correlation_id,
                 attempts: entry.attempts + 1,
             });
             return true;
@@ -78,6 +79,7 @@ export async function processNextDelivery(): Promise<boolean> {
             outbox_id: entry.id,
             transport: entry.transport,
             endpoint: entry.endpoint_id,
+            correlation_id: entry.correlation_id,
             attempts: failed.attempts,
             next_retry_at: failed.next_retry_at,
         });

@@ -115,6 +115,7 @@ async function enqueueOutgoing(input: {
             destination,
             payload: piece,
             spaceId: input.spaceId ?? null,
+            correlationId: (input.opts as MessageOptions | undefined)?.correlationId ?? null,
             ...(input.idempotencyKey ? { idempotencyKey: `${input.idempotencyKey}#${index}` } : {}),
         });
         if (index === 0) firstId = entry.id;

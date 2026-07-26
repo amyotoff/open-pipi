@@ -7,6 +7,12 @@ import { BRIEF_PIN_HOURS, createBriefPage, shouldCreateDailyBriefPage } from '..
 import { logError, logInfo, summarizeError, summarizeText } from '../utils/logging';
 import { addSpanAttributes, addSpanEvent, recordActiveSpanException, withSpan } from '../observability';
 import { classifyMessageRoute } from '../core/local-triage';
+import type { MessageOptions } from '../channels/_types';
+
+/** An empty options object is noise; callers that pass nothing should pass nothing. */
+function messageOptions(options: MessageOptions): MessageOptions | undefined {
+    return Object.keys(options).length > 0 ? options : undefined;
+}
 
 function isNoSendSentinel(text: string): boolean {
     const normalized = text
@@ -79,6 +85,7 @@ export async function handleButlerMessage(input: {
     spaceId?: string;
     taskId?: string;
     suppressNoSend?: boolean;
+    correlationId?: string;
 }): Promise<void>;
 export async function handleButlerMessage(
     arg1: null | {
@@ -89,6 +96,7 @@ export async function handleButlerMessage(
         spaceId?: string;
         taskId?: string;
         suppressNoSend?: boolean;
+        correlationId?: string;
     },
     chatId?: string,
     senderId?: string,
@@ -104,6 +112,7 @@ export async function handleButlerMessage(
                   text: arg1.text,
                   taskId: arg1.taskId,
                   suppressNoSend: arg1.suppressNoSend,
+                  correlationId: arg1.correlationId,
                   spaceId:
                       arg1.spaceId ||
                       (arg1.channel === 'telegram' || !arg1.channel
@@ -117,6 +126,7 @@ export async function handleButlerMessage(
                   text: text!,
                   taskId: options?.taskId,
                   suppressNoSend: false,
+                  correlationId: undefined,
                   spaceId: buildTelegramSpaceId(chatId!),
               };
 
@@ -217,13 +227,12 @@ export async function handleButlerMessage(
                 await sendSpaceMessage(
                     spaceId,
                     prepared.text,
-                    prepared.pin
-                        ? {
-                              pin: true,
-                              unpinAfterHours: BRIEF_PIN_HOURS,
-                              pinDisableNotification: true,
-                          }
-                        : undefined
+                    messageOptions({
+                        ...(input.correlationId ? { correlationId: input.correlationId } : {}),
+                        ...(prepared.pin
+                            ? { pin: true, unpinAfterHours: BRIEF_PIN_HOURS, pinDisableNotification: true }
+                            : {}),
+                    })
                 );
 
                 if (prepared.filePath) {
@@ -262,6 +271,7 @@ export interface ButlerPhotoInput {
     spaceId: string;
     senderId: string;
     caption: string;
+    correlationId?: string;
     /**
      * Already fetched by the transport. The assistant reasons about an image,
      * not about a Telegram file id — resolving one needs a bot token, which is
@@ -303,7 +313,13 @@ export async function handleButlerPhoto(input: ButlerPhotoInput) {
 
                 if (visionResponse.text) {
                     addSpanEvent('assistant.butler.photo_reply_sent', { response_chars: visionResponse.text.length });
-                    await sendSpaceMessage(input.spaceId, visionResponse.text);
+                    await sendSpaceMessage(
+                        input.spaceId,
+                        visionResponse.text,
+                        messageOptions({
+                            ...(input.correlationId ? { correlationId: input.correlationId } : {}),
+                        })
+                    );
 
                     storeMessage({
                         id: `bot-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,

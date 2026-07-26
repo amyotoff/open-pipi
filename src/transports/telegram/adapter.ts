@@ -30,6 +30,9 @@ import type {
     TransportRuntimeContext,
 } from '../types';
 
+/** Comfortably above any photo, far below anything that would strain a Pi. */
+const MAX_INBOUND_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+
 export class TelegramTransportAdapter implements TransportAdapter {
     readonly name = 'telegram';
 
@@ -125,13 +128,34 @@ export class TelegramTransportAdapter implements TransportAdapter {
         return TELEGRAM_CAPABILITIES;
     }
 
-    /** Telegram hands out file ids; the bytes take a second, authenticated request. */
+    /**
+     * Telegram hands out file ids; the bytes take a second, authenticated
+     * request. The size is checked before anything is buffered — the assistant
+     * holds an image in memory to reason about it, and an approved sender can
+     * still send something too large to hold.
+     */
     async resolveAttachment(attachment: IncomingAttachment): Promise<ResolvedAttachment | null> {
         const fileId = (attachment.metadata as { fileId?: string } | undefined)?.fileId;
         if (!fileId) return null;
 
+        if (attachment.sizeBytes && attachment.sizeBytes > MAX_INBOUND_ATTACHMENT_BYTES) {
+            logWarn('TELEGRAM', 'attachment_too_large', {
+                size_bytes: attachment.sizeBytes,
+                limit_bytes: MAX_INBOUND_ATTACHMENT_BYTES,
+            });
+            return null;
+        }
+
         const file = await bot.telegram.getFile(fileId);
         if (!file.file_path) return null;
+
+        if (file.file_size && file.file_size > MAX_INBOUND_ATTACHMENT_BYTES) {
+            logWarn('TELEGRAM', 'attachment_too_large', {
+                size_bytes: file.file_size,
+                limit_bytes: MAX_INBOUND_ATTACHMENT_BYTES,
+            });
+            return null;
+        }
 
         const response = await fetch(`https://api.telegram.org/file/bot${bot.telegram.token}/${file.file_path}`);
         const buffer = Buffer.from(await response.arrayBuffer());

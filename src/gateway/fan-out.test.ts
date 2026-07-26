@@ -145,3 +145,36 @@ describe('space fan-out', () => {
         expect(row.endpoint_type).toBe('group');
     });
 });
+
+describe('turn tracing', () => {
+    it('carries the inbound correlation id onto every queued delivery', async () => {
+        const { db, runtime } = await load();
+        db.ensureSpace('telegram', '-100', { kind: 'group_chat' });
+        db.ensureTransportBinding({
+            transport: 'web',
+            endpointId: 'telegram:-100',
+            endpointType: 'group',
+            spaceId: 'telegram:-100',
+        });
+
+        await runtime.sendSpaceMessage('telegram:-100', 'the answer', { correlationId: 'turn-42' });
+
+        // One turn, followable from "someone said this" to "the answer went
+        // out", on whichever surface it went out.
+        const rows = db.getDb().prepare('SELECT correlation_id FROM outbox').all() as Array<{
+            correlation_id: string;
+        }>;
+        expect(rows).toHaveLength(2);
+        expect(rows.every((row) => row.correlation_id === 'turn-42')).toBe(true);
+    });
+
+    it('leaves the correlation id empty for a send that answers nothing', async () => {
+        const { db, runtime } = await load();
+        db.ensureSpace('telegram', '-100', { kind: 'group_chat' });
+
+        await runtime.sendSpaceMessage('telegram:-100', 'a scheduled nudge');
+
+        const row = db.getDb().prepare('SELECT correlation_id FROM outbox').get() as { correlation_id: string | null };
+        expect(row.correlation_id).toBeNull();
+    });
+});
