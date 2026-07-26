@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { RuntimeExecutionContext } from '../core/runtime-context';
 import { HOUSEHOLD_CHAT_ID } from '../config';
-import { getSpace } from '../db';
+import { getSpace, listTransportBindingsForSpace } from '../db';
 import { resolveSpaceOperationalSettings } from '../core/space-preferences';
 import { getChannel } from './_registry';
 import { enqueueDelivery } from '../gateway/outbox';
@@ -201,28 +201,85 @@ export async function sendContextTyping(context: Partial<RuntimeExecutionContext
     await sendChannelTyping(channel, channelRef);
 }
 
-export async function sendSpaceMessage(spaceId: string, text: string, opts?: MessageOptions): Promise<SendResult> {
-    const space = getSpace(spaceId);
+/**
+ * Address a space, not an endpoint.
+ *
+ * A space may now be reachable from several places at once — Telegram and the
+ * web at the same time — so a reply goes to every active binding. Answering
+ * only where the question arrived would leave the other side of the same
+ * conversation silent.
+ *
+ * Each binding gets its own outbox entry keyed by binding id, so a failure on
+ * one retries without touching the others and a re-run cannot double-send to
+ * any single one. With a single binding this is identical to what it replaced.
+ */
+async function fanOutToSpace(input: {
+    spaceId: string;
+    text?: string;
+    attachment?: { localPath: string; filename?: string; caption?: string };
+    opts?: MessageOptions | FileOptions;
+}): Promise<SendResult> {
+    const space = getSpace(input.spaceId);
     if (!space) {
-        return { success: false, error: `Space "${spaceId}" not found.` };
+        return { success: false, error: `Space "${input.spaceId}" not found.` };
     }
 
     const settings = resolveSpaceOperationalSettings(space.policy_json);
     if (settings.channel_mode === 'off') {
-        return {
-            success: true,
-            messageId: `suppressed:${spaceId}`,
-        };
+        return { success: true, messageId: `suppressed:${input.spaceId}` };
     }
 
-    return enqueueOutgoing({
-        channel: space.channel,
-        channelRef: space.external_ref,
-        text,
-        spaceId: space.id,
-        endpointType: space.kind === 'group_chat' ? 'group' : 'direct',
+    const bindings = listTransportBindingsForSpace(space.id);
+    const baseKey = (input.opts as MessageOptions | undefined)?.idempotencyKey;
+
+    // A space with no binding row predates the migration or lost it; the legacy
+    // columns still say where it lives, so delivery is never simply dropped.
+    const destinations = bindings.length
+        ? bindings.map((binding) => ({
+              channel: binding.transport,
+              channelRef: binding.endpoint_id,
+              endpointType: binding.endpoint_type as TransportDestination['endpointType'],
+              keySuffix: `@${binding.id}`,
+          }))
+        : [
+              {
+                  channel: space.channel,
+                  channelRef: space.external_ref,
+                  endpointType: (space.kind === 'group_chat'
+                      ? 'group'
+                      : 'direct') as TransportDestination['endpointType'],
+                  keySuffix: '',
+              },
+          ];
+
+    let firstResult: SendResult | undefined;
+    for (const destination of destinations) {
+        const result = await enqueueOutgoing({
+            channel: destination.channel,
+            channelRef: destination.channelRef,
+            text: input.text,
+            attachment: input.attachment,
+            spaceId: space.id,
+            endpointType: destination.endpointType,
+            opts: input.opts,
+            idempotencyKey: baseKey ? `${baseKey}${destination.keySuffix}` : undefined,
+        });
+        firstResult = firstResult ?? result;
+    }
+
+    return firstResult ?? { success: true };
+}
+
+export async function sendSpaceMessage(spaceId: string, text: string, opts?: MessageOptions): Promise<SendResult> {
+    return fanOutToSpace({ spaceId, text, opts });
+}
+
+/** The file equivalent, so a brief reaches every surface its answer did. */
+export async function sendSpaceFile(spaceId: string, filePath: string, opts?: FileOptions): Promise<SendResult> {
+    return fanOutToSpace({
+        spaceId,
+        attachment: { localPath: filePath, filename: opts?.filename, caption: opts?.caption },
         opts,
-        idempotencyKey: opts?.idempotencyKey,
     });
 }
 

@@ -77,9 +77,24 @@ plumbing an event emitter through the butler; the value for a v1 is marginal. Re
 Manifest (name, icons, standalone) + a service worker that caches the app shell only and
 shows a clear offline state. No message sync.
 
-**Done when:** a message sent from the web lands in the same space as the Telegram binding,
-runs the agent once, and the reply is queued for *both* bindings; history survives reload
-and restart; an SSE-connected second browser sees the activity; `pnpm verify` green.
+**Delivered.** `pnpm verify` green, 645 tests; end-to-end smoke 7/7.
+
+Two things the implementation found, both real gaps rather than test problems:
+
+- **A web participant failed the owner check.** It reads an env allowlist of Telegram ids,
+  which a web session has nothing to do with. Fixed by `IncomingMessage.senderAuthenticated`:
+  a transport that *proved* who the sender is says so, and membership then carries the
+  authorization. Telegram cannot set it — a Telegram user id is only Telegram's assertion,
+  which is exactly why the allowlist exists there.
+- **A web login minted a second person.** `upsertWebAccount` created no identity row, so
+  the resolver fell back to the string convention and produced `web:777` beside the real
+  `777` — losing that participant's memory and authority, the precise failure D3 exists to
+  prevent. A web account now *is* a transport identity, linked on creation.
+
+Known limitation, stated rather than hidden: the send route answers `202` and runs the
+agent after. The pipeline persists synchronously before its first await, so the window is
+microseconds — but unlike Telegram, nothing redelivers a web message lost inside it.
+Closing it properly means splitting persist from run, which is Phase 7 material if wanted.
 
 ---
 

@@ -215,3 +215,39 @@ h2 {
         max-height: 40vh;
     }
 }
+
+.composer {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0.5rem;
+    align-items: end;
+    margin-top: 0.75rem;
+}
+
+.composer textarea {
+    padding: 0.55rem 0.7rem;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font: inherit;
+    resize: vertical;
+}
+
+.composer button {
+    margin: 0;
+    height: 2.6rem;
+}
+
+/* Visible to screen readers, out of the way for everyone else. */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}

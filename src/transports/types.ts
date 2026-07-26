@@ -95,6 +95,16 @@ export interface IncomingMessage {
      */
     addressedToAssistant?: boolean;
 
+    /**
+     * The transport verified who this sender is, rather than taking their word.
+     *
+     * A web session is proof of identity; a Telegram user id is only Telegram's
+     * assertion, which is why the owner allowlist exists there. When a transport
+     * can prove it, membership in the space becomes the authorization and the
+     * allowlist has nothing left to add.
+     */
+    senderAuthenticated?: boolean;
+
     content: {
         text?: string;
         attachments?: IncomingAttachment[];

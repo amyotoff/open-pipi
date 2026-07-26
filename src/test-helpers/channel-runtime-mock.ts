@@ -69,6 +69,14 @@ export function makeChannelRuntimeMock(deps: ChannelRuntimeMockDeps) {
             return sendChannelMessage(space.channel, space.external_ref, text, opts);
         },
 
+        sendSpaceFile: async (spaceId: string, filePath: string, opts?: unknown): Promise<SendResult> => {
+            const space = deps.getSpace?.(spaceId);
+            if (!space) return { success: false, error: `Space "${spaceId}" not found.` };
+            return deps.sendFileToChat
+                ? await deps.sendFileToChat(space.external_ref, filePath, opts)
+                : { success: false, error: 'Channel does not support file attachments.' };
+        },
+
         sendContextMessage: async (
             context: { channel?: string; chatId?: string; channelRef?: string },
             text: string,

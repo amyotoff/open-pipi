@@ -208,3 +208,33 @@ describe('web sessions', () => {
         expect(resolveSession(session.token)).not.toBeNull();
     });
 });
+
+describe('web accounts as transport identities', () => {
+    it('recognizes the web login as the participant it was linked to', async () => {
+        const { db, upsertWebAccount } = await loadAuth();
+
+        upsertWebAccount({ username: 'alex', password: 'correct horse', participantId: '777' });
+
+        // Without this the resolver would mint a second "web:777" person, and
+        // signing in over the web would lose that participant's memory and
+        // authority — the exact thing linking exists to prevent.
+        expect(db.getParticipantIdentity('web', 'alex')?.participant_id).toBe('777');
+        expect(
+            db
+                .listParticipantIdentities('777')
+                .map((i) => i.transport)
+                .sort()
+        ).toEqual(['telegram', 'web']);
+    });
+
+    it('moves the identity when an operator re-links the account', async () => {
+        const { db, upsertWebAccount } = await loadAuth();
+        db.upsertResident({ tg_id: '888', display_name: 'Sam', role: 'member' });
+
+        upsertWebAccount({ username: 'shared', password: 'correct horse', participantId: '777' });
+        upsertWebAccount({ username: 'shared', password: 'correct horse', participantId: '888' });
+
+        // A deliberate CLI action, unlike a login, which must never reassign.
+        expect(db.getParticipantIdentity('web', 'shared')?.participant_id).toBe('888');
+    });
+});

@@ -2063,6 +2063,32 @@ export function ensureTransportBinding(input: {
     return getTransportBinding(input.transport, input.endpointId, input.threadId)!;
 }
 
+/**
+ * Point an external account at a participant, moving it if it was pointed
+ * elsewhere.
+ *
+ * Unlike ensureParticipantIdentity this *does* reassign, because it exists for
+ * the deliberate operator action of linking an account. A login must never do
+ * this — that is how one person silently becomes another.
+ */
+export function linkParticipantIdentity(input: {
+    participantId: string;
+    transport: string;
+    externalUserId: string;
+    displayName?: string | null;
+}): ParticipantIdentity {
+    getDb()
+        .prepare('DELETE FROM participant_identities WHERE transport = ? AND external_user_id = ?')
+        .run(input.transport, input.externalUserId);
+
+    return ensureParticipantIdentity({
+        participantId: input.participantId,
+        transport: input.transport,
+        externalUserId: input.externalUserId,
+        displayName: input.displayName ?? null,
+    });
+}
+
 export function getParticipantIdentity(transport: string, externalUserId: string): ParticipantIdentity | undefined {
     return getDb()
         .prepare('SELECT * FROM participant_identities WHERE transport = ? AND external_user_id = ? LIMIT 1')

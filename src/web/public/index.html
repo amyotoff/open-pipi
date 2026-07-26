@@ -4,6 +4,9 @@
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Open PiPi</title>
+        <meta name="theme-color" content="#12131a" />
+        <link rel="manifest" href="/manifest.webmanifest" />
+        <link rel="icon" href="/icon.svg" type="image/svg+xml" />
         <link rel="stylesheet" href="/styles.css" />
     </head>
     <body>
@@ -34,9 +37,17 @@
                 <section class="conversation">
                     <h2 id="space-title">Pick a space</h2>
                     <ol id="messages" class="messages"></ol>
-                    <p class="notice">
-                        Reading only for now. Sending from the web arrives in the next release.
-                    </p>
+                    <form id="composer" class="composer" hidden>
+                        <label class="sr-only" for="composer-text">Message</label>
+                        <textarea
+                            id="composer-text"
+                            rows="2"
+                            placeholder="Write to your assistant…"
+                            required
+                        ></textarea>
+                        <button type="submit">Send</button>
+                    </form>
+                    <p id="connection" class="notice" role="status"></p>
                 </section>
             </section>
         </main>

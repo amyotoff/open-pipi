@@ -45,6 +45,11 @@ async function startServer() {
     auth.clearLoginAttempts();
     auth.upsertWebAccount({ username: 'alex', password: 'correct horse', participantId: '777' });
 
+    const registry = await import('../transports/registry');
+    registry.resetTransportRegistry();
+    const { WebTransportAdapter } = await import('../transports/web/adapter');
+    registry.registerTransport(new WebTransportAdapter());
+
     const api = await import('../api');
     const app = await api.createApiApp('tool-log-token');
     const instance = app.listen(0, '127.0.0.1');
@@ -56,6 +61,51 @@ async function startServer() {
     baseUrl = `http://127.0.0.1:${port}`;
 
     return { db, auth };
+}
+
+/** The route answers 202 and runs the agent after; the row lands moments later. */
+async function waitForMessage(db: typeof import('../db'), content: string, timeoutMs = 2000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const row = db.getDb().prepare('SELECT * FROM messages WHERE content = ?').get(content) as
+            | { sender_tg_id: string; transport: string }
+            | undefined;
+        if (row) return row;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    return undefined;
+}
+
+/** Read the stream far enough to see the events a test cares about. */
+async function readEvents(cookie: string, count: number, timeoutMs = 3000): Promise<string[]> {
+    const controller = new AbortController();
+    const response = await fetch(`${baseUrl}/api/events`, {
+        headers: { Cookie: cookie, Accept: 'text/event-stream' },
+        signal: controller.signal,
+    });
+
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    const events: string[] = [];
+    const deadline = Date.now() + timeoutMs;
+    let buffer = '';
+
+    while (events.length < count && Date.now() < deadline) {
+        const chunk = await Promise.race([
+            reader.read(),
+            new Promise<{ value: undefined; done: boolean }>((resolve) =>
+                setTimeout(() => resolve({ value: undefined, done: false }), 250)
+            ),
+        ]);
+        if (chunk.value) buffer += decoder.decode(chunk.value, { stream: true });
+
+        for (const block of buffer.split('\n\n')) {
+            if (block.includes('event: space_activity') && !events.includes(block)) events.push(block);
+        }
+    }
+
+    controller.abort();
+    return events;
 }
 
 /** Error pages come back as HTML, so the raw text is the useful fallback. */
@@ -264,5 +314,118 @@ describe('web space routes', () => {
 
         expect(response.status).toBe(200);
         expect(html).toContain('Open PiPi');
+    });
+});
+
+describe('web send', () => {
+    it('accepts a message from a member and binds the space to the web', async () => {
+        const { db } = await startServer();
+        const cookie = await signIn();
+
+        const response = await call('POST', '/api/spaces/telegram:-100/messages', {
+            cookie,
+            body: { text: 'from the browser' },
+        });
+
+        expect(response.status).toBe(202);
+        // A member sending is the space's web binding coming into existence:
+        // the resolver refuses to bootstrap web endpoints so that a *stranger*
+        // cannot, and a member is not one.
+        expect(db.getTransportBinding('web', 'telegram:-100')?.space_id).toBe('telegram:-100');
+    });
+
+    it('stores the message against the space, attributed to the session', async () => {
+        const { db } = await startServer();
+        const cookie = await signIn();
+
+        await call('POST', '/api/spaces/telegram:-100/messages', { cookie, body: { text: 'from the browser' } });
+
+        const stored = await waitForMessage(db, 'from the browser');
+        expect(stored?.sender_tg_id).toBe('777');
+        expect(stored?.transport).toBe('web');
+    });
+
+    it('refuses to send into a space the participant is not in', async () => {
+        const { db } = await startServer();
+        const cookie = await signIn();
+
+        const response = await call('POST', '/api/spaces/telegram:-200/messages', {
+            cookie,
+            body: { text: 'let me in' },
+        });
+
+        expect(response.status).toBe(404);
+        expect(db.getTransportBinding('web', 'telegram:-200')).toBeUndefined();
+    });
+
+    it('rejects an empty or oversized message', async () => {
+        await startServer();
+        const cookie = await signIn();
+
+        const empty = await call('POST', '/api/spaces/telegram:-100/messages', { cookie, body: { text: '   ' } });
+        const huge = await call('POST', '/api/spaces/telegram:-100/messages', {
+            cookie,
+            body: { text: 'x'.repeat(9000) },
+        });
+
+        expect(empty.status).toBe(400);
+        expect(huge.status).toBe(413);
+    });
+
+    it('ignores a sender named in the request body', async () => {
+        const { db } = await startServer();
+        const cookie = await signIn();
+
+        await call('POST', '/api/spaces/telegram:-100/messages', {
+            cookie,
+            body: { text: 'who am I', sender_id: '888', participant_id: '888' },
+        });
+
+        // Identity comes from the session; a client that could name its own
+        // sender could speak as anyone.
+        const stored = db.getDb().prepare("SELECT sender_tg_id FROM messages WHERE content = 'who am I'").get() as
+            | { sender_tg_id: string }
+            | undefined;
+        expect(stored?.sender_tg_id).toBe('777');
+    });
+
+    it('needs a session to send', async () => {
+        await startServer();
+
+        const response = await call('POST', '/api/spaces/telegram:-100/messages', { body: { text: 'anyone home' } });
+
+        expect(response.status).toBe(401);
+    });
+});
+
+describe('web activity stream', () => {
+    it('needs a session', async () => {
+        await startServer();
+
+        expect((await call('GET', '/api/events')).status).toBe(401);
+    });
+
+    it('tells a member their space moved', async () => {
+        await startServer();
+        const cookie = await signIn();
+
+        const streaming = readEvents(cookie, 1);
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        await call('POST', '/api/spaces/telegram:-100/messages', { cookie, body: { text: 'ping' } });
+
+        const events = await streaming;
+        expect(events.join('')).toContain('telegram:-100');
+    });
+
+    it('says nothing about a space the subscriber does not belong to', async () => {
+        await startServer();
+        const cookie = await signIn();
+        const { publishSpaceActivity } = await import('./events');
+
+        const streaming = readEvents(cookie, 1, 1200);
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        publishSpaceActivity('telegram:-200');
+
+        expect(await streaming).toHaveLength(0);
     });
 });

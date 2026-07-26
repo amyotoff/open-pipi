@@ -16,7 +16,7 @@
  */
 
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
-import { getDb, getResident } from '../db';
+import { getDb, getResident, linkParticipantIdentity } from '../db';
 
 const SCRYPT_KEY_LENGTH = 64;
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -118,6 +118,16 @@ export function upsertWebAccount(input: { username: string; password: string; pa
             created_at: now,
             updated_at: now,
         });
+
+    // The account is a transport identity like any other. Without this row the
+    // resolver would not recognize the login as an existing participant and
+    // would mint a second person — which is precisely what linking is for.
+    linkParticipantIdentity({
+        participantId: input.participantId,
+        transport: 'web',
+        externalUserId: username,
+        displayName: getResident(input.participantId)?.display_name ?? null,
+    });
 
     return getWebAccount(username)!;
 }

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Open PiPi">
+    <rect width="64" height="64" rx="14" fill="#12131a"/>
+    <circle cx="24" cy="27" r="4" fill="#6ea8fe"/>
+    <circle cx="40" cy="27" r="4" fill="#6ea8fe"/>
+    <path d="M20 40c4 5 20 5 24 0" stroke="#6ea8fe" stroke-width="4" stroke-linecap="round" fill="none"/>
+</svg>
