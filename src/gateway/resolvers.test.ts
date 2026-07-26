@@ -25,6 +25,7 @@ function buildMessage(overrides: {
 }): IncomingMessage {
     return {
         id: `${overrides.transport ?? 'telegram'}:${overrides.endpointId ?? '-100'}:1`,
+        transportMessageId: '1',
         transport: overrides.transport ?? 'telegram',
         endpoint: {
             id: overrides.endpointId ?? '-100',

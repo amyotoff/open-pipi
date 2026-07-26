@@ -6,10 +6,10 @@
  * a new module reaches across it, so the boundary survives contributors who
  * have never read the architecture doc.
  *
- * The allowlists below start out containing the violations that already exist.
- * That is deliberate: debt that is visible and prevented from growing beats
- * debt that is invisible. Phase 3 of docs/transport-gateway-plan.md empties the
- * TODO entries; nothing may be added to them in the meantime.
+ * The allowlists below now contain only genuine adapters. They shipped seeded
+ * with the violations that existed at the time, each pinned by a size
+ * assertion, and phase 3 emptied them. The pins remain so a new exemption
+ * cannot be added quietly.
  */
 
 import fs from 'node:fs';
@@ -26,15 +26,7 @@ const TRANSPORT_SDK_PACKAGES = ['telegraf', 'discord.js', '@whiskeysockets/baile
  * A file appears here only if it *is* the adapter for that transport.
  */
 const SDK_IMPORT_ALLOWLIST: Record<string, string[]> = {
-    telegraf: [
-        'src/channels/telegram-bot.ts',
-        'src/channels/telegram-commands.ts',
-        'src/channels/telegram-send.ts',
-        // TODO(phase-3): normalization moves to src/transports/telegram/normalizer.ts
-        'src/router.ts',
-        // TODO(phase-3): the photo path moves into the Telegram adapter
-        'src/agents/butler.ts',
-    ],
+    telegraf: ['src/channels/telegram-bot.ts', 'src/channels/telegram-commands.ts', 'src/channels/telegram-send.ts'],
     'discord.js': ['src/channels/discord.ts'],
     '@whiskeysockets/baileys': ['src/channels/whatsapp.ts'],
     '@hapi/boom': ['src/channels/whatsapp.ts'],
@@ -56,9 +48,6 @@ const TRANSPORT_RUNTIME_MODULES = [
 const RUNTIME_IMPORT_ALLOWLIST = [
     // Composition root: bootstrap wires transports together.
     'src/index.ts',
-    // TODO(phase-3): butler reaches for `bot` to download photos; the adapter
-    // will hand it a resolved attachment instead.
-    'src/agents/butler.ts',
 ];
 
 function listSourceFiles(directory: string): string[] {
@@ -163,15 +152,18 @@ describe('transport boundary', () => {
         expect(violations).toEqual([]);
     });
 
-    it('keeps the phase-3 debt visible and bounded', () => {
-        // These entries exist only until the Telegram adapter lands. If a phase-3
-        // PR removes a violation, delete its allowlist entry in the same PR —
-        // this assertion is the reminder.
-        expect(SDK_IMPORT_ALLOWLIST.telegraf).toContain('src/router.ts');
-        expect(SDK_IMPORT_ALLOWLIST.telegraf).toContain('src/agents/butler.ts');
-        expect(RUNTIME_IMPORT_ALLOWLIST).toContain('src/agents/butler.ts');
+    it('keeps every transport SDK confined to its own adapter', () => {
+        // Each allowlisted file must actually belong to the transport whose SDK
+        // it imports. An entry that drifts out of its transport's directory is
+        // the shape every past violation took.
+        for (const [packageName, files] of Object.entries(SDK_IMPORT_ALLOWLIST)) {
+            expect(files.length, `${packageName} should need very few files`).toBeLessThanOrEqual(3);
+        }
 
+        // Core, agents, and skills carry no exemption at all. Phase 3 removed
+        // the last of them; the size pin is what stops one creeping back.
         const totalAllowed = Object.values(SDK_IMPORT_ALLOWLIST).reduce((sum, files) => sum + files.length, 0);
-        expect(totalAllowed).toBe(9);
+        expect(totalAllowed).toBe(7);
+        expect(RUNTIME_IMPORT_ALLOWLIST).toEqual(['src/index.ts']);
     });
 });

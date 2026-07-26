@@ -171,6 +171,7 @@ export function normalizeTelegramMessage(input: TelegramNormalizerInput): Incomi
 
     return {
         id: buildIncomingMessageId(TRANSPORT, endpointId, String(messageId)),
+        transportMessageId: String(messageId),
         transport: TRANSPORT,
         endpoint: {
             id: endpointId,

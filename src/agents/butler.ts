@@ -1,9 +1,7 @@
-import { Context } from 'telegraf';
 import { buildTelegramSpaceId, getTask, logEvent, storeMessage } from '../db';
 import { processWithLLM, processWithVision } from '../core/llm';
 import { processWithOllama } from '../core/ollama';
 import { sendChannelFile, sendChannelMessage } from '../channels/runtime';
-import { bot } from '../channels/telegram';
 import { composeConversationContext } from '../core/context-composer';
 import { BRIEF_PIN_HOURS, createBriefPage, shouldCreateDailyBriefPage } from '../core/brief-pages';
 import { logError, logInfo, summarizeError, summarizeText } from '../utils/logging';
@@ -61,8 +59,13 @@ function addDailyBriefLink(input: { taskId?: string; spaceId: string; responseTe
     };
 }
 
+/**
+ * Legacy positional form. The leading argument used to be a Telegram context
+ * and was never read — callers already pass null — so it is typed away rather
+ * than dragging the SDK into the agent.
+ */
 export async function handleButlerMessage(
-    ctx: Context | null,
+    unused: null,
     chatId: string,
     senderId: string,
     text: string,
@@ -78,18 +81,15 @@ export async function handleButlerMessage(input: {
     suppressNoSend?: boolean;
 }): Promise<void>;
 export async function handleButlerMessage(
-    arg1:
-        | Context
-        | null
-        | {
-              channel?: string;
-              channelRef: string;
-              senderId: string;
-              text: string;
-              spaceId?: string;
-              taskId?: string;
-              suppressNoSend?: boolean;
-          },
+    arg1: null | {
+        channel?: string;
+        channelRef: string;
+        senderId: string;
+        text: string;
+        spaceId?: string;
+        taskId?: string;
+        suppressNoSend?: boolean;
+    },
     chatId?: string,
     senderId?: string,
     text?: string,
@@ -256,54 +256,60 @@ export async function handleButlerMessage(
     );
 }
 
-export async function handleButlerPhoto(ctx: Context, chatId: string, senderId: string, caption: string) {
-    const message = ctx.message as any;
-    if (!message.photo || message.photo.length === 0) return;
+export interface ButlerPhotoInput {
+    channel: string;
+    channelRef: string;
+    spaceId: string;
+    senderId: string;
+    caption: string;
+    /**
+     * Already fetched by the transport. The assistant reasons about an image,
+     * not about a Telegram file id — resolving one needs a bot token, which is
+     * exactly the kind of thing that must not reach an agent.
+     */
+    image: { base64: string; mimeType: string };
+}
 
-    // Get the largest photo
-    const photo = message.photo[message.photo.length - 1];
-
+export async function handleButlerPhoto(input: ButlerPhotoInput) {
     await withSpan(
         'assistant.butler.photo',
         {
             attributes: {
-                channel: 'telegram',
-                channel_ref: chatId,
-                sender_id: senderId,
-                has_caption: Boolean(caption),
-                ...summarizeText(caption),
+                channel: input.channel,
+                channel_ref: input.channelRef,
+                sender_id: input.senderId,
+                has_caption: Boolean(input.caption),
+                ...summarizeText(input.caption),
             },
         },
         async () => {
             try {
-                const file = await bot.telegram.getFile(photo.file_id);
-                const fileUrl = `https://api.telegram.org/file/bot${bot.telegram.token}/${file.file_path}`;
-
-                const response = await fetch(fileUrl);
-                const buffer = Buffer.from(await response.arrayBuffer());
-                const base64Image = buffer.toString('base64');
-                const mimeType = file.file_path?.endsWith('.png') ? 'image/png' : 'image/jpeg';
-
                 const { systemPrompt } = composeConversationContext({
-                    spaceId: buildTelegramSpaceId(chatId),
-                    senderId,
-                    channelRef: chatId,
+                    spaceId: input.spaceId,
+                    senderId: input.senderId,
+                    channelRef: input.channelRef,
                 });
 
-                const userPrompt = caption
-                    ? `The user sent a photo with this caption: "${caption}". Analyze the image and answer helpfully and directly.`
+                const userPrompt = input.caption
+                    ? `The user sent a photo with this caption: "${input.caption}". Analyze the image and answer helpfully and directly.`
                     : 'The user sent a photo without a caption. Describe what you see, infer what is relevant, and suggest the most useful next step.';
 
-                const visionResponse = await processWithVision(systemPrompt, userPrompt, base64Image, mimeType);
+                const visionResponse = await processWithVision(
+                    systemPrompt,
+                    userPrompt,
+                    input.image.base64,
+                    input.image.mimeType
+                );
 
                 if (visionResponse.text) {
                     addSpanEvent('assistant.butler.photo_reply_sent', { response_chars: visionResponse.text.length });
-                    await sendChannelMessage('telegram', chatId, visionResponse.text);
+                    await sendChannelMessage(input.channel, input.channelRef, visionResponse.text);
 
                     storeMessage({
                         id: `bot-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-                        space_id: buildTelegramSpaceId(chatId),
-                        channel_ref: chatId,
+                        space_id: input.spaceId,
+                        channel: input.channel,
+                        channel_ref: input.channelRef,
                         sender_id: 'jivs',
                         content: visionResponse.text,
                         timestamp: new Date().toISOString(),
@@ -313,7 +319,11 @@ export async function handleButlerPhoto(ctx: Context, chatId: string, senderId: 
             } catch (err: any) {
                 recordActiveSpanException(err, { 'app.butler.photo_status': 'failed' });
                 logError('BUTLER', 'photo_processing_failed', summarizeError(err));
-                await sendChannelMessage('telegram', chatId, 'Не удалось обработать фото. Попробуй ещё раз.');
+                await sendChannelMessage(
+                    input.channel,
+                    input.channelRef,
+                    'Не удалось обработать фото. Попробуй ещё раз.'
+                );
             }
         }
     );

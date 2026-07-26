@@ -3076,10 +3076,9 @@ function normalizeStoredMessage(
         throw new Error('storeMessage requires channel_ref (or legacy chat_jid).');
     }
 
-    // TODO(phase-3): the space_id fallback parses a transport out of a space id.
-    // Once every caller passes `channel` explicitly it can go, and with it the
-    // last assumption that a space id means anything.
-    const inferredChannel = msg.channel || msg.space_id?.split(':', 1)[0] || 'telegram';
+    // Only consulted when the caller gave no space id, in which case there is
+    // no space id to read a transport out of either — so this never parses one.
+    const inferredChannel = msg.channel || 'telegram';
     const senderId = msg.sender_id ?? msg.sender_tg_id ?? null;
 
     return {

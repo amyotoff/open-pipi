@@ -70,6 +70,9 @@ export interface IncomingReplyContext {
 export interface IncomingMessage {
     id: string;
 
+    /** The id this message has on its own transport, for replying in thread. */
+    transportMessageId: string;
+
     transport: string;
 
     endpoint: {
@@ -215,6 +218,12 @@ export interface TransportRuntimeContext {
     };
 }
 
+/** An attachment's actual bytes, once a transport has been asked for them. */
+export interface ResolvedAttachment {
+    base64: string;
+    mimeType: string;
+}
+
 export interface TransportAdapter {
     readonly name: string;
 
@@ -225,6 +234,18 @@ export interface TransportAdapter {
     send(destination: TransportDestination, message: OutgoingMessage): Promise<DeliveryResult>;
 
     getCapabilities(destination?: TransportDestination): Promise<TransportCapabilities>;
+
+    /**
+     * Fetch the bytes behind an attachment reference.
+     *
+     * A method rather than data on the attachment, for two reasons. It keeps
+     * IncomingMessage serializable, and it lets the gateway defer the download
+     * until after the permission checks — otherwise a stranger could make the
+     * assistant fetch files just by sending them.
+     *
+     * Optional: transports that deliver content inline do not need it.
+     */
+    resolveAttachment?(attachment: IncomingAttachment): Promise<ResolvedAttachment | null>;
 }
 
 /** Capabilities for a transport that can do nothing but send plain text. */

@@ -55,7 +55,10 @@ function spaceKindForEndpoint(endpointType: TransportEndpointType): string {
  * columns, and only then does bootstrap run. That way a re-pointed binding
  * takes effect immediately even though the old columns still say otherwise.
  */
-export function resolveTransportBinding(message: IncomingMessage): BindingResolution {
+export function resolveTransportBinding(
+    message: IncomingMessage,
+    options?: { allowBootstrap?: boolean }
+): BindingResolution {
     const { transport, endpoint, threadId } = message;
 
     const binding = getTransportBinding(transport, endpoint.id, threadId);
@@ -77,7 +80,11 @@ export function resolveTransportBinding(message: IncomingMessage): BindingResolu
         return { binding: null, space: legacySpace, source: 'legacy_space' };
     }
 
-    if (!canBootstrapTransport(transport)) {
+    // Bootstrapping is a write, so the caller decides when it is allowed. The
+    // gateway looks up first and only asks for a space once the sender has
+    // cleared the access check — otherwise a stranger in a random group could
+    // make the assistant create rows just by talking.
+    if (options?.allowBootstrap === false || !canBootstrapTransport(transport)) {
         return { binding: null, space: null, source: 'none' };
     }
 

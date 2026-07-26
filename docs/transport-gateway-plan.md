@@ -477,33 +477,43 @@ repo, and a fixture runs on every CI job rather than once by hand; re-running is
 integrity check passes; packs, groundings, memberships, and pre-`space_id` history all
 survive; no old data removed.
 
-### Phase 3 — Telegram normalizer + gateway — **in progress**
-*Behavior-preserving refactor. The largest and riskiest phase, so it lands in pieces that
-each keep `pnpm verify` green.*
-
-**Done:**
+### Phase 3 — Telegram normalizer + gateway — **done** (`pnpm verify` green, 555 tests)
+*Behavior-preserving refactor. The largest and riskiest phase, landed in pieces that each
+kept `pnpm verify` green.*
 
 - `transports/telegram/normalizer.ts` — typed structurally rather than against telegraf, so
   it needs no SDK import and tests from plain fixtures. Decides two things Core would
   otherwise have to: chat type collapsed into the shared closed set (unknown → `group`,
   never `direct`), and whether a message was addressed to the assistant.
-- `gateway/binding-resolver.ts` and `gateway/participant-resolver.ts`, with the legacy
-  fallbacks intact and bootstrap policy per transport.
-- `ensureSpace` now binds inline — writing the resolver tests surfaced that a space created
-  at runtime had no binding until the next restart, the same hole the identity work had.
+- `gateway/binding-resolver.ts`, `gateway/participant-resolver.ts`, and
+  `gateway/participation.ts` — routing, identity, and the group-reply rules, each testable
+  on its own.
+- `gateway/message-gateway.ts` — the single pipeline. `router.ts` is now a shim that
+  converts the legacy `IncomingChannelMessage` and calls the same gateway, so Discord,
+  WhatsApp, and Gmail run the identical path without being rewritten.
+- `transports/telegram/adapter.ts` owns the connection; `telegram-bot.ts` takes the
+  telegraf context apart at its own edge so the SDK's types stop there.
+- Butler receives a resolved image instead of a Telegram file id. **The download moved
+  behind the permission checks**, via an optional `resolveAttachment` on the adapter —
+  keeping the bytes on the attachment would have let any stranger make the assistant fetch
+  files just by sending one.
+- `telegraf` is now imported by exactly three files, all of them Telegram's own; the
+  allowlists carry no Core, agent, or skill exemptions at all.
 
-**Remaining:**
+Two things the implementation found:
 
-- `gateway/message-gateway.ts` + `gateway/participation.ts`; `router.ts` becomes a shim
-- `transports/telegram/adapter.ts` owning the bot, calling the normalizer and the gateway
-- Photo path: `bot.telegram.getFile()` moves into the adapter; butler receives a resolved
-  attachment and stops importing telegraf
-- Inbound dedup wired to the `inserted` flag
-- The remaining space-id parse sites removed
-- Boundary allowlist shrinks to `transports/telegram/**` and the size pin drops to 5
+- **The old code let bootstrap run before the access check on some paths**, so a stranger
+  in an unknown group could cause a space to be created. Look-up and bootstrap are now
+  separate calls, and only an owner — or a direct chat, which has always registered its
+  sender so a refusal can be recorded — may bring a space into existence.
+- **The space-id parse in `normalizeStoredMessage` was dead code**: it only ran when the
+  caller gave no space id, in which case there was no space id to parse. Deleted rather
+  than carried forward.
 
-**Done when:** Telegram behaves identically (commands, groups, DMs, photos, external groups);
-a test asserts a duplicate update runs the agent exactly once and replies once.
+**Done:** Telegram behaves identically (commands, groups, DMs, photos, external groups,
+channel modes, authority guard) — all nineteen router tests were ported onto the gateway
+and driven through the real normalizer, plus new cases for duplicate delivery, deferred
+attachment download, and space-creation discipline.
 
 ### Phase 4 — Outbox and delivery worker
 

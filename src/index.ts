@@ -5,12 +5,19 @@ const APP_VERSION = process.env.npm_package_version || '2.5.0';
 let shuttingDown = false;
 let closeDatabaseRef: (() => void) | null = null;
 let closeApiServerRef: (() => Promise<void>) | null = null;
+let closeTransportsRef: (() => Promise<void>) | null = null;
 
 async function shutdown(signal: string) {
     if (shuttingDown) return;
     shuttingDown = true;
 
     console.log(`[BOOT] Received ${signal}, shutting down gracefully...`);
+
+    try {
+        await closeTransportsRef?.();
+    } catch (error) {
+        console.error('[BOOT] Failed to stop transports cleanly:', error);
+    }
 
     try {
         closeDatabaseRef?.();
@@ -50,7 +57,9 @@ async function bootstrap() {
 
     const [
         db,
-        telegram,
+        telegramAdapter,
+        transportRegistry,
+        gateway,
         channelRegistry,
         runtime,
         router,
@@ -61,7 +70,9 @@ async function bootstrap() {
         api,
     ] = await Promise.all([
         import('./db'),
-        import('./channels/telegram'),
+        import('./transports/telegram/adapter'),
+        import('./transports/registry'),
+        import('./gateway/message-gateway'),
         import('./channels/_registry'),
         import('./channels/runtime'),
         import('./router'),
@@ -80,14 +91,12 @@ async function bootstrap() {
     const googleOAuth = await import('./core/google-oauth');
     googleOAuth.initGoogleOAuthMigrations();
     googleOAuth.onGoogleOAuthSuccess(async (spaceId) => {
-        const chatId = spaceId.startsWith('telegram:') ? spaceId.slice('telegram:'.length) : null;
-        if (chatId) {
-            const { sendMessageToChat } = await import('./channels/telegram');
-            await sendMessageToChat(
-                chatId,
-                'Google Drive connected! You can now use Google Docs and Sheets tools.'
-            ).catch(() => {});
-        }
+        // Addressed by space, not by picking a chat id out of the space id.
+        // The space knows which endpoint reaches it; this works for whichever
+        // transport the person actually used.
+        await runtime
+            .sendSpaceMessage(spaceId, 'Google Drive connected! You can now use Google Docs and Sheets tools.')
+            .catch(() => {});
     });
 
     await channelRegistry.connectAll();
@@ -121,8 +130,11 @@ async function bootstrap() {
     await api.startApiServer();
     closeApiServerRef = () => api.stopApiServer();
 
-    telegram.setMessageHandler(router.handleIncomingMessage);
-    telegram.startTelegramBot();
+    // Telegram is required: without it there is no assistant to run, so a
+    // failure here should stop the boot rather than leave a silent runtime.
+    transportRegistry.registerTransport(new telegramAdapter.TelegramTransportAdapter(), { required: true });
+    closeTransportsRef = () => transportRegistry.stopAllTransports();
+    await transportRegistry.startAllTransports({ messageGateway: { handleIncoming: gateway.handleIncoming } });
 
     db.logEvent('reboot', { reason: 'startup', timestamp: new Date().toISOString() });
     try {
@@ -131,9 +143,10 @@ async function bootstrap() {
     } catch (error) {
         console.error('[BOOT] Failed to refresh healthy restore point:', error);
     }
+    const { notifyPrimaryHousehold } = runtime;
     const startupMsg = 'Open PiPi is on air';
     console.log(startupMsg);
-    telegram.notifyHousehold(startupMsg);
+    await notifyPrimaryHousehold(startupMsg);
 }
 
 process.once('SIGINT', () => {

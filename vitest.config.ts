@@ -16,6 +16,9 @@ export default defineConfig({
                 'src/index.ts',
                 'src/sandboxd.ts',
                 'src/task-scheduler.ts',
+                // Transport adapters are thin I/O shells over a live connection;
+                // the logic they wrap (normalizer, gateway, resolvers) is tested.
+                'src/transports/*/adapter.ts',
                 // Channel adapters (require Telegram/Discord/WhatsApp/IMAP connections)
                 'src/channels/telegram.ts',
                 'src/channels/telegram-bot.ts',
