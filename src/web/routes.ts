@@ -37,7 +37,7 @@ const MAX_MESSAGE_CHARS = 8_000;
 
 export const WEB_PUBLIC_DIR = path.join(__dirname, 'public');
 
-interface AuthedRequest extends Request {
+export interface AuthedRequest extends Request {
     session?: AuthenticatedSession;
 }
 
@@ -149,6 +149,10 @@ export async function mountWebClient(app: Express, options: MountWebClientOption
         clearSessionCookie(res);
         res.json({ ok: true });
     });
+
+    // Owner-only views live behind the same session, checked one layer deeper.
+    const { mountAdminRoutes } = await import('./admin-routes');
+    mountAdminRoutes(app, requireSession);
 
     app.get('/api/me', requireSession, (req: AuthedRequest, res: Response) => {
         const participant = getResident(req.session!.participantId);

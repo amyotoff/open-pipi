@@ -9,6 +9,8 @@
     --muted: #9aa0b4;
     --accent: #6ea8fe;
     --danger: #ff8080;
+    --hover: #23263250;
+    --ok: #6ee7a8;
 }
 
 @media (prefers-color-scheme: light) {
@@ -20,11 +22,18 @@
         --muted: #5f6478;
         --accent: #2b6cb0;
         --danger: #b3261e;
+        --hover: #eceef5;
+        --ok: #1a7f52;
     }
 }
 
 * {
     box-sizing: border-box;
+}
+
+/* `hidden` must win over a display rule, or a hidden flex panel still shows. */
+[hidden] {
+    display: none !important;
 }
 
 body {
@@ -86,58 +95,139 @@ button {
 
 .workspace {
     display: grid;
-    grid-template-columns: minmax(14rem, 20rem) 1fr;
-    min-height: 100vh;
+    grid-template-columns: minmax(14rem, 18rem) 1fr;
+    height: 100vh;
+    /* Panels scroll inside themselves; the page itself never does. */
+    overflow: hidden;
+}
+
+/* Both views share the second column, so only one is ever laid out. */
+.conversation,
+.admin {
+    grid-column: 2;
+    grid-row: 1;
 }
 
 .sidebar {
-    border-right: 1px solid var(--line);
-    background: var(--panel);
+    grid-column: 1;
+    grid-row: 1;
     display: flex;
     flex-direction: column;
+    min-height: 0;
+    border-right: 1px solid var(--line);
+    background: var(--panel);
 }
 
-.sidebar-header {
+/* Navigation: an icon, a label, and enough room to breathe. Nothing else. */
+.nav {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    padding: 0.75rem 0.6rem 0.4rem;
+}
+
+.nav-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.nav-heading {
+    margin: 0.9rem 0 0.35rem;
+    padding: 0 0.55rem;
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 500;
+}
+
+.nav-item {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    width: 100%;
+    margin: 0;
+    padding: 0.5rem 0.55rem;
+    background: transparent;
+    color: var(--text);
+    border: 0;
+    border-radius: 8px;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.nav-item:hover {
+    background: var(--hover);
+}
+
+.nav-item[aria-current='true'] {
+    background: var(--hover);
+    color: var(--accent);
+}
+
+.nav-item svg {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    opacity: 0.85;
+}
+
+.panel-section {
+    padding: 0.2rem 0.6rem 0.6rem;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+.sidebar-footer {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 0.5rem;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid var(--line);
-    font-size: 0.9rem;
+    margin-top: auto;
+    padding: 0.7rem 0.9rem;
+    border-top: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.85rem;
 }
 
-.sidebar-header button {
+.sidebar-footer button {
     margin: 0;
     padding: 0.3rem 0.6rem;
     background: transparent;
     color: var(--muted);
     border: 1px solid var(--line);
-    font-size: 0.8rem;
+    font-size: 0.78rem;
 }
 
 .spaces {
     list-style: none;
     margin: 0;
     padding: 0;
-    overflow-y: auto;
 }
 
 .spaces button {
     width: 100%;
     margin: 0;
-    padding: 0.7rem 1rem;
+    padding: 0.5rem 0.55rem;
     text-align: left;
     background: transparent;
     color: inherit;
     border: 0;
-    border-bottom: 1px solid var(--line);
-    border-radius: 0;
+    border-radius: 8px;
+}
+
+.spaces button:hover {
+    background: var(--hover);
 }
 
 .spaces button[aria-current='true'] {
-    background: var(--bg);
-    border-left: 3px solid var(--accent);
+    background: var(--hover);
 }
 
 .space-title {
@@ -207,12 +297,23 @@ h2 {
 @media (max-width: 720px) {
     .workspace {
         grid-template-columns: 1fr;
+        grid-template-rows: auto 1fr;
+        height: auto;
+        min-height: 100vh;
+        overflow: visible;
     }
 
     .sidebar {
+        grid-column: 1;
         border-right: 0;
         border-bottom: 1px solid var(--line);
-        max-height: 40vh;
+        max-height: 45vh;
+    }
+
+    .conversation,
+    .admin {
+        grid-column: 1;
+        grid-row: 2;
     }
 }
 
@@ -250,4 +351,166 @@ h2 {
     clip: rect(0, 0, 0, 0);
     white-space: nowrap;
     border: 0;
+}
+
+/* ==========================================
+   Dashboard
+   ========================================== */
+
+.admin {
+    display: flex;
+    flex-direction: column;
+    padding: 1.25rem 1.5rem;
+    min-width: 0;
+    overflow-y: auto;
+}
+
+.admin-header h2 {
+    margin: 0;
+    font-size: 1.15rem;
+}
+
+.muted {
+    margin: 0.15rem 0 0;
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+
+.admin-body {
+    margin-top: 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.1rem;
+}
+
+/* Small numbers worth seeing at a glance. */
+.stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr));
+    gap: 0.6rem;
+}
+
+.stat {
+    padding: 0.7rem 0.85rem;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+}
+
+.stat-label {
+    display: block;
+    color: var(--muted);
+    font-size: 0.76rem;
+}
+
+.stat-value {
+    display: block;
+    margin-top: 0.15rem;
+    font-size: 1.3rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.stat-value.is-ok {
+    color: var(--ok);
+}
+
+.stat-value.is-bad {
+    color: var(--danger);
+}
+
+.card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+.card > h3 {
+    margin: 0;
+    padding: 0.7rem 0.9rem;
+    border-bottom: 1px solid var(--line);
+    font-size: 0.9rem;
+}
+
+/* Wide tables scroll on their own rather than the page. */
+.table-scroll {
+    overflow-x: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.87rem;
+}
+
+th,
+td {
+    padding: 0.55rem 0.9rem;
+    text-align: left;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+}
+
+th {
+    color: var(--muted);
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+tr:last-child td {
+    border-bottom: 0;
+}
+
+td.wrap {
+    overflow-wrap: anywhere;
+}
+
+.pill {
+    display: inline-block;
+    padding: 0.1rem 0.45rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--muted);
+    font-size: 0.76rem;
+    white-space: nowrap;
+}
+
+.pill.is-bad {
+    color: var(--danger);
+    border-color: var(--danger);
+}
+
+.pill.is-ok {
+    color: var(--ok);
+    border-color: var(--ok);
+}
+
+.page-body {
+    margin: 0;
+    padding: 0.9rem;
+    max-height: 26rem;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 0.85rem;
+}
+
+.empty {
+    padding: 0.9rem;
+    color: var(--muted);
+    font-size: 0.87rem;
+}
+
+/* A table cell that opens something, styled as a link rather than a button. */
+.link {
+    margin: 0;
+    padding: 0;
+    background: none;
+    border: 0;
+    color: var(--accent);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
 }
