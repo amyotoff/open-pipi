@@ -39,6 +39,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgnutls30 \
     && rm -rf /var/lib/apt/lists/*
 
+# The runtime starts with `node dist/index.js` and never installs anything, so
+# npm is dead weight here — and it vendors its own dependency tree, which is
+# where the image's CVEs keep coming from (CVE-2026-59873 in npm's bundled tar
+# being the current one). Dropping it removes the whole class.
+RUN rm -rf /usr/local/lib/node_modules/npm \
+    /usr/local/lib/node_modules/corepack \
+    /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
+
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml ./
