@@ -236,6 +236,18 @@ export interface TransportAdapter {
     getCapabilities(destination?: TransportDestination): Promise<TransportCapabilities>;
 
     /**
+     * Split a message into the pieces this transport will physically send.
+     *
+     * Done when a delivery is queued rather than when it is sent, so each piece
+     * retries on its own. Splitting at send time would mean a failure halfway
+     * through a long answer re-sends the parts that already arrived, and the
+     * reader sees the beginning twice.
+     *
+     * Optional: a transport with no size limit leaves the message whole.
+     */
+    splitForDelivery?(message: OutgoingMessage): OutgoingMessage[];
+
+    /**
      * Fetch the bytes behind an attachment reference.
      *
      * A method rather than data on the attachment, for two reasons. It keeps

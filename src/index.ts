@@ -6,12 +6,21 @@ let shuttingDown = false;
 let closeDatabaseRef: (() => void) | null = null;
 let closeApiServerRef: (() => Promise<void>) | null = null;
 let closeTransportsRef: (() => Promise<void>) | null = null;
+let closeDeliveryWorkerRef: (() => void) | null = null;
 
 async function shutdown(signal: string) {
     if (shuttingDown) return;
     shuttingDown = true;
 
     console.log(`[BOOT] Received ${signal}, shutting down gracefully...`);
+
+    try {
+        // Stop accepting new work before the transports go away, so the worker
+        // never claims an entry it has no way to deliver.
+        closeDeliveryWorkerRef?.();
+    } catch (error) {
+        console.error('[BOOT] Failed to stop the delivery worker cleanly:', error);
+    }
 
     try {
         await closeTransportsRef?.();
@@ -60,6 +69,7 @@ async function bootstrap() {
         telegramAdapter,
         transportRegistry,
         gateway,
+        deliveryWorker,
         channelRegistry,
         runtime,
         router,
@@ -73,6 +83,7 @@ async function bootstrap() {
         import('./transports/telegram/adapter'),
         import('./transports/registry'),
         import('./gateway/message-gateway'),
+        import('./gateway/delivery-worker'),
         import('./channels/_registry'),
         import('./channels/runtime'),
         import('./router'),
@@ -135,6 +146,11 @@ async function bootstrap() {
     transportRegistry.registerTransport(new telegramAdapter.TelegramTransportAdapter(), { required: true });
     closeTransportsRef = () => transportRegistry.stopAllTransports();
     await transportRegistry.startAllTransports({ messageGateway: { handleIncoming: gateway.handleIncoming } });
+
+    // Started after the transports, so the first drain has somewhere to send.
+    // Anything queued before the last shutdown goes out now.
+    deliveryWorker.startDeliveryWorker();
+    closeDeliveryWorkerRef = deliveryWorker.stopDeliveryWorker;
 
     db.logEvent('reboot', { reason: 'startup', timestamp: new Date().toISOString() });
     try {

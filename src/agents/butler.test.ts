@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { makeChannelRuntimeMock } from '../test-helpers/channel-runtime-mock';
 
 async function loadButler(options: { task?: any; briefUrl?: string | null } = {}) {
     vi.resetModules();
@@ -100,6 +101,7 @@ async function loadButler(options: { task?: any; briefUrl?: string | null } = {}
         sendFileToChat,
         bot: { telegram: { getFile, token: 'bot-token' } },
     }));
+    vi.doMock('../channels/runtime', () => makeChannelRuntimeMock({ sendMessageToChat, sendFileToChat }));
     vi.doMock('../core/memory-context', () => ({ getMemoryContext: vi.fn(() => '[MEMORY]') }));
     vi.doMock('../core/memory-sprint', () => ({
         ensureActiveMemorySprint: vi.fn(() => ({

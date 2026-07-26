@@ -515,16 +515,39 @@ channel modes, authority guard) — all nineteen router tests were ported onto t
 and driven through the real normalizer, plus new cases for duplicate delivery, deferred
 attachment download, and space-creation discipline.
 
-### Phase 4 — Outbox and delivery worker
+### Phase 4 — Outbox and delivery worker — **done** (`pnpm verify` green, 592 tests)
 
-- `outbox.ts` + `delivery-worker.ts`; the three `send*` functions enqueue (D6)
+- `outbox.ts` + `delivery-worker.ts`; `sendChannelMessage`, `sendSpaceMessage`, and
+  `sendChannelFile` enqueue, so all ~15 callers are unchanged (D6)
 - Telegram renderer with **4096-char splitting** — fixes the latent bug in §1
-- The four `SendResult.success` call sites handled per the D6 table
-- Worker started and stopped in the existing bootstrap/shutdown path
+- `legacy-channel.ts` wraps Discord, WhatsApp, and Gmail so the worker sees one interface
+  (D10)
+- Worker started after the transports and stopped before them, so it never claims an entry
+  it has no way to deliver
 
-**Done when:** tests cover retry-then-succeed, retry-exhaustion → `failed`, restart recovery
-of a `queued` entry, `processing` reclaim, idempotency-key collision, long-message
-splitting, and per-endpoint ordering (a retrying head blocks its endpoint but not others).
+Four things the implementation changed from the plan:
+
+- **Splitting happens at enqueue, not at send.** Sending a three-part answer and failing on
+  part two would re-send part one on retry, and the reader sees the beginning twice. Each
+  piece is its own entry, so each retries alone, and the per-endpoint FIFO keeps them in
+  order.
+- **Ordering follows `rowid`, not `created_at`.** Two entries queued in the same
+  millisecond share a timestamp — exactly what happens when a reply and its attachment go
+  out together — and breaking that tie on a random id delivered them in arbitrary order.
+- **The evaluator probe was fine.** The D6 table claimed it would break; re-reading it
+  showed it asserts that a space in quiet mode *suppresses* the send, which the outbox
+  preserves. Corrected rather than "fixed".
+- **Refusals bypass the queue.** An access-denied reply is only meaningful in the moment,
+  and queueing one spends the retry budget re-offering it to someone not allowed to talk to
+  the assistant at all. `sendChannelMessageNow` exists for exactly this.
+
+Task deadline alerts now carry an idempotency key naming the task, deadline, and phase,
+which makes a duplicate alert impossible rather than merely unlikely.
+
+**Done:** tests cover retry-then-succeed, retry-exhaustion → `failed`, permanent rejection,
+an adapter that throws, restart recovery of a `queued` entry, reclaim of a claim stranded by
+a crash, idempotency-key collision, long-message splitting with balanced markup, and
+per-endpoint ordering (a retrying head blocks its endpoint but not others).
 
 ### Phase 5 — Web transport, read-only
 

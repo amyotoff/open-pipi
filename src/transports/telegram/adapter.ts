@@ -17,6 +17,7 @@ import {
 import { sendMessageToChat, sendFileToChat } from '../../channels/telegram-send';
 import { logError, logWarn, summarizeError } from '../../utils/logging';
 import { normalizeTelegramMessage } from './normalizer';
+import { renderForTelegram } from './renderer';
 import { TELEGRAM_CAPABILITIES } from './capabilities';
 import type {
     DeliveryResult,
@@ -71,6 +72,31 @@ export class TelegramTransportAdapter implements TransportAdapter {
         }
     }
 
+    /**
+     * One outgoing message becomes one send per rendered piece: the text split
+     * across Telegram's ceiling, then each attachment.
+     */
+    splitForDelivery(message: OutgoingMessage): OutgoingMessage[] {
+        return renderForTelegram(message, TELEGRAM_CAPABILITIES).map((delivery, index) => ({
+            id: `${message.id}#${index}`,
+            content: {
+                ...(delivery.text ? { text: delivery.text } : {}),
+                ...(delivery.attachment ? { attachments: [delivery.attachment] } : {}),
+            },
+            ...(delivery.replyToTransportMessageId
+                ? { replyTo: { transportMessageId: delivery.replyToTransportMessageId } }
+                : {}),
+            formatting: message.formatting,
+            delivery: {
+                silent: delivery.silent,
+                pin: delivery.pin,
+                unpinAfterHours: delivery.unpinAfterHours,
+            },
+            metadata: message.metadata,
+        }));
+    }
+
+    /** Receives a single already-split piece; splitForDelivery did the shaping. */
     async send(destination: TransportDestination, message: OutgoingMessage): Promise<DeliveryResult> {
         const attachment = message.content.attachments?.[0];
 

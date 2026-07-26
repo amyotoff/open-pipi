@@ -46,7 +46,7 @@ async function loadGateway(options: LoadOptions = {}) {
 
     vi.doMock('../db', () => ({ storeMessage, getSpace, getParticipantIdentity }));
     vi.doMock('../agents/butler', () => ({ handleButlerMessage, handleButlerPhoto }));
-    vi.doMock('../channels/runtime', () => ({ buildChannelPersonId, sendChannelMessage }));
+    vi.doMock('../channels/runtime', () => ({ buildChannelPersonId, sendChannelMessageNow: sendChannelMessage }));
     vi.doMock('../config', () => ({
         BOT_NAME_ALIASES: ['pipi', 'пипи', 'jeeves', 'jivs', 'дживс'],
         isHouseholdChat: vi.fn(() => options.isHouseholdChat ?? false),

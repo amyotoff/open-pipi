@@ -11,7 +11,7 @@
 import { SpanKind } from '@opentelemetry/api';
 import { getParticipantIdentity, getSpace, storeMessage, type Space } from '../db';
 import { isOwner } from '../config';
-import { buildChannelPersonId, sendChannelMessage } from '../channels/runtime';
+import { buildChannelPersonId, sendChannelMessageNow } from '../channels/runtime';
 import { recordApprovalResponse } from '../utils/approvals';
 import { logInfo, logWarn, summarizeText } from '../utils/logging';
 import { evaluateAuthorityGuard } from '../core/authority-guard';
@@ -40,12 +40,19 @@ function readImageAttachment(message: IncomingMessage): IncomingAttachment | und
     return message.content.attachments?.find((attachment) => attachment.type === 'image');
 }
 
+/**
+ * Answer a refusal on the spot rather than through the outbox.
+ *
+ * A refusal is only meaningful in the moment it is given, and queueing one
+ * would spend the retry budget re-offering it to someone who is not allowed to
+ * talk to the assistant in the first place.
+ */
 async function reply(message: IncomingMessage, text: string, options?: HandleIncomingOptions): Promise<void> {
     if (options?.respond) {
         await options.respond(text);
         return;
     }
-    await sendChannelMessage(message.transport, message.endpoint.id, text);
+    await sendChannelMessageNow(message.transport, message.endpoint.id, text);
 }
 
 function injectReplyContext(message: IncomingMessage, text: string): string {
