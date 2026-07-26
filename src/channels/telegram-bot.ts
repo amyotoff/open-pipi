@@ -35,6 +35,7 @@ if (!TELEGRAM_BOT_TOKEN) {
 export const bot = new Telegraf(TELEGRAM_BOT_TOKEN || 'dummy_token');
 
 let fallbackHandlersRegistered = false;
+let launched = false;
 
 /**
  * Register the catch-all handlers. Telegraf middleware runs in registration
@@ -88,7 +89,18 @@ export function startTelegramBot() {
         .catch((err) => console.error('[BOT] Failed to set commands:', err.message));
 
     bot.launch();
+    launched = true;
     console.log('Telegram bot started.');
-    process.once('SIGINT', () => bot.stop('SIGINT'));
-    process.once('SIGTERM', () => bot.stop('SIGTERM'));
+    // Shutdown belongs to the transport registry, which the bootstrap drives on
+    // SIGINT/SIGTERM. Registering signal handlers here too would stop the bot
+    // twice and make telegraf throw on the second call.
+}
+
+/** Whether launch() actually ran, so stopping a bot that never started is a no-op. */
+export function isTelegramBotLaunched(): boolean {
+    return launched;
+}
+
+export function markTelegramBotStopped(): void {
+    launched = false;
 }

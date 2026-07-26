@@ -14,6 +14,12 @@
 
 import './telegram-commands';
 
-export { bot, registerTelegramFallbackHandlers, startTelegramBot } from './telegram-bot';
+export {
+    bot,
+    isTelegramBotLaunched,
+    markTelegramBotStopped,
+    registerTelegramFallbackHandlers,
+    startTelegramBot,
+} from './telegram-bot';
 export type { TelegramInboundUpdate, TelegramFallbackHandlers } from './telegram-bot';
 export { sendMessageToChat, sendFileToChat, notifyHousehold, sendTypingAction } from './telegram-send';

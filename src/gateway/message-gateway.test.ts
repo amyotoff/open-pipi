@@ -462,6 +462,21 @@ describe('gateway: photos', () => {
         expect(mocks.handleButlerPhoto).not.toHaveBeenCalled();
     });
 
+    it('refuses a photo from a non-owner even in an attached external group', async () => {
+        const { handleIncoming, normalizeTelegramMessage, mocks } = await loadGateway({
+            isOwner: false,
+            spacePolicyJson: JSON.stringify({ external_group_enabled: true, external_group_mode: 'auto' }),
+        });
+
+        await handleIncoming(normalizeTelegramMessage(photoUpdate({ id: 500, type: 'supergroup' }))!);
+
+        // Text from strangers is fine in a group the operator attached on
+        // purpose. Vision is the priciest call the assistant makes, and has
+        // always needed an owner on every surface.
+        expect(mocks.resolveAttachment).not.toHaveBeenCalled();
+        expect(mocks.handleButlerPhoto).not.toHaveBeenCalled();
+    });
+
     it('ignores a photo in a group the assistant does not take part in', async () => {
         const { handleIncoming, normalizeTelegramMessage, mocks } = await loadGateway({ isHouseholdChat: false });
 

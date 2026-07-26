@@ -184,8 +184,16 @@ export async function handleIncoming(message: IncomingMessage, options?: HandleI
 
             // An external group is answerable by people who are not owners; every
             // other surface stays owner-only, exactly as before.
+            //
+            // Attachments are the exception to the exception: they have always
+            // required an owner, on every surface. Vision is the most expensive
+            // call the assistant makes, and an attached client group is full of
+            // people the operator did not vouch for.
             const isExternalTelegramGroup =
-                message.transport === 'telegram' && !participation.isDirect && participation.groupMode === 'external';
+                message.transport === 'telegram' &&
+                !participation.isDirect &&
+                participation.groupMode === 'external' &&
+                !image;
 
             if (!senderIsOwner && !isExternalTelegramGroup) {
                 addSpanAttributes({ 'app.access': 'denied' });

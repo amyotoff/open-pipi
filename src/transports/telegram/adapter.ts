@@ -7,7 +7,13 @@
  * or a bot token.
  */
 
-import { bot, registerTelegramFallbackHandlers, startTelegramBot } from '../../channels/telegram';
+import {
+    bot,
+    isTelegramBotLaunched,
+    markTelegramBotStopped,
+    registerTelegramFallbackHandlers,
+    startTelegramBot,
+} from '../../channels/telegram';
 import { sendMessageToChat, sendFileToChat } from '../../channels/telegram-send';
 import { logError, logWarn, summarizeError } from '../../utils/logging';
 import { normalizeTelegramMessage } from './normalizer';
@@ -52,12 +58,16 @@ export class TelegramTransportAdapter implements TransportAdapter {
     }
 
     async stop(): Promise<void> {
+        // A bot that never launched — no token, a dry run — has nothing to stop,
+        // and telegraf throws rather than shrugging if asked anyway.
+        if (!isTelegramBotLaunched()) return;
+
         try {
             bot.stop('shutdown');
         } catch (error) {
-            // Telegraf throws when the bot was never launched, which is the
-            // normal case for a token-less test or dry run.
             logError('TELEGRAM', 'stop_failed', summarizeError(error));
+        } finally {
+            markTelegramBotStopped();
         }
     }
 
