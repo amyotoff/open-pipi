@@ -420,6 +420,35 @@ function createSchema(database: Database.Database): void {
         -- Delivery is FIFO per endpoint, so the worker reads in this order.
         CREATE INDEX IF NOT EXISTS idx_outbox_endpoint_created
             ON outbox(transport, endpoint_id, created_at);
+
+        -- Local Web accounts. participant_id points at an existing participant,
+        -- which is what makes a Web login the same person as their Telegram
+        -- account rather than a stranger with the same name.
+        CREATE TABLE IF NOT EXISTS web_accounts (
+            username TEXT PRIMARY KEY,
+            password_hash TEXT NOT NULL,
+            password_salt TEXT NOT NULL,
+            participant_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_web_accounts_participant
+            ON web_accounts(participant_id);
+
+        -- Sessions are stored hashed: a stolen database must not hand over live
+        -- sessions the way a stolen cookie would.
+        CREATE TABLE IF NOT EXISTS web_sessions (
+            token_hash TEXT PRIMARY KEY,
+            username TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_web_sessions_expires
+            ON web_sessions(expires_at);
+        CREATE INDEX IF NOT EXISTS idx_web_sessions_username
+            ON web_sessions(username);
     `);
 }
 
