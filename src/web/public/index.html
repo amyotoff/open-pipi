@@ -27,14 +27,67 @@
 
             <section id="workspace" class="workspace" hidden>
                 <aside class="sidebar">
-                    <header class="sidebar-header">
+                    <nav id="nav" class="nav" aria-label="Sections">
+                        <button type="button" class="nav-item" data-view="chat" aria-current="true">
+                            <svg viewBox="0 0 20 20" aria-hidden="true">
+                                <path d="M3.5 4.5h13v9h-8l-3.5 3v-3h-1.5z" />
+                            </svg>
+                            <span>Chat</span>
+                        </button>
+                        <div id="admin-nav" class="nav-group" hidden>
+                            <p class="nav-heading">Runtime</p>
+                            <button type="button" class="nav-item" data-view="overview">
+                                <svg viewBox="0 0 20 20" aria-hidden="true">
+                                    <path d="M3.5 11.5a6.5 6.5 0 0 1 13 0" />
+                                    <path d="M10 11.5 13 7" />
+                                </svg>
+                                <span>Overview</span>
+                            </button>
+                            <button type="button" class="nav-item" data-view="spaces">
+                                <svg viewBox="0 0 20 20" aria-hidden="true">
+                                    <rect x="3" y="3.5" width="6" height="6" rx="1.5" />
+                                    <rect x="11" y="3.5" width="6" height="6" rx="1.5" />
+                                    <rect x="3" y="11" width="6" height="5.5" rx="1.5" />
+                                    <rect x="11" y="11" width="6" height="5.5" rx="1.5" />
+                                </svg>
+                                <span>Spaces</span>
+                            </button>
+                            <button type="button" class="nav-item" data-view="delivery">
+                                <svg viewBox="0 0 20 20" aria-hidden="true">
+                                    <path d="M3 10.5 9 4l8 3-3 8-4.5-2z" />
+                                </svg>
+                                <span>Delivery</span>
+                            </button>
+                            <p class="nav-heading">Knowledge</p>
+                            <button type="button" class="nav-item" data-view="brain">
+                                <svg viewBox="0 0 20 20" aria-hidden="true">
+                                    <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H16v13H6.5A2.5 2.5 0 0 0 4 18.5z" />
+                                    <path d="M7 7h6M7 10h6" />
+                                </svg>
+                                <span>Wiki</span>
+                            </button>
+                            <button type="button" class="nav-item" data-view="memory">
+                                <svg viewBox="0 0 20 20" aria-hidden="true">
+                                    <circle cx="10" cy="10" r="6.5" />
+                                    <path d="M10 6v4l2.5 2" />
+                                </svg>
+                                <span>Memory</span>
+                            </button>
+                        </div>
+                    </nav>
+
+                    <div id="space-list-panel" class="panel-section">
+                        <p class="nav-heading">Spaces</p>
+                        <ul id="spaces" class="spaces"></ul>
+                    </div>
+
+                    <footer class="sidebar-footer">
                         <span id="who"></span>
                         <button id="logout" type="button">Sign out</button>
-                    </header>
-                    <ul id="spaces" class="spaces"></ul>
+                    </footer>
                 </aside>
 
-                <section class="conversation">
+                <section id="view-chat" class="conversation">
                     <h2 id="space-title">Pick a space</h2>
                     <ol id="messages" class="messages"></ol>
                     <form id="composer" class="composer" hidden>
@@ -48,6 +101,15 @@
                         <button type="submit">Send</button>
                     </form>
                     <p id="connection" class="notice" role="status"></p>
+                </section>
+
+                <section id="view-admin" class="admin" hidden>
+                    <header class="admin-header">
+                        <h2 id="admin-title"></h2>
+                        <p id="admin-subtitle" class="muted"></p>
+                        <p id="admin-notice" class="notice" role="status" hidden></p>
+                    </header>
+                    <div id="admin-body" class="admin-body"></div>
                 </section>
             </section>
         </main>

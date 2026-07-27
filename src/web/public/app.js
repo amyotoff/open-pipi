@@ -12,6 +12,20 @@ const state = {
     spaces: [],
     activeSpaceId: null,
     events: null,
+    view: 'chat',
+    isOwner: false,
+};
+
+/**
+ * Every dashboard view: a title, one line saying what it is for, and how to
+ * turn its data into rows. Adding a view means adding an entry, not a branch.
+ */
+const ADMIN_VIEWS = {
+    overview: { title: 'Overview', subtitle: 'Health, delivery, and how the runtime is wired.', path: '/api/admin/overview' },
+    spaces: { title: 'Spaces', subtitle: 'Every space, and what decides how it behaves.', path: '/api/admin/spaces' },
+    delivery: { title: 'Delivery', subtitle: 'Messages still queued, retrying, or given up on.', path: '/api/admin/delivery' },
+    brain: { title: 'Wiki', subtitle: 'Curated pages and notebook notes the assistant keeps.', path: '/api/admin/brain' },
+    memory: { title: 'Memory', subtitle: 'What the assistant remembers, newest first.', path: '/api/admin/memory' },
 };
 
 async function api(path, options = {}) {
@@ -38,6 +52,95 @@ async function api(path, options = {}) {
 function show(section) {
     el('login').hidden = section !== 'login';
     el('workspace').hidden = section !== 'workspace';
+}
+
+// ==========================================
+// Small builders — text only, never innerHTML
+// ==========================================
+
+function node(tag, className, text) {
+    const element = document.createElement(tag);
+    if (className) element.className = className;
+    if (text !== undefined && text !== null) element.textContent = String(text);
+    return element;
+}
+
+function stat(label, value, tone) {
+    const box = node('div', 'stat');
+    box.append(node('span', 'stat-label', label));
+    box.append(node('span', `stat-value${tone ? ` is-${tone}` : ''}`, value));
+    return box;
+}
+
+function pill(text, tone) {
+    return node('span', `pill${tone ? ` is-${tone}` : ''}`, text);
+}
+
+/**
+ * A dropdown of the values the server said are allowed.
+ *
+ * The current value is kept in the list even when the server no longer offers
+ * it — a space pointing at a pack that was removed should say so, not silently
+ * appear to be set to something else.
+ */
+function choice(value, options, onChange) {
+    const values = (options || []).includes(value) ? options : [value ?? '', ...(options || [])];
+    const select = document.createElement('select');
+    select.className = 'choice';
+
+    for (const option of values) {
+        const element = node('option', null, option || '—');
+        element.value = option ?? '';
+        element.selected = option === value;
+        select.append(element);
+    }
+
+    select.addEventListener('change', () => void onChange(select.value));
+    return select;
+}
+
+/** A button that reads as an action in a table cell. */
+function action(label, onClick) {
+    const button = node('button', 'link', label);
+    button.type = 'button';
+    button.addEventListener('click', () => void onClick());
+    return button;
+}
+
+/** A card with a table inside, or a plain line when there is nothing to show. */
+function table(title, columns, rows) {
+    const card = node('section', 'card');
+    card.append(node('h3', null, title));
+
+    if (rows.length === 0) {
+        card.append(node('p', 'empty', 'Nothing here.'));
+        return card;
+    }
+
+    const scroll = node('div', 'table-scroll');
+    const element = document.createElement('table');
+    const head = document.createElement('tr');
+    for (const column of columns) head.append(node('th', null, column));
+    element.append(head);
+
+    for (const row of rows) {
+        const tr = document.createElement('tr');
+        for (const cell of row) {
+            const td = node('td', 'wrap');
+            td.append(cell instanceof Node ? cell : document.createTextNode(String(cell ?? '')));
+            tr.append(td);
+        }
+        element.append(tr);
+    }
+
+    scroll.append(element);
+    card.append(scroll);
+    return card;
+}
+
+function shortTime(value) {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? '' : new Date(parsed).toLocaleString();
 }
 
 function formatTime(timestamp) {
@@ -167,11 +270,26 @@ async function refreshSpaceList() {
     const { ok, body } = await api('/api/spaces');
     if (!ok || !body?.ok) return;
     state.spaces = body.spaces;
+
+    // A space can go away underneath the person reading it — archived, or
+    // membership removed. Leaving it on screen with a live composer invites
+    // typing into somewhere that no longer answers.
+    if (state.activeSpaceId && !state.spaces.some((space) => space.id === state.activeSpaceId)) {
+        state.activeSpaceId = null;
+        el('composer').hidden = true;
+        renderMessages(null, []);
+    }
+
     renderSpaces();
 }
 
 async function loadWorkspace(me) {
     el('who').textContent = me.participant.display_name || me.username;
+
+    // The dashboard is only offered to an owner; the API refuses everyone else
+    // regardless, and answers 404 so its existence stays quiet.
+    state.isOwner = me.participant.role === 'owner';
+    el('admin-nav').hidden = !state.isOwner;
 
     await refreshSpaceList();
     connectEvents();
@@ -182,6 +300,255 @@ async function loadWorkspace(me) {
         el('composer').hidden = true;
         renderMessages(null, []);
     }
+}
+
+// ==========================================
+// Dashboard views
+// ==========================================
+
+function renderOverview(body, data) {
+    const health = data.health || {};
+    const stats = node('div', 'stats');
+    for (const [label, key] of [
+        ['Gemini', 'gemini'],
+        ['Ollama', 'ollama'],
+        ['Internet', 'internet'],
+        ['Disk', 'disk_ok'],
+        ['Memory', 'ram_ok'],
+    ]) {
+        stats.append(stat(label, health[key] ? 'ok' : 'down', health[key] ? 'ok' : 'bad'));
+    }
+    body.append(stats);
+
+    const outbox = data.outbox || {};
+    const queue = node('div', 'stats');
+    queue.append(stat('Queued', outbox.queued || 0));
+    queue.append(stat('Sent', outbox.sent || 0));
+    queue.append(stat('Failed', outbox.failed || 0, outbox.failed ? 'bad' : undefined));
+    queue.append(stat('Web clients', data.web_subscribers || 0));
+    body.append(queue);
+
+    const topology = data.topology || {};
+    body.append(
+        table(
+            'Wiring',
+            ['What', 'Count'],
+            [
+                ['Spaces', topology.spaces],
+                ['Bindings', topology.bindings],
+                ['Participants', topology.participants],
+                ['Identities', topology.identities],
+                ['Transports running', (data.transports || []).join(', ') || 'none'],
+            ]
+        )
+    );
+
+    // Only worth showing when something actually needs a human.
+    const orphans = [
+        ...(topology.spaces_without_binding || []).map((id) => ['Space without a binding', id]),
+        ...(topology.participants_without_identity || []).map((id) => ['Participant without an identity', id]),
+    ];
+    if (orphans.length > 0) body.append(table('Needs a look', ['Problem', 'Which'], orphans));
+}
+
+function renderSpacesView(body, data) {
+    const choices = data.choices || {};
+
+    body.append(
+        table(
+            'Spaces',
+            ['Space', 'Pack', 'Grounding', 'Mode', 'Reachable from', ''],
+            (data.spaces || []).map((space) => {
+                const bindings = node('span');
+                for (const binding of space.bindings) {
+                    bindings.append(pill(binding.transport, binding.status === 'active' ? undefined : 'bad'));
+                    bindings.append(document.createTextNode(' '));
+                }
+                if (space.bindings.length === 0) bindings.append(pill('none', 'bad'));
+
+                const archived = space.status === 'ARCHIVED';
+                const title = node('span');
+                title.append(node('span', null, space.title));
+                if (archived) {
+                    title.append(document.createTextNode(' '));
+                    title.append(pill('archived'));
+                }
+
+                return [
+                    title,
+                    choice(space.pack, choices.pack, (value) => patchSpace(space.id, { pack: value })),
+                    choice(space.grounding, choices.grounding, (value) => patchSpace(space.id, { grounding: value })),
+                    choice(space.channel_mode, choices.channel_mode, (value) =>
+                        patchSpace(space.id, { channel_mode: value })
+                    ),
+                    bindings,
+                    action(archived ? 'Restore' : 'Archive', () =>
+                        patchSpace(space.id, { status: archived ? 'ACTIVE' : 'ARCHIVED' })
+                    ),
+                ];
+            })
+        )
+    );
+
+    body.append(
+        node(
+            'p',
+            'muted',
+            'Archiving hides a space and stops the assistant answering in it. Nothing is deleted, and Restore brings it back.'
+        )
+    );
+}
+
+async function patchSpace(spaceId, patch) {
+    const { ok, body } = await api(`/api/admin/spaces/${encodeURIComponent(spaceId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+    });
+
+    await openAdminView('spaces');
+    if (!ok || !body?.ok) {
+        setAdminNotice(body?.error || 'That change did not stick.');
+        return;
+    }
+
+    // Archiving takes a space out of the chat list, so it has to be re-read.
+    await refreshSpaceList();
+}
+
+function renderDelivery(body, data) {
+    const counts = data.counts || {};
+    const stats = node('div', 'stats');
+    stats.append(stat('Queued', counts.queued || 0));
+    stats.append(stat('Failed', counts.failed || 0, counts.failed ? 'bad' : undefined));
+    stats.append(stat('Sent', counts.sent || 0, 'ok'));
+    body.append(stats);
+
+    body.append(
+        table(
+            'Not delivered yet',
+            ['Status', 'Transport', 'Endpoint', 'Tries', 'Last error', ''],
+            (data.entries || []).map((entry) => [
+                pill(entry.status, entry.status === 'failed' ? 'bad' : undefined),
+                entry.transport,
+                entry.endpoint_id,
+                entry.attempts,
+                entry.last_error || '',
+                // Only a given-up entry has anything to retry; the rest are
+                // still on their way.
+                entry.status === 'failed' ? action('Retry', () => requeueDelivery(entry.id)) : '',
+            ])
+        )
+    );
+}
+
+async function requeueDelivery(id) {
+    const { ok, body } = await api(`/api/admin/delivery/${encodeURIComponent(id)}/requeue`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+    });
+
+    await openAdminView('delivery');
+    setAdminNotice(ok && body?.ok ? 'Queued again. It goes out on the next pass.' : body?.error || 'Could not retry that.');
+}
+
+async function renderBrain(body, data) {
+    const pages = data.wiki_pages || [];
+    body.append(
+        table(
+            'Wiki pages',
+            ['Page', 'Title', 'Updated'],
+            pages.map((page) => {
+                const link = node('button', 'link', page.path);
+                link.type = 'button';
+                link.addEventListener('click', () => void openWikiPage(page.path));
+                return [link, page.title, shortTime(page.updated_at)];
+            })
+        )
+    );
+
+    body.append(
+        table(
+            'Notebook notes',
+            ['Topic', 'Note', 'Status'],
+            (data.notes || []).map((note) => [note.topic, note.text, pill(note.status)])
+        )
+    );
+}
+
+async function openWikiPage(pagePath) {
+    const { ok, body } = await api(`/api/admin/brain/page?path=${encodeURIComponent(pagePath)}`);
+    if (!ok || !body?.ok) return;
+
+    const card = node('section', 'card');
+    card.append(node('h3', null, pagePath));
+    // textContent, so a wiki page is read as text and never as markup.
+    card.append(node('pre', 'page-body', body.page.content || '(empty)'));
+    el('admin-body').prepend(card);
+}
+
+function renderMemory(body, data) {
+    body.append(
+        table(
+            'Memory',
+            ['Scope', 'Kind', 'Content', 'Updated'],
+            (data.entries || []).map((entry) => [
+                `${entry.scope_type}:${entry.scope_id}`,
+                entry.kind,
+                entry.content,
+                shortTime(entry.updated_at),
+            ])
+        )
+    );
+}
+
+const RENDERERS = {
+    overview: renderOverview,
+    spaces: renderSpacesView,
+    delivery: renderDelivery,
+    brain: renderBrain,
+    memory: renderMemory,
+};
+
+function setAdminNotice(text) {
+    const notice = el('admin-notice');
+    notice.textContent = text || '';
+    notice.hidden = !text;
+}
+
+async function openAdminView(view) {
+    const config = ADMIN_VIEWS[view];
+    if (!config) return;
+
+    el('admin-title').textContent = config.title;
+    el('admin-subtitle').textContent = config.subtitle;
+    setAdminNotice('');
+
+    const body = el('admin-body');
+    body.replaceChildren(node('p', 'empty', 'Loading…'));
+
+    const { ok, body: payload } = await api(config.path);
+    body.replaceChildren();
+
+    if (!ok || !payload?.ok) {
+        body.append(node('p', 'empty', 'Could not load that right now.'));
+        return;
+    }
+
+    await RENDERERS[view](body, payload);
+}
+
+function setView(view) {
+    state.view = view;
+    for (const item of document.querySelectorAll('.nav-item')) {
+        item.setAttribute('aria-current', String(item.dataset.view === view));
+    }
+
+    const isChat = view === 'chat';
+    el('view-chat').hidden = !isChat;
+    el('view-admin').hidden = isChat;
+    el('space-list-panel').hidden = !isChat;
+
+    if (!isChat) void openAdminView(view);
 }
 
 async function start() {
@@ -214,6 +581,10 @@ el('login-form').addEventListener('submit', async (event) => {
     await start();
 });
 
+for (const item of document.querySelectorAll('.nav-item')) {
+    item.addEventListener('click', () => setView(item.dataset.view));
+}
+
 el('composer').addEventListener('submit', async (event) => {
     event.preventDefault();
     const field = el('composer-text');
@@ -242,7 +613,10 @@ el('logout').addEventListener('click', async () => {
     disconnectEvents();
     state.spaces = [];
     state.activeSpaceId = null;
+    state.isOwner = false;
     el('composer').hidden = true;
+    el('admin-nav').hidden = true;
+    setView('chat');
     show('login');
 });
 

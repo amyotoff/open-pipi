@@ -609,6 +609,21 @@ function writeWikiPage(
     };
 }
 
+export interface BrainWikiSummary {
+    path: string;
+    title: string;
+    excerpt: string;
+    updated_at: string;
+}
+
+/** The curated pages, most recently touched first — for browsing rather than reading. */
+export function listWikiPages(input?: { limit?: number } & BrainScopeInput): BrainWikiSummary[] {
+    const limit = clampLimit(input?.limit, 50, 1, 200);
+    return getBrainDb(input)
+        .prepare('SELECT path, title, excerpt, updated_at FROM wiki_pages ORDER BY updated_at DESC LIMIT ?')
+        .all(limit) as BrainWikiSummary[];
+}
+
 export function readWikiPage(targetPath: string, scope?: BrainScopeInput): BrainWikiPage {
     const relativePath = normalizeWikiPath(targetPath);
     const absolutePath = brainPath(scope, 'wiki', ...relativePath.split('/'));

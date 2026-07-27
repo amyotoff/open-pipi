@@ -15,6 +15,12 @@ All notable changes to Open PiPi will be documented in this file.
 - Local web client (`PIPI_WEB_ENABLED`): sign in, read the spaces you belong to, send. Accounts are
   linked to an existing participant with `pnpm web:account`, so a web login arrives as the same
   person as their Telegram account. Off by default, loopback-only unless an account exists.
+- Owner dashboard in the web client: health and wiring, every space and what decides how it
+  behaves, stuck deliveries with their errors, the Brain Layer wiki, and memory. Owner-only, and
+  answers `404` to everyone else so its existence stays quiet.
+- Dashboard writes: a space's mode, pack and grounding can be changed, a space archived or
+  restored, and a failed delivery given its attempt budget back. Each is validated against the
+  same list the UI offers, and logged with who did it.
 - `docs/transports.md`: how to write an adapter without touching Core.
 
 ### Fixed
