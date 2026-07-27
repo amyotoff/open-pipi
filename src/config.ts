@@ -130,6 +130,38 @@ export function isOwner(userId: string, channel: string = 'telegram'): boolean {
     );
 }
 
+// ==========================================
+// Local Web client
+// ==========================================
+
+export const PIPI_WEB_ENABLED = readBooleanEnv('PIPI_WEB_ENABLED', false);
+export const PIPI_WEB_HOST = process.env.PIPI_WEB_HOST || '127.0.0.1';
+export const PIPI_WEB_PORT = readPositiveIntEnv('PIPI_WEB_PORT', 3000);
+
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
+
+export function isLoopbackHost(host: string): boolean {
+    return LOOPBACK_HOSTS.has(host.trim().toLowerCase());
+}
+
+/**
+ * Refuse to expose the Web client to the network with no way to sign in.
+ *
+ * Binding beyond loopback is the moment the assistant becomes reachable by
+ * anything else on the LAN, so it is the moment an account has to exist. This
+ * runs after the database opens, because that is where accounts live.
+ */
+export function assertSafeWebConfig(accountCount: number): void {
+    if (!PIPI_WEB_ENABLED) return;
+    if (isLoopbackHost(PIPI_WEB_HOST)) return;
+    if (accountCount > 0) return;
+
+    throw new Error(
+        `PIPI_WEB_HOST is ${PIPI_WEB_HOST}, which exposes the web client beyond this machine, but no web account exists. ` +
+            'Create one with "pnpm web:account", or set PIPI_WEB_HOST=127.0.0.1.'
+    );
+}
+
 export function validateCriticalConfig(): void {
     const errors: string[] = [];
 

@@ -6,12 +6,27 @@ import { getToolLog, queryToolLogs, summarizeToolLogs, ToolLogQuery } from './db
 import { getBriefPagePath } from './core/brief-pages';
 import { getHtmlArtifactPath } from './core/html-artifacts';
 import { exchangeGoogleAuthCode, isGoogleOAuthConfigured } from './core/google-oauth';
+import { PIPI_WEB_ENABLED, PIPI_WEB_HOST, PIPI_WEB_PORT, isLoopbackHost } from './config';
 
 type StartApiServerOptions = {
     host?: string;
     port?: number;
     token?: string;
 };
+
+/**
+ * One express app and one listener for the whole runtime.
+ *
+ * When the web client is on it owns the host and port, and the read-only
+ * tool-log API rides along behind its bearer token. Two ports for one process
+ * would be complexity with nothing to show for it.
+ */
+function resolveListenTarget(options: StartApiServerOptions): { host: string; port: number } {
+    if (PIPI_WEB_ENABLED) {
+        return { host: options.host || PIPI_WEB_HOST, port: options.port ?? PIPI_WEB_PORT };
+    }
+    return { host: options.host || DEFAULT_HOST, port: options.port ?? DEFAULT_PORT };
+}
 
 const DEFAULT_HOST = process.env.PIPI_API_HOST || '127.0.0.1';
 const DEFAULT_PORT = Number(process.env.PIPI_API_PORT || 0);
@@ -57,6 +72,7 @@ export async function createApiApp(token: string): Promise<Express> {
     const { default: express } = await import('express');
     const app = express();
     app.disable('x-powered-by');
+    app.set('trust proxy', true);
 
     app.get('/health', (_req, res) => {
         res.json({ ok: true });
@@ -116,7 +132,12 @@ export async function createApiApp(token: string): Promise<Express> {
         }
     });
 
-    app.use('/api', verifyAuth(token));
+    // Scoped to the tool-log routes, not the whole /api prefix.
+    //
+    // A blanket guard here would demand a bearer token for POST /api/auth/login,
+    // which a browser can never supply — the web client could not sign in at
+    // all. The tool-log routes keep exactly the protection they had.
+    app.use('/api/tool-logs', verifyAuth(token));
 
     app.get('/api/tool-logs', (req, res) => {
         const filters = readToolLogQuery(req);
@@ -157,19 +178,28 @@ export async function createApiApp(token: string): Promise<Express> {
         res.json({ ok: true, item });
     });
 
+    if (PIPI_WEB_ENABLED) {
+        const { mountWebClient, WEB_PUBLIC_DIR } = await import('./web/routes');
+        await mountWebClient(app, {
+            secureCookies: !isLoopbackHost(PIPI_WEB_HOST) && process.env.NODE_ENV === 'production',
+        });
+        app.use(express.static(WEB_PUBLIC_DIR, { index: 'index.html' }));
+    }
+
     return app;
 }
 
 export async function startApiServer(options: StartApiServerOptions = {}): Promise<Server | null> {
-    const host = options.host || DEFAULT_HOST;
-    const port = options.port ?? DEFAULT_PORT;
+    const { host, port } = resolveListenTarget(options);
     const token = options.token ?? DEFAULT_TOKEN;
 
     if (!Number.isFinite(port) || (options.port === undefined && port <= 0)) {
         return null;
     }
 
-    if (!token) {
+    // The tool-log routes still need their token; the web client brings its own
+    // sessions and does not.
+    if (!token && !PIPI_WEB_ENABLED) {
         throw new Error('PIPI_API_TOKEN must be set when PIPI_API_PORT is enabled.');
     }
 

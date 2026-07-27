@@ -549,7 +549,22 @@ an adapter that throws, restart recovery of a `queued` entry, reclaim of a claim
 a crash, idempotency-key collision, long-message splitting with balanced markup, and
 per-endpoint ordering (a retrying head blocks its endpoint but not others).
 
-### Phase 5 — Web transport, read-only
+### Phase 5 — Web transport, read-only — **done** (`pnpm verify` green, 627 tests)
+
+Everything below landed as planned. Three things the implementation added:
+
+- **The build did not ship the client.** `pnpm build` copied packs and groundings but not
+  `src/web/public`, so a built runtime would have served nothing. Caught by running the
+  build, not by any test.
+- **Brief and HTML artifact URLs are the only thing protecting those pages** — they are
+  linked from a chat and so cannot require a session. Their filenames carried 32 bits of
+  randomness beside a guessable date and space slug. That was tolerable while the server was
+  off by default; making a LAN bind the normal path raises the stakes, so the random part is
+  now 128 bits. Pre-existing weakness, newly relevant.
+- **ESLint had no browser globals**, so the client's own `document` and `fetch` read as
+  undefined. A scoped override rather than switching the rule off.
+
+*Original plan, for reference:*
 
 - `web_accounts` / `web_sessions`, scrypt, session cookie, login rate limit
 - Bearer middleware re-scoped to `/api/tool-logs`; web routes mounted first, with a test

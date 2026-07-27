@@ -313,7 +313,11 @@ export function createBriefPage(args: {
 
     const createdAt = args.createdAt || new Date();
     const day = createdAt.toISOString().slice(0, 10);
-    const random = crypto.randomBytes(4).toString('hex');
+    // The URL is the only thing protecting this page: it is linked from a
+    // chat and therefore cannot require a session. The rest of the name is
+    // the date and the space, both guessable, so the random part carries
+    // all of the secrecy and needs to be long enough to be worth calling one.
+    const random = crypto.randomBytes(16).toString('hex');
     const fileName = `${day}-${slugify(args.spaceId)}-${random}.html`;
     const filePath = path.join(BRIEF_DIR, fileName);
 

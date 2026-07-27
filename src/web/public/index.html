@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Open PiPi</title>
+        <link rel="stylesheet" href="/styles.css" />
+    </head>
+    <body>
+        <main id="app">
+            <section id="login" class="panel" hidden>
+                <h1>Open PiPi</h1>
+                <form id="login-form" autocomplete="on">
+                    <label for="username">Username</label>
+                    <input id="username" name="username" autocomplete="username" required />
+
+                    <label for="password">Password</label>
+                    <input id="password" name="password" type="password" autocomplete="current-password" required />
+
+                    <button type="submit">Sign in</button>
+                    <p id="login-error" class="error" role="alert" hidden></p>
+                </form>
+            </section>
+
+            <section id="workspace" class="workspace" hidden>
+                <aside class="sidebar">
+                    <header class="sidebar-header">
+                        <span id="who"></span>
+                        <button id="logout" type="button">Sign out</button>
+                    </header>
+                    <ul id="spaces" class="spaces"></ul>
+                </aside>
+
+                <section class="conversation">
+                    <h2 id="space-title">Pick a space</h2>
+                    <ol id="messages" class="messages"></ol>
+                    <p class="notice">
+                        Reading only for now. Sending from the web arrives in the next release.
+                    </p>
+                </section>
+            </section>
+        </main>
+
+        <script src="/app.js"></script>
+    </body>
+</html>

@@ -420,6 +420,35 @@ function createSchema(database: Database.Database): void {
         -- Delivery is FIFO per endpoint, so the worker reads in this order.
         CREATE INDEX IF NOT EXISTS idx_outbox_endpoint_created
             ON outbox(transport, endpoint_id, created_at);
+
+        -- Local Web accounts. participant_id points at an existing participant,
+        -- which is what makes a Web login the same person as their Telegram
+        -- account rather than a stranger with the same name.
+        CREATE TABLE IF NOT EXISTS web_accounts (
+            username TEXT PRIMARY KEY,
+            password_hash TEXT NOT NULL,
+            password_salt TEXT NOT NULL,
+            participant_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_web_accounts_participant
+            ON web_accounts(participant_id);
+
+        -- Sessions are stored hashed: a stolen database must not hand over live
+        -- sessions the way a stolen cookie would.
+        CREATE TABLE IF NOT EXISTS web_sessions (
+            token_hash TEXT PRIMARY KEY,
+            username TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_web_sessions_expires
+            ON web_sessions(expires_at);
+        CREATE INDEX IF NOT EXISTS idx_web_sessions_username
+            ON web_sessions(username);
     `);
 }
 
@@ -1091,6 +1120,8 @@ export interface Chat {
 export interface Space {
     id: string;
     kind: string;
+    /** Human-facing identity for web routes; null for spaces that never got one. */
+    slug: string | null;
     title: string | null;
     channel: string;
     external_ref: string;
@@ -1739,6 +1770,42 @@ export function listSpaces(status?: string): Space[] {
     `
         )
         .all() as Space[];
+}
+
+export interface SpaceSummary extends Space {
+    last_message_at: string | null;
+    last_message_preview: string | null;
+}
+
+/**
+ * The spaces one participant belongs to, most recently active first.
+ *
+ * Membership is the whole access rule for the Web client: a person sees the
+ * conversations they are part of and nothing else, which is the same rule that
+ * already governs every other surface.
+ */
+export function listSpacesForParticipant(participantId: string, limit: number = 100): SpaceSummary[] {
+    return getDb()
+        .prepare(
+            `
+        SELECT
+            s.*,
+            (SELECT MAX(m.timestamp) FROM messages m WHERE m.space_id = s.id) AS last_message_at,
+            (SELECT m.content FROM messages m WHERE m.space_id = s.id
+             ORDER BY m.timestamp DESC, m.rowid DESC LIMIT 1) AS last_message_preview
+        FROM spaces s
+        JOIN memberships mem ON mem.space_id = s.id
+        WHERE mem.person_id = ?
+          AND s.status = 'ACTIVE'
+        ORDER BY COALESCE(last_message_at, s.created_at) DESC, s.id ASC
+        LIMIT ?
+    `
+        )
+        .all(participantId, clampLimit(limit, 100, 1, 500)) as SpaceSummary[];
+}
+
+export function isSpaceMember(spaceId: string, participantId: string): boolean {
+    return Boolean(getMembership(spaceId, participantId));
 }
 
 export function getSpaceByChannelRef(channel: string, externalRef: string): Space | undefined {

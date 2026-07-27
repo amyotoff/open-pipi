@@ -16,7 +16,7 @@
         "dev": "nodemon --exec ts-node src/index.ts",
         "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
         "prebuild": "pnpm clean",
-        "build": "tsc -p tsconfig.build.json && cp -r src/packs dist/packs && cp -r src/groundings dist/groundings",
+        "build": "tsc -p tsconfig.build.json && cp -r src/packs dist/packs && cp -r src/groundings dist/groundings && cp -r src/web/public dist/web/public",
         "typecheck": "tsc --noEmit",
         "lint": "eslint src/",
         "lint:fix": "eslint src/ --fix",
@@ -34,7 +34,8 @@
         "content:check": "ts-node src/scripts/content-check.ts",
         "content:new": "ts-node src/scripts/content-new.ts",
         "setup:check": "ts-node src/scripts/doctor.ts",
-        "prepare": "husky"
+        "prepare": "husky",
+        "web:account": "ts-node src/scripts/web-account.ts"
     },
     "keywords": [
         "telegram-bot",
