@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { makeChannelRuntimeMock } from '../test-helpers/channel-runtime-mock';
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -11,6 +12,12 @@ async function loadTasksModule() {
 
     vi.doMock('../agents/butler', () => ({ handleButlerMessage }));
     vi.doMock('../channels/telegram', () => ({ sendMessageToChat }));
+    vi.doMock('../channels/runtime', () =>
+        makeChannelRuntimeMock({
+            sendMessageToChat,
+            getSpace: (spaceId: string) => db.getSpace(spaceId) as any,
+        })
+    );
 
     const db = await import('../db');
     db.initDatabase();
@@ -275,9 +282,13 @@ describe('core/tasks', () => {
             );
 
             await tasks.checkTaskDeadlines();
+            // The alert carries a key naming its task, deadline, and phase, so
+            // the outbox refuses a duplicate outright rather than relying on
+            // the config flag alone.
             expect(mocks.sendMessageToChat).toHaveBeenCalledWith(
                 'chat-1',
-                expect.stringContaining('is due by 2026-03-31 08:00')
+                expect.stringContaining('is due by 2026-03-31 08:00'),
+                { idempotencyKey: expect.stringContaining(':2026-03-31T08:00:00.000Z:upcoming') }
             );
 
             await tasks.checkTaskDeadlines();
@@ -287,7 +298,8 @@ describe('core/tasks', () => {
             await tasks.checkTaskDeadlines();
             expect(mocks.sendMessageToChat).toHaveBeenCalledWith(
                 'chat-1',
-                expect.stringContaining('was due by 2026-03-31 08:00')
+                expect.stringContaining('was due by 2026-03-31 08:00'),
+                { idempotencyKey: expect.stringContaining(':2026-03-31T08:00:00.000Z:overdue') }
             );
             expect(mocks.sendMessageToChat).toHaveBeenCalledTimes(2);
 

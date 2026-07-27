@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { createTestDb, makeDbModuleMock } from '../test-helpers/mock-db';
+import { makeChannelRuntimeMock } from '../test-helpers/channel-runtime-mock';
 
 let db: Database.Database;
 
@@ -14,6 +15,12 @@ async function loadModule() {
         logEvent,
     }));
     vi.doMock('../channels/telegram', () => ({ sendMessageToChat }));
+    vi.doMock('../channels/runtime', () =>
+        makeChannelRuntimeMock({
+            sendMessageToChat,
+            getSpace: (spaceId: string) => db.prepare('SELECT * FROM spaces WHERE id = ?').get(spaceId) as any,
+        })
+    );
 
     const mod = await import('./reminders');
     return { ...mod, sendMessageToChat, logEvent };

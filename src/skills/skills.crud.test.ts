@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { makeChannelRuntimeMock } from '../test-helpers/channel-runtime-mock';
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import os from 'os';
@@ -826,6 +827,20 @@ describe('CRUD skills', () => {
             const { default: taskSkill } = await loadSkill<any>('./tasks.skill', () => {
                 vi.doMock('../agents/butler', () => ({ handleButlerMessage: vi.fn(async () => undefined) }));
                 vi.doMock('../channels/telegram', () => ({ sendMessageToChat: vi.fn(async () => undefined) }));
+                vi.doMock('../channels/runtime', () =>
+                    makeChannelRuntimeMock({
+                        sendMessageToChat: vi.fn(async () => undefined),
+                        getSpace: (spaceId: string) =>
+                            db.prepare('SELECT * FROM spaces WHERE id = ?').get(spaceId) as any,
+                    })
+                );
+                vi.doMock('../channels/runtime', () =>
+                    makeChannelRuntimeMock({
+                        sendMessageToChat: vi.fn(async () => undefined),
+                        getSpace: (spaceId: string) =>
+                            db.prepare('SELECT * FROM spaces WHERE id = ?').get(spaceId) as any,
+                    })
+                );
             });
             const { default: workspaceSkill } = await loadSkill<any>('./workspace.skill');
             const context = { chatId: 'chat-1', userId: '111' };
@@ -1063,6 +1078,12 @@ describe('CRUD skills', () => {
         const { default: skill } = await loadSkill<any>('./tasks.skill', () => {
             vi.doMock('../agents/butler', () => ({ handleButlerMessage: vi.fn(async () => undefined) }));
             vi.doMock('../channels/telegram', () => ({ sendMessageToChat: vi.fn(async () => undefined) }));
+            vi.doMock('../channels/runtime', () =>
+                makeChannelRuntimeMock({
+                    sendMessageToChat: vi.fn(async () => undefined),
+                    getSpace: (spaceId: string) => db.prepare('SELECT * FROM spaces WHERE id = ?').get(spaceId) as any,
+                })
+            );
         });
         const context = { chatId: 'chat-1', userId: '111' };
 
@@ -1149,6 +1170,12 @@ describe('CRUD skills', () => {
         const { default: skill } = await loadSkill<any>('./rituals.skill', () => {
             vi.doMock('../agents/butler', () => ({ handleButlerMessage: vi.fn(async () => undefined) }));
             vi.doMock('../channels/telegram', () => ({ sendMessageToChat: vi.fn(async () => undefined) }));
+            vi.doMock('../channels/runtime', () =>
+                makeChannelRuntimeMock({
+                    sendMessageToChat: vi.fn(async () => undefined),
+                    getSpace: (spaceId: string) => db.prepare('SELECT * FROM spaces WHERE id = ?').get(spaceId) as any,
+                })
+            );
         });
         const { ensureDefaultAssistantTasksForSpace } = await import('../core/tasks');
         const context = { chatId: 'chat-1', userId: '111' };
@@ -1392,6 +1419,13 @@ describe('CRUD skills', () => {
 
             const { default: skill } = await loadSkill<any>('./onboarding.skill', () => {
                 vi.doMock('../channels/telegram', () => ({ sendMessageToChat }));
+                vi.doMock('../channels/runtime', () =>
+                    makeChannelRuntimeMock({
+                        sendMessageToChat,
+                        getSpace: (spaceId: string) =>
+                            db.prepare('SELECT * FROM spaces WHERE id = ?').get(spaceId) as any,
+                    })
+                );
             });
             const job = skill.crons.find((cron: any) => cron.description === 'Day-two onboarding coaching note');
 

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { makeChannelRuntimeMock } from '../test-helpers/channel-runtime-mock';
 
 async function loadButler(options: { task?: any; briefUrl?: string | null } = {}) {
     vi.resetModules();
@@ -100,6 +101,7 @@ async function loadButler(options: { task?: any; briefUrl?: string | null } = {}
         sendFileToChat,
         bot: { telegram: { getFile, token: 'bot-token' } },
     }));
+    vi.doMock('../channels/runtime', () => makeChannelRuntimeMock({ sendMessageToChat, sendFileToChat }));
     vi.doMock('../core/memory-context', () => ({ getMemoryContext: vi.fn(() => '[MEMORY]') }));
     vi.doMock('../core/memory-sprint', () => ({
         ensureActiveMemorySprint: vi.fn(() => ({
@@ -297,13 +299,24 @@ describe('agents/butler', () => {
 
     it('processes photos through the vision pipeline', async () => {
         const mod = await loadButler();
-        const ctx = {
-            message: { photo: [{ file_id: 'small' }, { file_id: 'large' }] },
-        };
 
-        await mod.handleButlerPhoto(ctx as any, 'chat-1', '111', 'What is this?');
+        // The transport resolved the bytes already: reaching for a Telegram
+        // file id here would need a bot token inside the agent.
+        await mod.handleButlerPhoto({
+            channel: 'telegram',
+            channelRef: 'chat-1',
+            spaceId: 'telegram:chat-1',
+            senderId: '111',
+            caption: 'What is this?',
+            image: { base64: 'AAA', mimeType: 'image/jpeg' },
+        });
 
-        expect(mod.mocks.processWithVision).toHaveBeenCalled();
+        expect(mod.mocks.processWithVision).toHaveBeenCalledWith(
+            expect.any(String),
+            expect.stringContaining('What is this?'),
+            'AAA',
+            'image/jpeg'
+        );
         expect(mod.mocks.sendMessageToChat).toHaveBeenCalledWith('chat-1', 'Image reply');
     });
 });

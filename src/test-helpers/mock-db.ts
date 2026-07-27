@@ -77,7 +77,9 @@ export function createTestDb(): Database.Database {
             sender_tg_id TEXT,
             content TEXT,
             timestamp TEXT,
-            is_bot INTEGER DEFAULT 0
+            is_bot INTEGER DEFAULT 0,
+            transport TEXT,
+            transport_message_id TEXT
         );
 
         CREATE TABLE IF NOT EXISTS shopping_list (
@@ -511,21 +513,35 @@ export function makeDbModuleMock(db: Database.Database) {
             `
                 )
                 .all(spaceId, Math.min(Math.max(limit, 1), 24)),
+        // Mirrors the real storeMessage contract: replaying a message id is a
+        // no-op that reports `inserted: false`, which is how the gateway keeps
+        // one transport event to one agent run.
         storeMessage: (msg: Record<string, unknown>) => {
             const channelRef = String(msg.channel_ref || msg.chat_jid || '');
             const senderId = msg.sender_id ?? msg.sender_tg_id ?? null;
-            return db
+            const result = db
                 .prepare(
                     `
-                INSERT INTO messages (id, space_id, chat_jid, sender_tg_id, content, timestamp, is_bot)
-                VALUES (@id, @space_id, @chat_jid, @sender_tg_id, @content, @timestamp, @is_bot)
+                INSERT INTO messages (
+                    id, space_id, chat_jid, sender_tg_id, content, timestamp, is_bot,
+                    transport, transport_message_id
+                )
+                VALUES (
+                    @id, @space_id, @chat_jid, @sender_tg_id, @content, @timestamp, @is_bot,
+                    @transport, @transport_message_id
+                )
+                ON CONFLICT(id) DO NOTHING
             `
                 )
                 .run({
                     ...msg,
                     chat_jid: channelRef,
                     sender_tg_id: senderId,
+                    transport: msg.transport ?? msg.channel ?? null,
+                    transport_message_id: msg.transport_message_id ?? null,
                 });
+
+            return { inserted: result.changes > 0 };
         },
         getChat: (jid: string) => db.prepare('SELECT * FROM chats WHERE jid = ?').get(jid),
         buildSpaceId: (channel: string, externalRef: string) => `${channel}:${externalRef}`,

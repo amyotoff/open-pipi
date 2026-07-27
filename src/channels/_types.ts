@@ -15,6 +15,12 @@ export interface MessageOptions {
     pin?: boolean; // Telegram-only: pin the sent message
     unpinAfterHours?: number; // Telegram-only: best-effort auto-unpin delay
     pinDisableNotification?: boolean; // Telegram-only: pin quietly
+    /**
+     * A caller with a natural key for this send gets exactly-once delivery:
+     * queueing the same key twice is a no-op, so a scheduler that runs again
+     * cannot produce a second copy.
+     */
+    idempotencyKey?: string;
 }
 
 export interface FileOptions {

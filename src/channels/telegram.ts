@@ -13,9 +13,13 @@
  */
 
 import './telegram-commands';
-import { registerTelegramFallbackHandlers } from './telegram-bot';
 
-registerTelegramFallbackHandlers();
-
-export { bot, setMessageHandler, startTelegramBot } from './telegram-bot';
+export {
+    bot,
+    isTelegramBotLaunched,
+    markTelegramBotStopped,
+    registerTelegramFallbackHandlers,
+    startTelegramBot,
+} from './telegram-bot';
+export type { TelegramInboundUpdate, TelegramFallbackHandlers } from './telegram-bot';
 export { sendMessageToChat, sendFileToChat, notifyHousehold, sendTypingAction } from './telegram-send';

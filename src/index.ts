@@ -5,12 +5,28 @@ const APP_VERSION = process.env.npm_package_version || '2.5.0';
 let shuttingDown = false;
 let closeDatabaseRef: (() => void) | null = null;
 let closeApiServerRef: (() => Promise<void>) | null = null;
+let closeTransportsRef: (() => Promise<void>) | null = null;
+let closeDeliveryWorkerRef: (() => void) | null = null;
 
 async function shutdown(signal: string) {
     if (shuttingDown) return;
     shuttingDown = true;
 
     console.log(`[BOOT] Received ${signal}, shutting down gracefully...`);
+
+    try {
+        // Stop accepting new work before the transports go away, so the worker
+        // never claims an entry it has no way to deliver.
+        closeDeliveryWorkerRef?.();
+    } catch (error) {
+        console.error('[BOOT] Failed to stop the delivery worker cleanly:', error);
+    }
+
+    try {
+        await closeTransportsRef?.();
+    } catch (error) {
+        console.error('[BOOT] Failed to stop transports cleanly:', error);
+    }
 
     try {
         closeDatabaseRef?.();
@@ -50,7 +66,10 @@ async function bootstrap() {
 
     const [
         db,
-        telegram,
+        telegramAdapter,
+        transportRegistry,
+        gateway,
+        deliveryWorker,
         channelRegistry,
         runtime,
         router,
@@ -61,7 +80,10 @@ async function bootstrap() {
         api,
     ] = await Promise.all([
         import('./db'),
-        import('./channels/telegram'),
+        import('./transports/telegram/adapter'),
+        import('./transports/registry'),
+        import('./gateway/message-gateway'),
+        import('./gateway/delivery-worker'),
         import('./channels/_registry'),
         import('./channels/runtime'),
         import('./router'),
@@ -80,14 +102,12 @@ async function bootstrap() {
     const googleOAuth = await import('./core/google-oauth');
     googleOAuth.initGoogleOAuthMigrations();
     googleOAuth.onGoogleOAuthSuccess(async (spaceId) => {
-        const chatId = spaceId.startsWith('telegram:') ? spaceId.slice('telegram:'.length) : null;
-        if (chatId) {
-            const { sendMessageToChat } = await import('./channels/telegram');
-            await sendMessageToChat(
-                chatId,
-                'Google Drive connected! You can now use Google Docs and Sheets tools.'
-            ).catch(() => {});
-        }
+        // Addressed by space, not by picking a chat id out of the space id.
+        // The space knows which endpoint reaches it; this works for whichever
+        // transport the person actually used.
+        await runtime
+            .sendSpaceMessage(spaceId, 'Google Drive connected! You can now use Google Docs and Sheets tools.')
+            .catch(() => {});
     });
 
     await channelRegistry.connectAll();
@@ -102,12 +122,35 @@ async function bootstrap() {
         );
     }
 
+    const topology = db.getTransportTopologyReport();
+    console.log(
+        `[BOOT] Transport topology: ${topology.bindings} binding(s) for ${topology.spaces} space(s), ${topology.identities} identity(ies) for ${topology.participants} participant(s)`
+    );
+    if (topology.spaces_without_binding.length > 0) {
+        console.warn(
+            `[BOOT] ${topology.spaces_without_binding.length} space(s) have no transport binding and fall back to legacy routing: ${topology.spaces_without_binding.join(', ')}`
+        );
+    }
+    if (topology.participants_without_identity.length > 0) {
+        console.warn(
+            `[BOOT] ${topology.participants_without_identity.length} participant(s) have no transport identity: ${topology.participants_without_identity.join(', ')}`
+        );
+    }
+
     scheduler.startTaskScheduler();
     await api.startApiServer();
     closeApiServerRef = () => api.stopApiServer();
 
-    telegram.setMessageHandler(router.handleIncomingMessage);
-    telegram.startTelegramBot();
+    // Telegram is required: without it there is no assistant to run, so a
+    // failure here should stop the boot rather than leave a silent runtime.
+    transportRegistry.registerTransport(new telegramAdapter.TelegramTransportAdapter(), { required: true });
+    closeTransportsRef = () => transportRegistry.stopAllTransports();
+    await transportRegistry.startAllTransports({ messageGateway: { handleIncoming: gateway.handleIncoming } });
+
+    // Started after the transports, so the first drain has somewhere to send.
+    // Anything queued before the last shutdown goes out now.
+    deliveryWorker.startDeliveryWorker();
+    closeDeliveryWorkerRef = deliveryWorker.stopDeliveryWorker;
 
     db.logEvent('reboot', { reason: 'startup', timestamp: new Date().toISOString() });
     try {
@@ -116,9 +159,10 @@ async function bootstrap() {
     } catch (error) {
         console.error('[BOOT] Failed to refresh healthy restore point:', error);
     }
+    const { notifyPrimaryHousehold } = runtime;
     const startupMsg = 'Open PiPi is on air';
     console.log(startupMsg);
-    telegram.notifyHousehold(startupMsg);
+    await notifyPrimaryHousehold(startupMsg);
 }
 
 process.once('SIGINT', () => {

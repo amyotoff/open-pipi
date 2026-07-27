@@ -1,9 +1,13 @@
+import { randomUUID } from 'node:crypto';
 import { RuntimeExecutionContext } from '../core/runtime-context';
 import { HOUSEHOLD_CHAT_ID } from '../config';
 import { getSpace } from '../db';
 import { resolveSpaceOperationalSettings } from '../core/space-preferences';
 import { getChannel } from './_registry';
+import { enqueueDelivery } from '../gateway/outbox';
+import { getTransport } from '../transports/registry';
 import type { ChannelType, FileOptions, MessageOptions, SendResult } from './_types';
+import type { OutgoingMessage, TransportDestination } from '../transports/types';
 
 export type RuntimeChannel = 'telegram' | ChannelType;
 
@@ -57,7 +61,83 @@ export function buildChannelPersonId(channel: string, senderId: string): string 
     return channel === 'telegram' ? senderId : `${channel}:${senderId}`;
 }
 
+/**
+ * Hand a message to the outbox.
+ *
+ * Every caller in the system already goes through these functions, so queueing
+ * here is what makes delivery survive a crash without touching any of them.
+ *
+ * The meaning of the result changes with it: `success` now says the message was
+ * accepted for delivery, not that it arrived. That is the honest reading —
+ * delivery is asynchronous — and callers that gate a "already notified" flag on
+ * it are better off for it, because the outbox keeps trying.
+ */
+async function enqueueOutgoing(input: {
+    channel: string;
+    channelRef: string;
+    text?: string;
+    attachment?: { localPath: string; filename?: string; caption?: string };
+    spaceId?: string | null;
+    opts?: MessageOptions | FileOptions;
+    idempotencyKey?: string;
+    endpointType?: TransportDestination['endpointType'];
+}): Promise<SendResult> {
+    const message: OutgoingMessage = {
+        id: randomUUID(),
+        content: {
+            ...(input.text ? { text: input.text } : {}),
+            ...(input.attachment ? { attachments: [input.attachment] } : {}),
+        },
+        delivery: {
+            pin: input.opts?.pin,
+            unpinAfterHours: input.opts?.unpinAfterHours,
+            silent: input.opts?.pinDisableNotification,
+        },
+    };
+
+    const destination: TransportDestination = {
+        endpointId: input.channelRef,
+        endpointType: input.endpointType ?? 'direct',
+        ...((input.opts as MessageOptions | undefined)?.threadId
+            ? { threadId: (input.opts as MessageOptions).threadId }
+            : {}),
+    };
+
+    // Split now, not at send time, so each piece retries alone — see
+    // TransportAdapter.splitForDelivery.
+    const pieces = getTransport(input.channel)?.splitForDelivery?.(message) ?? [message];
+    if (pieces.length === 0) return { success: true };
+
+    let firstId = '';
+    for (const [index, piece] of pieces.entries()) {
+        const entry = enqueueDelivery({
+            transport: input.channel,
+            destination,
+            payload: piece,
+            spaceId: input.spaceId ?? null,
+            ...(input.idempotencyKey ? { idempotencyKey: `${input.idempotencyKey}#${index}` } : {}),
+        });
+        if (index === 0) firstId = entry.id;
+    }
+
+    return { success: true, messageId: `outbox:${firstId}` };
+}
+
 export async function sendChannelMessage(
+    channel: string,
+    channelRef: string,
+    text: string,
+    opts?: MessageOptions
+): Promise<SendResult> {
+    return enqueueOutgoing({ channel, channelRef, text, opts });
+}
+
+/**
+ * Send without queueing, for replies that must not outlive the process —
+ * a command's own answer, or a refusal. Queueing those would mean a message
+ * arriving long after the moment it made sense.
+ */
+export async function sendChannelMessageNow(
     channel: string,
     channelRef: string,
     text: string,
@@ -92,17 +172,12 @@ export async function sendChannelFile(
     filePath: string,
     opts?: FileOptions
 ): Promise<SendResult> {
-    if (channel === 'telegram') {
-        const { sendFileToChat } = await getTelegramRuntime();
-        return await sendFileToChat(channelRef, filePath, opts);
-    }
-
-    const outboundChannel = getChannel(channel as ChannelType);
-    if (!outboundChannel?.sendFile) {
-        return { success: false, error: `Channel "${channel}" does not support file attachments.` };
-    }
-
-    return outboundChannel.sendFile(channelRef, filePath, opts);
+    return enqueueOutgoing({
+        channel,
+        channelRef,
+        attachment: { localPath: filePath, filename: opts?.filename, caption: opts?.caption },
+        opts,
+    });
 }
 
 export async function sendContextMessage(
@@ -140,7 +215,15 @@ export async function sendSpaceMessage(spaceId: string, text: string, opts?: Mes
         };
     }
 
-    return sendChannelMessage(space.channel, space.external_ref, text, opts);
+    return enqueueOutgoing({
+        channel: space.channel,
+        channelRef: space.external_ref,
+        text,
+        spaceId: space.id,
+        endpointType: space.kind === 'group_chat' ? 'group' : 'direct',
+        opts,
+        idempotencyKey: opts?.idempotencyKey,
+    });
 }
 
 export async function notifyPrimaryHousehold(text: string): Promise<SendResult | undefined> {

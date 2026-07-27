@@ -766,7 +766,12 @@ export async function checkTaskDeadlines(): Promise<void> {
         try {
             const sendResult = await sendSpaceMessage(
                 task.space_id,
-                buildTaskDeadlineMessage(task, deadlineAt, alertKind)
+                buildTaskDeadlineMessage(task, deadlineAt, alertKind),
+                // The alert is uniquely identified by its task, deadline, and
+                // kind, so the outbox refuses a second copy outright. The config
+                // flag below still short-circuits the common case; this makes
+                // duplicate alerts impossible rather than merely unlikely.
+                { idempotencyKey: `task-deadline:${task.id}:${deadlineAt}:${alertKind}` }
             );
             if (!sendResult.success) {
                 console.error(`[TASKS] Failed to send ${alertKind} deadline alert for ${task.id}:`, sendResult.error);
