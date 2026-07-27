@@ -21,6 +21,11 @@ export interface MessageOptions {
      * cannot produce a second copy.
      */
     idempotencyKey?: string;
+    /**
+     * The inbound turn this send answers. Threaded explicitly rather than kept
+     * in ambient context: three call sites is cheaper to read than a hidden one.
+     */
+    correlationId?: string;
 }
 
 export interface FileOptions {

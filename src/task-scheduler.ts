@@ -67,6 +67,14 @@ export function startTaskScheduler() {
                 if (deletedCallLogs > 0) {
                     console.log(`[CRON] Cleaned up ${deletedCallLogs} old tool call log(s).`);
                 }
+
+                // Expired web sessions are already refused on sight; this only
+                // stops the rows accumulating forever.
+                const { purgeExpiredSessions } = require('./web/auth');
+                const deletedSessions = purgeExpiredSessions();
+                if (deletedSessions > 0) {
+                    console.log(`[CRON] Cleaned up ${deletedSessions} expired web session(s).`);
+                }
             } catch (e) {
                 console.error('[CRON] Retention cleanup error:', e);
             }

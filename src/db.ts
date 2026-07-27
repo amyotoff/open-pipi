@@ -404,6 +404,9 @@ function createSchema(database: Database.Database): void {
             endpoint_type TEXT NOT NULL DEFAULT '',
             thread_id TEXT,
             payload_json TEXT NOT NULL,
+            -- Carried from the inbound message, so one turn can be followed from
+            -- "someone said this" to "the answer went out".
+            correlation_id TEXT,
             status TEXT NOT NULL DEFAULT 'queued',
             attempts INTEGER NOT NULL DEFAULT 0,
             next_retry_at TEXT,
@@ -548,6 +551,9 @@ function runMigrations(database: Database.Database): void {
     } catch {}
     try {
         database.exec('ALTER TABLE messages ADD COLUMN transport_message_id TEXT');
+    } catch {}
+    try {
+        database.exec('ALTER TABLE outbox ADD COLUMN correlation_id TEXT');
     } catch {}
     try {
         database.exec('ALTER TABLE projects ADD COLUMN active_pack_id TEXT');

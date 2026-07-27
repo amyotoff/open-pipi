@@ -178,7 +178,9 @@ That stack brings up:
 
 | Piece | What it means | Where it lives |
 | --- | --- | --- |
-| `space` | One runtime context for a DM, group, channel, or email correspondent | SQLite + runtime |
+| `space` | One runtime context for a conversation, reachable from one or more transports | SQLite + runtime |
+| `binding` | Maps an external endpoint (a Telegram chat, a web room) to a space | SQLite |
+| `participant` | One person, with an identity per transport they use | SQLite |
 | `pack` | Persona, enabled skills, defaults, seeded tasks, and optional pack tools | source in `src/packs/*`, active snapshot in `DATA_DIR/space-behavior/*` |
 | `grounding` | Stable facts, people, glossary, and operating rules | source in `src/groundings/*`, active snapshot in `DATA_DIR/space-behavior/*` |
 | `memory` | Structured evolving context, not a vague vector blob | SQLite |
@@ -186,7 +188,7 @@ That stack brings up:
 | `HTML artifacts` | Shareable pages for long plans, research, reports, meeting notes, daily Briefs, and morning plans | `DATA_DIR/html-artifacts/*` and `DATA_DIR/briefs/*` |
 
 
-If you only remember one thing, remember this: `packs` shape behavior, `groundings` shape world knowledge, and `spaces` keep everything scoped cleanly.
+If you only remember one thing, remember this: `packs` shape behavior, `groundings` shape world knowledge, and `spaces` keep everything scoped cleanly. Transports are only ways in.
 
 There is one more practical split worth keeping in mind:
 
@@ -269,23 +271,50 @@ pnpm content:new -- grounding my_world
 
 Add `--dry-run` to preview the files. Existing content directories are never overwritten.
 
-## Channels
+## Transports
 
-`Telegram` is still the richest surface. The others intentionally reuse the same kernel with lighter UX.
+A transport is a way *into* a space, not a place the assistant lives. It carries messages and nothing else — behavior, memory, permissions, and knowledge all belong to the space, so the same conversation can be open on two surfaces at once.
 
 For `Discord`, `WhatsApp`, `Gmail`, and browser-based skills, use the full `pnpm install`. A lean `pnpm install --no-optional` is meant for Telegram-only setups.
 
-| Channel | Status | Notes |
+| Transport | Status | Notes |
 | --- | --- | --- |
 | Telegram | Primary / alpha | Fullest UX: commands, group participation, typing, photo flow |
+| Web / PWA | Local, read + send | Runs on your own network; sign in, read history, send. See below |
 | Discord | Working text adapter | DMs plus one primary channel, Telegram-lite command set |
 | WhatsApp | Working text adapter | Owner-operated, DM-first, optional primary group |
 | Gmail | Working email-mode adapter | SMTP outbound + IMAP polling inbound, threaded and email-native |
 | Slack | Not implemented | No adapter in the repo |
 
+Writing another one: [docs/transports.md](docs/transports.md).
+
+### Bindings: one space, several ways in
+
+A `transport binding` maps an external endpoint — a Telegram chat, a web room — to a space. A space can hold more than one, and a reply goes to every active binding, so a question asked from the browser is still answered in the Telegram group where the rest of the conversation lives.
+
+Existing chats bind themselves on first contact, so adding the bot to a group just works. Nothing needs reconnecting after an upgrade.
+
+### Delivery is durable
+
+Every outgoing message is written to an outbox before any send is attempted, and an in-process worker drains it: retries with backoff, bounded attempts, FIFO per conversation, and resumption after a restart. A crash between deciding to answer and answering does not lose the reply.
+
+### Local web client
+
+Off by default. Turn it on with `PIPI_WEB_ENABLED=true`, then create an account **linked to a participant the assistant already knows**:
+
+```bash
+PIPI_WEB_PASSWORD='something long' pnpm web:account -- --username alex --participant <person_id>
+```
+
+Run `pnpm web:account -- --list` to see the participant ids. The link is the point: signing in over the web arrives as the *same person* as their Telegram account, with the same memory, membership, and authority.
+
+Then open `http://<host>:3000`. You see the spaces you are a member of and nothing else.
+
+`PIPI_WEB_HOST` stays on `127.0.0.1` unless you mean to reach the assistant from other devices. Binding wider requires an account to exist first — otherwise startup refuses rather than publishing an open assistant to your network.
+
 ### Channel modes
 
-Every space currently has one primary transport, and that transport gets one simple runtime mode:
+Every space gets one simple runtime mode, applied across its transports:
 
 | Mode | Behavior |
 | --- | --- |
@@ -447,13 +476,16 @@ Operator and improvement loop:
 ## Architecture
 
 ```text
-Incoming Channel Message
-  -> Shared Router
-  -> Agent Kernel
-  -> Materialized Pack + Grounding + Artifacts
-  -> Core Skills / Pack Tools
-  -> SQLite
-  -> Outbound Channel Reply
+Telegram ─┐
+Web/PWA  ─┼─▶ Transport Adapter ─▶ Message Gateway ─▶ Space ─▶ Agent
+Discord  ─┤                             │                       │
+WhatsApp ─┤                             ├── Pack                │
+Gmail    ─┘                             ├── Grounding           │
+                                        ├── Memory              │
+                                        └── Skills / Tools      │
+                                                                ▼
+Telegram ◀─┐                                                 Outbox
+Web/PWA  ◀─┴── Transport Adapter ◀── Delivery Worker ◀──────────┘
 
 Optional sidecars:
   -> sandboxd
@@ -461,11 +493,20 @@ Optional sidecars:
   -> Chromium CDP
 ```
 
+Each inbound message takes one path, whatever carried it: normalize → drop replays → resolve the binding to a space → resolve the sender to a participant → check permissions → persist → run the agent. No transport has its own agent flow, and no transport SDK reaches past its own adapter — a test reads the source tree and fails if one does.
+
 Key files:
 
-- `src/index.ts`: bootstrap, channel registration, scheduler startup
-- `src/api.ts`: optional read-only HTTP API for inspecting tool logs
-- `src/router.ts`: shared inbound routing and owner/group logic
+- `src/index.ts`: bootstrap, transport registration, scheduler startup
+- `src/api.ts`: HTTP server — web client, tool-log API, OAuth callback
+- `src/transports/types.ts`: the narrow waist every transport translates into
+- `src/transports/telegram/`: normalizer, renderer, capabilities, adapter
+- `src/transports/web/`: the web transport's outbound half
+- `src/gateway/message-gateway.ts`: the one inbound pipeline
+- `src/gateway/binding-resolver.ts`: endpoint → space
+- `src/gateway/participant-resolver.ts`: external account → participant
+- `src/gateway/outbox.ts` + `delivery-worker.ts`: durable outbound delivery
+- `src/web/`: local accounts, sessions, HTTP routes, activity stream
 - `src/core/agent-kernel.ts`: materializes the active pack and execution context
 - `src/core/space-behavior.ts`: pins pack and grounding snapshots per space
 - `src/core/context-composer.ts`: assembles prompt context with budgets and guards

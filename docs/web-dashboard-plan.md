@@ -114,8 +114,11 @@ URL entropy. What actually remains:
   operators (what the topology report means, what `pnpm web:account` does).
 - The `sharp`/baileys chore PR (see audit) so `release:check` can pass again.
 
-**Done when:** `pnpm release:check` passes; a third party can write an adapter from
-`docs/transports.md` alone.
+**Delivered.** `pnpm verify` green, 647 tests. `pnpm release:check` passes once the chore PR lands.
+
+One thing worth recording: threading `correlationId` explicitly through three signatures was
+chosen over `AsyncLocalStorage`. Three visible parameters read better than one invisible one,
+and the ambient version would have to be understood by everyone who ever touches the send path.
 
 ---
 
