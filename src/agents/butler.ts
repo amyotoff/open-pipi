@@ -1,7 +1,7 @@
 import { buildTelegramSpaceId, getTask, logEvent, storeMessage } from '../db';
 import { processWithLLM, processWithVision } from '../core/llm';
 import { processWithOllama } from '../core/ollama';
-import { sendChannelFile, sendChannelMessage } from '../channels/runtime';
+import { sendSpaceFile, sendSpaceMessage } from '../channels/runtime';
 import { composeConversationContext } from '../core/context-composer';
 import { BRIEF_PIN_HOURS, createBriefPage, shouldCreateDailyBriefPage } from '../core/brief-pages';
 import { logError, logInfo, summarizeError, summarizeText } from '../utils/logging';
@@ -212,9 +212,10 @@ export async function handleButlerMessage(
                     response_chars: prepared.text.length,
                     ...(prepared.url ? { brief_url: prepared.url } : {}),
                 });
-                await sendChannelMessage(
-                    input.channel,
-                    input.channelRef,
+                // Addressed to the space, so an answer reaches every surface the
+                // conversation is open on rather than only the one it came from.
+                await sendSpaceMessage(
+                    spaceId,
                     prepared.text,
                     prepared.pin
                         ? {
@@ -226,7 +227,7 @@ export async function handleButlerMessage(
                 );
 
                 if (prepared.filePath) {
-                    const fileResult = await sendChannelFile(input.channel, input.channelRef, prepared.filePath, {
+                    const fileResult = await sendSpaceFile(spaceId, prepared.filePath, {
                         filename: prepared.fileName || undefined,
                         caption: 'Brief HTML',
                         pin: true,
@@ -234,9 +235,8 @@ export async function handleButlerMessage(
                         pinDisableNotification: true,
                     });
                     if (!fileResult.success) {
-                        await sendChannelMessage(
-                            input.channel,
-                            input.channelRef,
+                        await sendSpaceMessage(
+                            spaceId,
                             `Не смог прикрепить Brief HTML: ${fileResult.error || 'канал не поддерживает файлы'}.`
                         );
                     }
@@ -303,7 +303,7 @@ export async function handleButlerPhoto(input: ButlerPhotoInput) {
 
                 if (visionResponse.text) {
                     addSpanEvent('assistant.butler.photo_reply_sent', { response_chars: visionResponse.text.length });
-                    await sendChannelMessage(input.channel, input.channelRef, visionResponse.text);
+                    await sendSpaceMessage(input.spaceId, visionResponse.text);
 
                     storeMessage({
                         id: `bot-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
@@ -319,11 +319,7 @@ export async function handleButlerPhoto(input: ButlerPhotoInput) {
             } catch (err: any) {
                 recordActiveSpanException(err, { 'app.butler.photo_status': 'failed' });
                 logError('BUTLER', 'photo_processing_failed', summarizeError(err));
-                await sendChannelMessage(
-                    input.channel,
-                    input.channelRef,
-                    'Не удалось обработать фото. Попробуй ещё раз.'
-                );
+                await sendSpaceMessage(input.spaceId, 'Не удалось обработать фото. Попробуй ещё раз.');
             }
         }
     );

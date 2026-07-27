@@ -151,7 +151,11 @@ export async function handleIncoming(message: IncomingMessage, options?: HandleI
                 ...summarizeText(text),
             });
 
-            const senderIsOwner = isOwner(message.sender.transportUserId, message.transport);
+            // A transport that authenticated its sender has already proven who
+            // they are; the owner allowlist is the trust anchor only where the
+            // transport cannot. Membership then carries the authorization.
+            const senderIsOwner =
+                message.senderAuthenticated === true || isOwner(message.sender.transportUserId, message.transport);
             const isDirect = message.endpoint.type === 'direct';
 
             // Look up without creating anything first. Only an owner — or a

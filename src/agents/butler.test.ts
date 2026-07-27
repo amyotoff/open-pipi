@@ -101,7 +101,18 @@ async function loadButler(options: { task?: any; briefUrl?: string | null } = {}
         sendFileToChat,
         bot: { telegram: { getFile, token: 'bot-token' } },
     }));
-    vi.doMock('../channels/runtime', () => makeChannelRuntimeMock({ sendMessageToChat, sendFileToChat }));
+    vi.doMock('../channels/runtime', () =>
+        makeChannelRuntimeMock({
+            sendMessageToChat,
+            sendFileToChat,
+            getSpace: () => ({
+                id: 'telegram:chat-1',
+                channel: 'telegram',
+                external_ref: 'chat-1',
+                policy_json: null,
+            }),
+        })
+    );
     vi.doMock('../core/memory-context', () => ({ getMemoryContext: vi.fn(() => '[MEMORY]') }));
     vi.doMock('../core/memory-sprint', () => ({
         ensureActiveMemorySprint: vi.fn(() => ({

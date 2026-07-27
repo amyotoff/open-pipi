@@ -1,8 +1,9 @@
 /**
  * The whole web client. No framework, no build step — this file is what runs.
  *
- * Read-only for now: it signs in, lists the spaces you belong to, and shows
- * their history. Sending arrives with the next release.
+ * Live updates come from one server event: "this space moved". The client's
+ * whole reaction is to refetch that space. That means a dropped connection
+ * costs nothing to recover from — no cursor, no replay, no gap to reconcile.
  */
 
 const el = (id) => document.getElementById(id);
@@ -10,6 +11,7 @@ const el = (id) => document.getElementById(id);
 const state = {
     spaces: [],
     activeSpaceId: null,
+    events: null,
 };
 
 async function api(path, options = {}) {
@@ -95,9 +97,59 @@ function renderMessages(space, messages) {
     list.scrollTop = list.scrollHeight;
 }
 
+function parseEventData(data) {
+    try {
+        return JSON.parse(data);
+    } catch {
+        return null;
+    }
+}
+
+function setConnectionNotice(text) {
+    el('connection').textContent = text;
+}
+
+/**
+ * Listen for activity. Membership is enforced server-side, so this stream only
+ * ever mentions spaces the signed-in person belongs to.
+ */
+function connectEvents() {
+    if (state.events) return;
+
+    const events = new EventSource('/api/events');
+    state.events = events;
+
+    events.addEventListener('open', () => {
+        setConnectionNotice('');
+        // A reconnect may have missed events, so re-read what is on screen.
+        if (state.activeSpaceId) void openSpace(state.activeSpaceId);
+    });
+
+    events.addEventListener('space_activity', (event) => {
+        const payload = parseEventData(event.data);
+        if (!payload) return;
+
+        void refreshSpaceList();
+        if (payload.space_id === state.activeSpaceId) {
+            void openSpace(state.activeSpaceId);
+        }
+    });
+
+    events.addEventListener('error', () => {
+        // EventSource retries on its own; this only explains the pause.
+        setConnectionNotice('Reconnecting…');
+    });
+}
+
+function disconnectEvents() {
+    state.events?.close();
+    state.events = null;
+}
+
 async function openSpace(spaceId) {
     state.activeSpaceId = spaceId;
     renderSpaces();
+    el('composer').hidden = false;
 
     const { ok, body } = await api(`/api/spaces/${encodeURIComponent(spaceId)}/messages`);
     if (!ok || !body?.ok) {
@@ -111,16 +163,23 @@ async function openSpace(spaceId) {
     );
 }
 
+async function refreshSpaceList() {
+    const { ok, body } = await api('/api/spaces');
+    if (!ok || !body?.ok) return;
+    state.spaces = body.spaces;
+    renderSpaces();
+}
+
 async function loadWorkspace(me) {
     el('who').textContent = me.participant.display_name || me.username;
 
-    const { ok, body } = await api('/api/spaces');
-    state.spaces = ok && body?.ok ? body.spaces : [];
-    renderSpaces();
+    await refreshSpaceList();
+    connectEvents();
 
     if (state.spaces.length > 0) {
         await openSpace(state.spaces[0].id);
     } else {
+        el('composer').hidden = true;
         renderMessages(null, []);
     }
 }
@@ -155,11 +214,44 @@ el('login-form').addEventListener('submit', async (event) => {
     await start();
 });
 
+el('composer').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const field = el('composer-text');
+    const text = field.value.trim();
+    if (!text || !state.activeSpaceId) return;
+
+    field.value = '';
+    const { ok } = await api(`/api/spaces/${encodeURIComponent(state.activeSpaceId)}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ text }),
+    });
+
+    if (!ok) {
+        // Give the text back rather than losing what someone typed.
+        field.value = text;
+        setConnectionNotice('Could not send that. Try again.');
+        return;
+    }
+
+    setConnectionNotice('');
+    await openSpace(state.activeSpaceId);
+});
+
 el('logout').addEventListener('click', async () => {
     await api('/api/auth/logout', { method: 'POST' });
+    disconnectEvents();
     state.spaces = [];
     state.activeSpaceId = null;
+    el('composer').hidden = true;
     show('login');
 });
+
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        void navigator.serviceWorker.register('/sw.js').catch(() => {
+            // An unregistered worker only costs offline shell caching.
+        });
+    });
+}
 
 void start();

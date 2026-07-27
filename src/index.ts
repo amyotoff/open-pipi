@@ -67,6 +67,7 @@ async function bootstrap() {
     const [
         db,
         telegramAdapter,
+        webAdapter,
         transportRegistry,
         gateway,
         deliveryWorker,
@@ -81,6 +82,7 @@ async function bootstrap() {
     ] = await Promise.all([
         import('./db'),
         import('./transports/telegram/adapter'),
+        import('./transports/web/adapter'),
         import('./transports/registry'),
         import('./gateway/message-gateway'),
         import('./gateway/delivery-worker'),
@@ -149,6 +151,11 @@ async function bootstrap() {
     // Telegram is required: without it there is no assistant to run, so a
     // failure here should stop the boot rather than leave a silent runtime.
     transportRegistry.registerTransport(new telegramAdapter.TelegramTransportAdapter(), { required: true });
+    if (config.PIPI_WEB_ENABLED) {
+        // Registered so the delivery worker can reach a space's web binding.
+        // Inbound arrives over HTTP, which the API server already handles.
+        transportRegistry.registerTransport(new webAdapter.WebTransportAdapter());
+    }
     closeTransportsRef = () => transportRegistry.stopAllTransports();
     await transportRegistry.startAllTransports({ messageGateway: { handleIncoming: gateway.handleIncoming } });
 

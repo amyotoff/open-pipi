@@ -14,12 +14,26 @@
 
 import type { Express, NextFunction, Request, Response } from 'express';
 import path from 'node:path';
-import { getRecentMessagesForSpace, getResident, getSpace, isSpaceMember, listSpacesForParticipant } from '../db';
+import { randomUUID } from 'node:crypto';
+import {
+    ensureTransportBinding,
+    getRecentMessagesForSpace,
+    getResident,
+    getSpace,
+    isSpaceMember,
+    listSpacesForParticipant,
+} from '../db';
 import { logInfo, logWarn } from '../utils/logging';
+import { handleIncoming } from '../gateway/message-gateway';
+import { buildIncomingMessageId } from '../transports/types';
+import { WEB_TRANSPORT } from '../transports/web/adapter';
 import { login, resolveSession, revokeSession, type AuthenticatedSession } from './auth';
+import { publishSpaceActivity, subscribe } from './events';
+import type { IncomingMessage } from '../transports/types';
 
 const SESSION_COOKIE = 'pipi_session';
 const MAX_JSON_BODY_BYTES = 64 * 1024;
+const MAX_MESSAGE_CHARS = 8_000;
 
 export const WEB_PUBLIC_DIR = path.join(__dirname, 'public');
 
@@ -167,6 +181,109 @@ export async function mountWebClient(app: Express, options: MountWebClientOption
                 last_message_preview: space.last_message_preview?.slice(0, 160) ?? null,
             })),
         });
+    });
+
+    /**
+     * Send into a space.
+     *
+     * Membership is the authorization, so a member's first message is also what
+     * creates the space's web binding — the resolver refuses to bootstrap web
+     * endpoints precisely so that a *stranger* cannot, and a member is not one.
+     *
+     * From there the message goes through the same gateway as every other
+     * transport: same id format, same deduplication, same pipeline. There is no
+     * separate agent flow for the web.
+     */
+    app.post(
+        '/api/spaces/:spaceId/messages',
+        requireSession,
+        requireJsonBody,
+        jsonBody,
+        async (req: AuthedRequest, res: Response) => {
+            const spaceId = String(req.params.spaceId);
+            const participantId = req.session!.participantId;
+            const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+
+            if (!isSpaceMember(spaceId, participantId)) {
+                res.status(404).json({ ok: false, error: 'Space not found.' });
+                return;
+            }
+
+            const space = getSpace(spaceId);
+            if (!space) {
+                res.status(404).json({ ok: false, error: 'Space not found.' });
+                return;
+            }
+
+            if (!text) {
+                res.status(400).json({ ok: false, error: 'A message needs some text.' });
+                return;
+            }
+            if (text.length > MAX_MESSAGE_CHARS) {
+                res.status(413).json({ ok: false, error: `Keep it under ${MAX_MESSAGE_CHARS} characters.` });
+                return;
+            }
+
+            ensureTransportBinding({
+                transport: WEB_TRANSPORT,
+                endpointId: space.id,
+                endpointType: space.kind === 'group_chat' ? 'group' : 'direct',
+                spaceId: space.id,
+            });
+
+            const transportMessageId = randomUUID();
+            const message: IncomingMessage = {
+                id: buildIncomingMessageId(WEB_TRANSPORT, space.id, transportMessageId),
+                transportMessageId,
+                transport: WEB_TRANSPORT,
+                endpoint: {
+                    id: space.id,
+                    type: space.kind === 'group_chat' ? 'group' : 'direct',
+                    title: space.title,
+                },
+                sender: {
+                    // The username is this participant's web identity, so the
+                    // resolver recognizes the same person it knows from
+                    // Telegram. From the session, never from the body: a client
+                    // that can name its own sender can speak as anyone.
+                    transportUserId: req.session!.username,
+                    displayName: getResident(participantId)?.display_name ?? null,
+                    username: req.session!.username,
+                },
+                content: { text },
+                timestamp: new Date().toISOString(),
+                correlationId: randomUUID(),
+                // A message typed into the assistant's own client is addressed
+                // to it by definition.
+                addressedToAssistant: true,
+                // The session proved who this is, and membership was checked
+                // above — the gateway needs no allowlist to trust it.
+                senderAuthenticated: true,
+            };
+
+            res.status(202).json({ ok: true, message_id: message.id });
+            publishSpaceActivity(space.id);
+
+            // The reply may take a while; the client already has its 202 and
+            // learns about the answer from the activity stream.
+            void handleIncoming(message).catch((error) => {
+                logWarn('WEB', 'send_failed', {
+                    space_id: space.id,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            });
+        }
+    );
+
+    /**
+     * The activity stream.
+     *
+     * One event type and no server-side cursor: the client refetches the space
+     * it was told about, so a dropped connection costs nothing to recover from.
+     */
+    app.get('/api/events', requireSession, (req: AuthedRequest, res: Response) => {
+        const detach = subscribe(req.session!.participantId, res);
+        req.on('close', detach);
     });
 
     app.get('/api/spaces/:spaceId/messages', requireSession, (req: AuthedRequest, res: Response) => {
