@@ -101,4 +101,31 @@ describe('core/healthcheck', () => {
         expect(mod.getHealthSummary()).toContain('Platform: generic');
         expect(mod.getHealthSummary()).toContain('Pi-specific telemetry: disabled');
     });
+
+    describe('the daily spend ceiling', () => {
+        const ORIGINAL_ENV = { ...process.env };
+
+        afterEach(() => {
+            process.env = { ...ORIGINAL_ENV };
+        });
+
+        it('defaults to $3 when nothing is configured', async () => {
+            delete process.env.PIPI_DAILY_COST_LIMIT_USD;
+            expect((await loadHealthcheck()).DAILY_COST_LIMIT).toBe(3.0);
+        });
+
+        it('takes the configured limit', async () => {
+            process.env.PIPI_DAILY_COST_LIMIT_USD = '25';
+            expect((await loadHealthcheck()).DAILY_COST_LIMIT).toBe(25);
+        });
+
+        it('keeps the ceiling when the value is nonsense', async () => {
+            // A typo must not silently remove the spend limit — that is the one
+            // failure mode this guard exists to prevent.
+            for (const value of ['', 'lots', '-5', '0']) {
+                process.env.PIPI_DAILY_COST_LIMIT_USD = value;
+                expect((await loadHealthcheck()).DAILY_COST_LIMIT, value).toBe(3.0);
+            }
+        });
+    });
 });
