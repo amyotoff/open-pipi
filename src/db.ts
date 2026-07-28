@@ -157,12 +157,21 @@ function createSchema(database: Database.Database): void {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date TEXT NOT NULL,
             model TEXT,
+            -- Nullable on purpose: background work and local triage calls belong
+            -- to no conversation, and rows written before this column existed
+            -- have no space to attribute. Both read as "unattributed" rather
+            -- than being quietly folded into some space's bill.
+            space_id TEXT,
             input_tokens INTEGER DEFAULT 0,
             output_tokens INTEGER DEFAULT 0,
             cost_usd REAL DEFAULT 0,
             timestamp TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_token_usage_date ON token_usage(date);
+        -- The index on space_id lives in runMigrations, not here. On an existing
+        -- database CREATE TABLE IF NOT EXISTS is a no-op, so the column does not
+        -- exist yet at this point and indexing it would fail — taking this whole
+        -- statement, and every table after it, down with it.
 
         CREATE TABLE IF NOT EXISTS system_metrics_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -466,6 +475,13 @@ function dropColumnIfExists(database: Database.Database, table: string, column: 
 }
 
 function runMigrations(database: Database.Database): void {
+    try {
+        database.exec('ALTER TABLE token_usage ADD COLUMN space_id TEXT');
+    } catch {}
+    try {
+        database.exec('CREATE INDEX IF NOT EXISTS idx_token_usage_space_date ON token_usage(space_id, date)');
+    } catch {}
+
     try {
         database.exec('ALTER TABLE residents ADD COLUMN nickname TEXT');
     } catch {}
@@ -3833,7 +3849,7 @@ function resolvePricing(model: string, inputTokens: number): { input: number; ou
     return PRICING[model] || PRICING['gemini-2.5-flash'];
 }
 
-export function logTokenUsage(model: string, inputTokens: number, outputTokens: number): void {
+export function logTokenUsage(model: string, inputTokens: number, outputTokens: number, spaceId?: string | null): void {
     const today = new Date().toISOString().split('T')[0];
     const isLocal = model.startsWith('ollama:');
     const pricing = isLocal ? { input: 0, output: 0 } : resolvePricing(model, inputTokens);
@@ -3842,11 +3858,84 @@ export function logTokenUsage(model: string, inputTokens: number, outputTokens: 
     getDb()
         .prepare(
             `
-        INSERT INTO token_usage (date, model, input_tokens, output_tokens, cost_usd, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO token_usage (date, model, space_id, input_tokens, output_tokens, cost_usd, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
     `
         )
-        .run(today, model, inputTokens, outputTokens, cost, new Date().toISOString());
+        .run(today, model, spaceId ?? null, inputTokens, outputTokens, cost, new Date().toISOString());
+}
+
+export interface SpendRow {
+    key: string;
+    input_tokens: number;
+    output_tokens: number;
+    cost_usd: number;
+    calls: number;
+}
+
+export interface SpendReport {
+    days: number;
+    since: string;
+    total: SpendRow;
+    today: SpendRow;
+    by_model: SpendRow[];
+    by_space: SpendRow[];
+    by_day: SpendRow[];
+    /** Rows written before per-space accounting existed, or by work that belongs to no space. */
+    unattributed_cost_usd: number;
+}
+
+const SPEND_COLUMNS = `
+    COALESCE(SUM(input_tokens), 0) AS input_tokens,
+    COALESCE(SUM(output_tokens), 0) AS output_tokens,
+    COALESCE(SUM(cost_usd), 0) AS cost_usd,
+    COUNT(*) AS calls
+`;
+
+/**
+ * What the assistant has cost, and where it went.
+ *
+ * Grouped three ways because they answer different questions: by model tells
+ * you whether the expensive model is being reached for too often, by space
+ * tells you which conversation is expensive, and by day tells you whether
+ * either is a trend or a one-off.
+ */
+export function getSpendReport(options?: { days?: number }): SpendReport {
+    const days = clampLimit(options?.days, 30, 1, 365);
+    const since = new Date(Date.now() - (days - 1) * 86_400_000).toISOString().split('T')[0];
+    const today = new Date().toISOString().split('T')[0];
+    const db = getDb();
+
+    const group = (expression: string, extraWhere = ''): SpendRow[] =>
+        db
+            .prepare(
+                `SELECT ${expression} AS key, ${SPEND_COLUMNS}
+                 FROM token_usage WHERE date >= ? ${extraWhere}
+                 GROUP BY key ORDER BY cost_usd DESC, key ASC`
+            )
+            .all(since) as SpendRow[];
+
+    const single = (where: string, param: string): SpendRow =>
+        db.prepare(`SELECT '' AS key, ${SPEND_COLUMNS} FROM token_usage WHERE ${where}`).get(param) as SpendRow;
+
+    return {
+        days,
+        since,
+        total: single('date >= ?', since),
+        today: single('date = ?', today),
+        by_model: group("COALESCE(NULLIF(model, ''), 'unknown')"),
+        by_space: group('space_id', 'AND space_id IS NOT NULL'),
+        by_day: group('date'),
+        unattributed_cost_usd:
+            (
+                db
+                    .prepare(
+                        `SELECT COALESCE(SUM(cost_usd), 0) AS cost_usd
+                         FROM token_usage WHERE date >= ? AND space_id IS NULL`
+                    )
+                    .get(since) as { cost_usd: number }
+            ).cost_usd || 0,
+    };
 }
 
 export function getDailyTokenCost(date?: string): {

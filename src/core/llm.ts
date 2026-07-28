@@ -296,7 +296,10 @@ export async function processWithLLM(
                     const inputTokens = resp?.usageMetadata?.promptTokenCount || 0;
                     const outputTokens = resp?.usageMetadata?.candidatesTokenCount || 0;
                     if (inputTokens > 0 || outputTokens > 0) {
-                        logTokenUsage(model, inputTokens, outputTokens);
+                        // Attributed to the space whose turn this is, so the
+                        // dashboard can say which conversation costs money.
+                        // Undefined for work that belongs to no conversation.
+                        logTokenUsage(model, inputTokens, outputTokens, context.spaceId);
                     }
                 };
 
@@ -492,7 +495,8 @@ export async function processWithLLM(
                                     logTokenUsage(
                                         OLLAMA_MODEL,
                                         ollamaData.prompt_eval_count || 0,
-                                        ollamaData.eval_count || 0
+                                        ollamaData.eval_count || 0,
+                                        context.spaceId
                                     );
                                     return { text: ollamaText };
                                 }

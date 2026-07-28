@@ -4,6 +4,21 @@ All notable changes to Open PiPi will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Budget block on the dashboard overview: today's spend against the limit that trips the
+  killswitch, plus a breakdown by model and by space. `token_usage` gained a `space_id`, and the
+  LLM path now attributes spend to the space whose turn it is.
+
+### Fixed
+
+- The dashboard shredded tables in a narrow window — `overflow-wrap: anywhere` on every cell also
+  shrinks each column's min-content width, so instead of widening into its scroller the table broke
+  words one letter per line, leaving a "Retry" button 104px tall.
+- `src/web/routes.test.ts` raced the server: it slept a fixed interval hoping an SSE client had
+  subscribed, which under coverage instrumentation sometimes published to nobody. It now waits on
+  the subscription itself. This was the intermittent `pnpm verify` failure noted in 2.6.0.
+
 ## [2.6.0] — 2026-07-27
 
 Transports become replaceable. A `space` already owned behavior, memory, and permissions; this

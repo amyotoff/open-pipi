@@ -80,6 +80,7 @@ async function write(method: 'PATCH' | 'POST', routePath: string, body: unknown,
 const ADMIN_ROUTES = [
     '/api/admin/overview',
     '/api/admin/spaces',
+    '/api/admin/budget',
     '/api/admin/delivery',
     '/api/admin/brain',
     '/api/admin/memory',
@@ -172,6 +173,61 @@ describe('dashboard views', () => {
         expect(space.channel_mode).toBe('full');
         expect(space.pack).toBeTruthy();
         expect(space.bindings.map((binding: { transport: string }) => binding.transport)).toContain('telegram');
+    });
+
+    it('breaks spend down by model and by space, and says what it cannot attribute', async () => {
+        const { db } = await startServer();
+        const cookie = await signIn('alex');
+
+        db.logTokenUsage('gemini-2.5-flash', 1_000_000, 1_000_000, 'telegram:-100');
+        db.logTokenUsage('gemini-2.5-pro', 1_000_000, 0, 'telegram:-100');
+        // Background work belongs to no conversation.
+        db.logTokenUsage('gemini-2.5-flash', 1_000_000, 0, null);
+
+        const { body } = await get('/api/admin/budget', cookie);
+
+        // 0.15 + 0.60 (flash) + 1.25 (pro) + 0.15 (unattributed flash)
+        expect(body.total.cost_usd).toBeCloseTo(2.15, 5);
+        expect(body.today.cost_usd).toBeCloseTo(2.15, 5);
+        expect(body.daily_limit_usd).toBeGreaterThan(0);
+
+        const byModel = Object.fromEntries(body.by_model.map((row: any) => [row.key, row.cost_usd]));
+        expect(byModel['gemini-2.5-pro']).toBeCloseTo(1.25, 5);
+        expect(byModel['gemini-2.5-flash']).toBeCloseTo(0.9, 5);
+
+        // Only the two attributed calls land on the space, and it is named.
+        expect(body.by_space).toHaveLength(1);
+        expect(body.by_space[0]).toMatchObject({ key: 'telegram:-100', title: 'Household', calls: 2 });
+        expect(body.by_space[0].cost_usd).toBeCloseTo(2.0, 5);
+
+        // The remainder is declared rather than silently dropped.
+        expect(body.unattributed_cost_usd).toBeCloseTo(0.15, 5);
+    });
+
+    it('counts a local model as free rather than guessing a price', async () => {
+        const { db } = await startServer();
+        const cookie = await signIn('alex');
+
+        db.logTokenUsage('ollama:llama3', 500_000, 500_000, 'telegram:-100');
+
+        const { body } = await get('/api/admin/budget', cookie);
+
+        expect(body.total.cost_usd).toBe(0);
+        expect(body.total.input_tokens).toBe(500_000);
+    });
+
+    it('leaves spend outside the window out of the report', async () => {
+        const { db } = await startServer();
+        const cookie = await signIn('alex');
+
+        db.logTokenUsage('gemini-2.5-flash', 1_000_000, 0, 'telegram:-100');
+        db.getDb().prepare(`UPDATE token_usage SET date = '2020-01-01' WHERE id = 1`).run();
+
+        const { body } = await get('/api/admin/budget?days=7', cookie);
+
+        expect(body.days).toBe(7);
+        expect(body.total.calls).toBe(0);
+        expect(body.total.cost_usd).toBe(0);
     });
 
     it('shows what is stuck and why', async () => {

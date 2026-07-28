@@ -131,7 +131,10 @@ describe('core/llm advisor strategy', () => {
         ).toContain('consult_advisor');
         expect(generateContent.mock.calls[1][0].config.tools).toBeUndefined();
         expect(generateContent.mock.calls[1][0].contents[0].parts[0].text).toContain('Focused question:');
-        expect(mod.logTokenUsage).toHaveBeenCalledWith('gemini-3-pro-preview', 70, 25);
+        // Fourth argument is the space the spend belongs to. This turn has no
+        // space in its context, so it is recorded as unattributed rather than
+        // being charged to whichever conversation happens to be nearby.
+        expect(mod.logTokenUsage).toHaveBeenCalledWith('gemini-3-pro-preview', 70, 25, undefined);
         expect(mod.recordLlmRequest.mock.calls.some((call: any[]) => call[1]?.mode === 'advisor')).toBe(true);
     });
 
@@ -206,5 +209,24 @@ describe('core/llm advisor strategy', () => {
             (tool: any) => tool.name
         );
         expect(names).toEqual(['web_search']);
+    });
+
+    it('charges the spend to the space whose turn it is', async () => {
+        const generateContent = vi.fn().mockResolvedValueOnce({
+            usageMetadata: { promptTokenCount: 90, candidatesTokenCount: 30 },
+            functionCalls: [],
+            text: 'Answer',
+        });
+
+        const mod = await loadLlm({ generateContent });
+        await mod.processWithLLM([{ role: 'user', content: 'Hello' }], {
+            chatId: 'chat-1',
+            userId: '111',
+            spaceId: 'telegram:-100',
+        });
+
+        // Without this the dashboard can say what the assistant cost but not
+        // which conversation ran up the bill.
+        expect(mod.logTokenUsage).toHaveBeenCalledWith(expect.any(String), 90, 30, 'telegram:-100');
     });
 });

@@ -72,7 +72,8 @@ const FAIL_THRESHOLD = 3; // 3 fails → mark down
 const RECOVER_THRESHOLD = 2; // 2 successes → mark up
 
 // Kill switch config
-const DAILY_COST_LIMIT = 3.0; // $3 per day auto-kill
+/** $3 per day, after which the killswitch trips. Exported so surfaces can show spend against it. */
+export const DAILY_COST_LIMIT = 3.0;
 const HOURLY_CALLS_LIMIT = 120; // 120 LLM calls/hour → something is looping
 let hourlyCallCount = 0;
 let hourlyResetTime = Date.now();
