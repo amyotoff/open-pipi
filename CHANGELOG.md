@@ -4,6 +4,27 @@ All notable changes to Open PiPi will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Budget block on the dashboard overview: today's spend against the limit that trips the
+  killswitch, plus a breakdown by model and by space. `token_usage` gained a `space_id`, and the
+  LLM path now attributes spend to the space whose turn it is.
+- `PIPI_DAILY_COST_LIMIT_USD` makes the daily spend ceiling configurable. It was a constant in
+  `healthcheck.ts`, so the only way to raise it was editing the source — and $3/day is a sensible
+  default for a household on a Pi and a useless one for anything else. A missing or nonsensical
+  value keeps the $3 default rather than removing the ceiling.
+- README documents the cost ceiling at all. The assistant hard-stops when the day's spend crosses
+  the limit, which is deliberate but surprising if you do not know it is there.
+
+### Fixed
+
+- The dashboard shredded tables in a narrow window — `overflow-wrap: anywhere` on every cell also
+  shrinks each column's min-content width, so instead of widening into its scroller the table broke
+  words one letter per line, leaving a "Retry" button 104px tall.
+- `src/web/routes.test.ts` raced the server: it slept a fixed interval hoping an SSE client had
+  subscribed, which under coverage instrumentation sometimes published to nobody. It now waits on
+  the subscription itself. This was the intermittent `pnpm verify` failure noted in 2.6.0.
+
 ## [2.6.0] — 2026-07-27
 
 Transports become replaceable. A `space` already owned behavior, memory, and permissions; this

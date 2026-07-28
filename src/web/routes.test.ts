@@ -108,6 +108,26 @@ async function readEvents(cookie: string, count: number, timeoutMs = 3000): Prom
     return events;
 }
 
+/**
+ * Wait until the stream is actually registered before publishing to it.
+ *
+ * Sleeping a fixed interval here raced the server: under coverage
+ * instrumentation the subscription sometimes landed after the event was
+ * published, and the event went to nobody. Waiting on the real condition is
+ * both faster and not a guess.
+ */
+async function waitForSubscribers(expected: number, timeoutMs = 5000): Promise<void> {
+    const { countSubscribers } = await import('./events');
+    const deadline = Date.now() + timeoutMs;
+
+    while (countSubscribers() < expected) {
+        if (Date.now() > deadline) {
+            throw new Error(`Stream never subscribed: wanted ${expected}, saw ${countSubscribers()}.`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+}
+
 /** Error pages come back as HTML, so the raw text is the useful fallback. */
 function parseJsonOrText(text: string): unknown {
     try {
@@ -410,7 +430,7 @@ describe('web activity stream', () => {
         const cookie = await signIn();
 
         const streaming = readEvents(cookie, 1);
-        await new Promise((resolve) => setTimeout(resolve, 150));
+        await waitForSubscribers(1);
         await call('POST', '/api/spaces/telegram:-100/messages', { cookie, body: { text: 'ping' } });
 
         const events = await streaming;
@@ -423,7 +443,7 @@ describe('web activity stream', () => {
         const { publishSpaceActivity } = await import('./events');
 
         const streaming = readEvents(cookie, 1, 1200);
-        await new Promise((resolve) => setTimeout(resolve, 150));
+        await waitForSubscribers(1);
         publishSpaceActivity('telegram:-200');
 
         expect(await streaming).toHaveLength(0);

@@ -231,6 +231,7 @@ export function createTestDb(): Database.Database {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             date TEXT NOT NULL,
             model TEXT,
+            space_id TEXT,
             input_tokens INTEGER DEFAULT 0,
             output_tokens INTEGER DEFAULT 0,
             cost_usd REAL DEFAULT 0,
@@ -1475,17 +1476,18 @@ export function makeDbModuleMock(db: Database.Database) {
             db
                 .prepare('INSERT INTO event_log (event_type, details, timestamp) VALUES (?, ?, ?)')
                 .run(eventType, JSON.stringify(details), new Date().toISOString()),
-        logTokenUsage: (model: string, inputTokens: number, outputTokens: number) =>
+        logTokenUsage: (model: string, inputTokens: number, outputTokens: number, spaceId?: string | null) =>
             db
                 .prepare(
                     `
-                INSERT INTO token_usage (date, model, input_tokens, output_tokens, cost_usd, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO token_usage (date, model, space_id, input_tokens, output_tokens, cost_usd, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             `
                 )
                 .run(
                     new Date().toISOString().slice(0, 10),
                     model,
+                    spaceId ?? null,
                     inputTokens,
                     outputTokens,
                     0,

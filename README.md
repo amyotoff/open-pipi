@@ -321,13 +321,15 @@ An owner signing in gets extra sections in the sidebar. Everyone else does not �
 
 | View | Shows | Lets you change |
 | --- | --- | --- |
-| Overview | Health, queue depth, and how spaces, bindings and participants are wired together | — |
+| Overview | Health, queue depth, how spaces, bindings and participants are wired together, and what the assistant is costing | — |
 | Spaces | Every space with its pack, grounding, mode, and the transports it is reachable from | Mode, pack, grounding; archive and restore |
 | Delivery | What is still queued or has been given up on, with the error | Retry a failed delivery |
 | Wiki | The Brain Layer's curated pages and notes, as plain text | — |
 | Memory | What the assistant remembers, newest first | — |
 
 Archiving a space hides it and sets its mode to `off`; nothing is deleted, and Restore brings it back. Retrying a failed delivery hands back its attempt budget — useful once the reason it failed is fixed. Both are written to the event log with who did it.
+
+**Budget.** Overview shows today's spend against the daily limit that trips the killswitch, plus a breakdown by model and by space. Local models are counted at zero rather than guessed at. Work that belongs to no conversation — background passes, local triage, and anything recorded before per-space accounting existed — is reported as unattributed instead of being folded into some space's bill.
 
 Settings that live in `.env` — tokens, owners, hosts — are edited in `.env`. A dashboard that edits credentials is an attack surface, not a convenience. For the same reason the wiki and memory are readable but not editable here: the assistant maintains those through its own skills, where a change carries provenance.
 
@@ -556,6 +558,25 @@ Useful env vars:
 - `OLLAMA_MODEL`
 - `PIPI_LOCAL_ROUTING_ENABLED` (defaults to `true`; safe fallback routes uncertain messages to Gemini)
 
+### Cost, and the daily limit that stops it
+
+Every model call is recorded with its token counts and a cost, attributed to the space whose turn it was. Local `Ollama` calls are recorded at zero rather than priced by guess.
+
+**There is a hard daily ceiling, and it is not advisory.** When the day's spend crosses `PIPI_DAILY_COST_LIMIT_USD` (default `$3.00`), the killswitch trips and the assistant stops answering until it is cleared. This is deliberate — a runaway loop on a metered API is the failure mode most likely to cost real money — but it will surprise you if you do not know it is there. Raise it if $3 is the wrong number for you:
+
+```dotenv
+PIPI_DAILY_COST_LIMIT_USD=25
+```
+
+Where to see the spend:
+
+- the dashboard's **Overview**, broken down by model and by space, with today's total against the limit
+- `/status` in Telegram, for the day's total
+
+Work that belongs to no conversation — background passes, local triage, and anything recorded before per-space accounting existed — is reported as **unattributed** rather than folded into some space's bill.
+
+Pricing is a table in [`src/db.ts`](src/db.ts) covering the Gemini models this runtime calls. It is applied at write time, so changing it does not rewrite history.
+
 OpenTelemetry is opt-in. It starts only if one of the OTLP env vars is configured:
 
 - `OTEL_EXPORTER_OTLP_ENDPOINT`
@@ -652,6 +673,7 @@ The OAuth callback is intentionally public so Google can redirect to it, but it 
 | `PIPI_ADVISOR_ENABLED` | Enables the internal advisor consultation tool for the executor |
 | `PIPI_ADVISOR_MAX_CALLS_PER_TURN` | Hard cap on advisor consultations during one user turn |
 | `PIPI_LOCAL_ROUTING_ENABLED` | Uses a fast local classifier for ambiguous routing and relevance-based group participation |
+| `PIPI_DAILY_COST_LIMIT_USD` | Spend per day before the killswitch trips and the assistant stops answering (default `3.00`) |
 | `OWNER_TG_IDS` | Comma-separated Telegram owner IDs |
 | `OWNER_IDENTITIES` | Comma-separated channel-qualified owner IDs |
 | `BOT_DISPLAY_NAME` | Name the assistant introduces itself with (default: `PiPi`) |

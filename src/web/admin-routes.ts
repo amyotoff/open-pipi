@@ -20,6 +20,7 @@ import {
     getMemoryEntries,
     getResident,
     getSpace,
+    getSpendReport,
     getTransportTopologyReport,
     listSpaces,
     listTransportBindingsForSpace,
@@ -31,7 +32,7 @@ import {
     type Space,
 } from '../db';
 import { countOutboxByStatus, getOutboxEntry, requeueDelivery } from '../gateway/outbox';
-import { getHealthState, getSystemMetrics } from '../core/healthcheck';
+import { DAILY_COST_LIMIT, getHealthState, getSystemMetrics } from '../core/healthcheck';
 import { listTransports } from '../transports/registry';
 import { listInstallablePackIds } from '../core/pack-loader';
 import { listInstallableGroundingIds } from '../core/grounding-loader';
@@ -115,6 +116,31 @@ export function mountAdminRoutes(app: Express, deps: AdminRouteDependencies): vo
                 participants_without_identity: topology.participants_without_identity,
             },
             web_subscribers: countSubscribers(),
+        });
+    });
+
+    /**
+     * What the assistant has cost, and where it went.
+     *
+     * Shown against `DAILY_COST_LIMIT` because that number is not decorative —
+     * crossing it trips the killswitch and the assistant stops answering. An
+     * owner should be able to see that coming.
+     */
+    app.get('/api/admin/budget', guard, (req: AuthedRequest, res: Response) => {
+        const report = getSpendReport({ days: Number(req.query.days) || 30 });
+        const titles = new Map(listSpaces().map((space) => [space.id, space.title || space.id]));
+
+        res.json({
+            ok: true,
+            days: report.days,
+            since: report.since,
+            daily_limit_usd: DAILY_COST_LIMIT,
+            today: report.today,
+            total: report.total,
+            by_model: report.by_model,
+            by_space: report.by_space.map((row) => ({ ...row, title: titles.get(row.key) || row.key })),
+            by_day: report.by_day,
+            unattributed_cost_usd: report.unattributed_cost_usd,
         });
     });
 

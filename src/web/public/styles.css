@@ -461,8 +461,12 @@ tr:last-child td {
     border-bottom: 0;
 }
 
+/* Long error strings and remembered text have to wrap somewhere, but this must
+   stay `break-word`. `anywhere` also shrinks a column's min-content width, so a
+   narrow window stops widening the table and starts shredding every cell one
+   letter per line instead. */
 td.wrap {
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
 }
 
 .pill {
@@ -501,8 +505,35 @@ td.wrap {
     font-size: 0.87rem;
 }
 
+/* Divides the overview into what it is made of, without a card around it. */
+.section-heading {
+    margin: 0.6rem 0 -0.3rem;
+    font-size: 0.95rem;
+}
+
+/* Spend against the daily limit. One bar, because there is one question. */
+.meter {
+    height: 6px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.meter-fill {
+    height: 100%;
+    background: var(--ok);
+    transition: width 0.2s ease;
+}
+
+.meter-fill.is-bad {
+    background: var(--danger);
+}
+
 /* A setting changed in place: it should read as the value, not as a form. */
 .choice {
+    /* A control is not prose: never break its label across lines. */
+    white-space: nowrap;
     padding: 0.25rem 0.4rem;
     background: var(--bg);
     color: var(--text);
@@ -519,6 +550,7 @@ td.wrap {
 
 /* A table cell that opens something, styled as a link rather than a button. */
 .link {
+    white-space: nowrap;
     margin: 0;
     padding: 0;
     background: none;

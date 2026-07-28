@@ -306,7 +306,75 @@ async function loadWorkspace(me) {
 // Dashboard views
 // ==========================================
 
-function renderOverview(body, data) {
+const money = (value) => `$${Number(value || 0).toFixed(2)}`;
+const thousands = (value) => Number(value || 0).toLocaleString();
+
+/**
+ * Spend, and where it went.
+ *
+ * Today's number is shown against the daily limit because that limit is not
+ * decorative — crossing it trips the killswitch and the assistant goes quiet.
+ */
+function renderBudget(body, data) {
+    const today = data.today || {};
+    const total = data.total || {};
+    const limit = Number(data.daily_limit_usd) || 0;
+    const spent = Number(today.cost_usd) || 0;
+    const share = limit > 0 ? Math.min(spent / limit, 1) : 0;
+
+    const stats = node('div', 'stats');
+    stats.append(stat('Today', money(spent), share >= 0.8 ? 'bad' : undefined));
+    stats.append(stat('Daily limit', money(limit)));
+    stats.append(stat(`Last ${data.days} days`, money(total.cost_usd)));
+    stats.append(stat('Calls', thousands(total.calls)));
+    body.append(stats);
+
+    const meter = node('div', 'meter');
+    const fill = node('div', `meter-fill${share >= 0.8 ? ' is-bad' : ''}`);
+    fill.style.width = `${Math.round(share * 100)}%`;
+    meter.append(fill);
+    body.append(meter);
+    body.append(
+        node(
+            'p',
+            'muted',
+            spent >= limit
+                ? 'The daily limit is spent — the killswitch trips here and the assistant stops answering.'
+                : `${money(limit - spent)} left today before the killswitch trips.`
+        )
+    );
+
+    const spendRows = (rows, title, column) =>
+        table(
+            title,
+            [column, 'Cost', 'In', 'Out', 'Calls'],
+            (rows || []).map((row) => [
+                row.title || row.key || 'unknown',
+                money(row.cost_usd),
+                thousands(row.input_tokens),
+                thousands(row.output_tokens),
+                row.calls,
+            ])
+        );
+
+    body.append(spendRows(data.by_model, 'Spend by model', 'Model'));
+    body.append(spendRows(data.by_space, 'Spend by space', 'Space'));
+
+    // Background work and local triage belong to no conversation, and rows
+    // written before per-space accounting existed cannot be attributed at all.
+    // Saying so beats letting the per-space totals look like they should add up.
+    if (data.unattributed_cost_usd > 0) {
+        body.append(
+            node(
+                'p',
+                'muted',
+                `${money(data.unattributed_cost_usd)} is not attributed to any space — background work, local triage, or usage recorded before per-space accounting existed.`
+            )
+        );
+    }
+}
+
+async function renderOverview(body, data) {
     const health = data.health || {};
     const stats = node('div', 'stats');
     for (const [label, key] of [
@@ -349,6 +417,14 @@ function renderOverview(body, data) {
         ...(topology.participants_without_identity || []).map((id) => ['Participant without an identity', id]),
     ];
     if (orphans.length > 0) body.append(table('Needs a look', ['Problem', 'Which'], orphans));
+
+    // Its own request: spend needs a date range, and the wiring above does not.
+    // A slow or failed budget query must not take the health panel down with it.
+    const budget = await api('/api/admin/budget');
+    if (budget.ok && budget.body?.ok) {
+        body.append(node('h3', 'section-heading', 'Budget'));
+        renderBudget(body, budget.body);
+    }
 }
 
 function renderSpacesView(body, data) {
