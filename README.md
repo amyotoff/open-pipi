@@ -11,7 +11,7 @@ Private memory. Shared know-how. Your hardware.
 ✓ **Team-native** · ✓ **Runs on Raspberry Pi 4** · ✓ **Token-frugal** · ✓ **Open source**
 
 [![CI](https://github.com/amyotoff/open-pipi/actions/workflows/ci.yml/badge.svg)](https://github.com/amyotoff/open-pipi/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-2.5.0-informational.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-2.6.0-informational.svg)](package.json)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D24-green.svg)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue.svg)](https://www.typescriptlang.org)
@@ -19,10 +19,13 @@ Private memory. Shared know-how. Your hardware.
 ## TL;DR
 
 - Open PiPi is a self-hosted assistant runtime you can actually read, fork, and change.
-- It is `Telegram`-first, but `Discord`, `WhatsApp`, and `Gmail` reuse the same core runtime.
-- The main runtime unit is a `space`: a DM, group, channel, or email thread participant.
+- The main runtime unit is a `space`: one conversation, owning its own memory, behavior, permissions, and history.
+- A `transport` — `Telegram`, the local web client, `Discord`, `WhatsApp`, `Gmail` — is only a way *into* a space. Adding one touches no core code.
+- A space can be reachable from several transports at once, and a reply goes to all of them, so a question asked in the browser is still answered in the Telegram group.
+- Outbound messages go through a durable outbox: retries with backoff, ordering per conversation, and nothing lost to a restart.
 - A `pack` changes the assistant's voice, enabled skills, default policies, seeded tasks, and optional pack-local tools.
 - A `grounding` holds stable facts and operating rules. Memory handles the changing stuff.
+- There is a local web client and, for owners, a dashboard showing health, spaces, stuck deliveries, the wiki, and memory. Off by default, loopback-only.
 - The happy path is simple: copy `.env.example`, fill a few vars, run `pnpm setup:check`, bootstrap, then `pnpm dev`.
 - `DATA_DIR` is the assistant's suitcase: database, auth state, restore points, and pinned per-space behavior all live there.
 - Safe updates are meant to preserve both memory and behavior. Existing spaces keep their current pack + grounding snapshot until you intentionally switch them.
@@ -670,6 +673,15 @@ The OAuth callback is intentionally public so Google can redirect to it, but it 
 | `PIPI_API_TOKEN` | Bearer token required for `/api/*` requests |
 | `PIPI_PUBLIC_BASE_URL` | Optional public base URL for shareable `/html/*` and `/briefs/*` pages; without it, Telegram receives HTML files as attachments |
 
+### Local Web Client
+
+| Variable | Purpose |
+| --- | --- |
+| `PIPI_WEB_ENABLED` | Serves the web client and its API. Off unless set to `true` |
+| `PIPI_WEB_HOST` | Bind host (default `127.0.0.1`). Binding wider requires an account to exist first, or startup refuses |
+| `PIPI_WEB_PORT` | Port for the web client (default `3000`) |
+| `PIPI_WEB_PASSWORD` | Read by `pnpm web:account` when creating or re-passwording an account, so it stays out of shell history |
+
 ### Google Docs And Sheets OAuth
 
 | Variable | Purpose |
@@ -678,7 +690,7 @@ The OAuth callback is intentionally public so Google can redirect to it, but it 
 | `GOOGLE_CLIENT_SECRET` | OAuth 2.0 Web application client secret |
 | `GOOGLE_OAUTH_REDIRECT_URI` | Public callback URL, usually `https://<host>/oauth/google/callback` |
 
-### Channel Adapters
+### Transport Adapters
 
 | Variable | Purpose |
 | --- | --- |
