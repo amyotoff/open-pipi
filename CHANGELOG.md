@@ -4,28 +4,7 @@ All notable changes to Open PiPi will be documented in this file.
 
 ## [Unreleased]
 
-### Added
-
-- Budget block on the dashboard overview: today's spend against the limit that trips the
-  killswitch, plus a breakdown by model and by space. `token_usage` gained a `space_id`, and the
-  LLM path now attributes spend to the space whose turn it is.
-- `PIPI_DAILY_COST_LIMIT_USD` makes the daily spend ceiling configurable. It was a constant in
-  `healthcheck.ts`, so the only way to raise it was editing the source — and $3/day is a sensible
-  default for a household on a Pi and a useless one for anything else. A missing or nonsensical
-  value keeps the $3 default rather than removing the ceiling.
-- README documents the cost ceiling at all. The assistant hard-stops when the day's spend crosses
-  the limit, which is deliberate but surprising if you do not know it is there.
-
-### Fixed
-
-- The dashboard shredded tables in a narrow window — `overflow-wrap: anywhere` on every cell also
-  shrinks each column's min-content width, so instead of widening into its scroller the table broke
-  words one letter per line, leaving a "Retry" button 104px tall.
-- `src/web/routes.test.ts` raced the server: it slept a fixed interval hoping an SSE client had
-  subscribed, which under coverage instrumentation sometimes published to nobody. It now waits on
-  the subscription itself. This was the intermittent `pnpm verify` failure noted in 2.6.0.
-
-## [2.6.0] — 2026-07-27
+## [2.6.0] — 2026-07-29
 
 Transports become replaceable. A `space` already owned behavior, memory, and permissions; this
 release finishes the thought by making every way *into* a space — Telegram, a browser, Discord,
@@ -51,6 +30,17 @@ boot, and every space keeps its pinned pack and grounding.
 - Dashboard writes: a space's mode, pack and grounding can be changed, a space archived or
   restored, and a failed delivery given its attempt budget back. Each is validated against the
   same list the UI offers, and logged with who did it.
+- Budget block on the dashboard overview: today's spend against the limit that trips the
+  killswitch, plus a breakdown by model and by space. `token_usage` gained a `space_id`, and the
+  LLM path attributes spend to the space whose turn it is. Local models are counted at zero rather
+  than priced by guess, and work belonging to no conversation is reported as unattributed rather
+  than folded into some space's bill.
+- `PIPI_DAILY_COST_LIMIT_USD` makes the daily spend ceiling configurable. It was a constant in
+  `healthcheck.ts`, so the only way to raise it was editing the source — and $3/day is a sensible
+  default for a household on a Pi and a useless one for anything else. A missing or nonsensical
+  value keeps the $3 default rather than removing the ceiling.
+- README documents the cost ceiling at all. The assistant hard-stops when the day's spend crosses
+  the limit, which is deliberate but surprising if you do not know it is there.
 - `docs/transports.md`: how to write an adapter without touching Core.
 
 ### Fixed
@@ -61,6 +51,12 @@ boot, and every space keeps its pinned pack and grounding.
 - Attachments were downloaded before the sender's permissions were checked.
 - A stranger writing in an unknown group could cause a space to be created.
 - Shutdown stopped the Telegram bot twice, logging an error on every clean exit.
+- The dashboard shredded tables in a narrow window — `overflow-wrap: anywhere` on every cell also
+  shrinks each column's min-content width, so instead of widening into its scroller the table broke
+  words one letter per line, leaving a "Retry" button 104px tall.
+- `src/web/routes.test.ts` raced the server: it slept a fixed interval hoping an SSE client had
+  subscribed, which under coverage instrumentation sometimes published to nobody. It now waits on
+  the subscription itself, which removes an intermittent `pnpm verify` failure.
 
 ### Changed
 
@@ -80,8 +76,6 @@ boot, and every space keeps its pinned pack and grounding.
 
 ### Known limitations
 
-- The Telegram adapter has been exercised only against a faked wire — unit tests, smoke tests, and
-  a scripted gateway. It has not yet been run against a live bot token.
 - The web send route answers `202` and then runs the agent, so a crash in that window loses a
   message that nothing redelivers. Every *outbound* message is durable; this one inbound step is
   not yet.
