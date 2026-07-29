@@ -18,6 +18,10 @@ All notable changes to Open PiPi will be documented in this file.
 - `PIPI_DAILY_CALL_LIMIT` and `PIPI_CALL_ALLOWED_COUNTRIES`: calls bill on a meter the runtime
   cannot see, so their ceiling is a count rather than a cost. Counted before dialling, so a crash
   loop cannot dial without bound.
+- `docker-compose.dev.yml` works again. It ran `npm run dev` against the production image, which is
+  built with `pnpm prune --prod` and therefore has neither `nodemon` nor `ts-node` — and, since the
+  image stopped shipping npm, not even a way to try. The Dockerfile gained a `dev` target that keeps
+  devDependencies, and CI now builds it so this cannot rot unnoticed again.
 - `docs/addons.md`: what makes something an addon, and how to write a **subagent** — a delegate that
   runs where the orchestrator cannot supervise it, briefed with a task contract and answering with a
   result contract. The voice addon is the worked example.

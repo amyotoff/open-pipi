@@ -5,6 +5,11 @@
 
 services:
   pipi-bot:
+    # The dev stage keeps devDependencies, so nodemon and ts-node exist here.
+    # The production image deliberately has neither, nor npm to invoke them.
+    build:
+      context: .
+      target: dev
     network_mode: host
     cap_add:
       - NET_ADMIN
@@ -24,7 +29,11 @@ services:
       - SANDBOX_PACK_PROJECT_ROOT=${PWD}/src
       - SANDBOX_WORKSPACE_ROOT=${PWD}/data
       - SANDBOX_WORKSPACE_CONTAINER_ROOT=/app/data
-    command: npm run dev
+    # No command override: the dev stage's own CMD is `pnpm dev`, which is
+    # nodemon watching the mounted ./src.
+    #
+    # The production service runs read-only; ts-node and nodemon need to write.
+    read_only: false
     ports: !reset []
     security_opt: !reset
       - seccomp:unconfined
