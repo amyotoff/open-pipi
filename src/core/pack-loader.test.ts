@@ -33,6 +33,7 @@ describe('core/pack-loader', () => {
 
         expect(pack).not.toBeNull();
         expect(pack?.id).toBe('office');
+        expect(pack?.persona_id).toBe('alfred');
         expect(pack?.source).toBe('installable');
         expect(pack?.enabled_capabilities).toContain('shopping');
         expect(pack?.enabled_capabilities).toContain('workspace');
@@ -40,12 +41,13 @@ describe('core/pack-loader', () => {
         expect(pack?.seeded_tasks.map((task) => task.template_id)).toEqual(
             expect.arrayContaining(['briefing_morning', 'followup_digest', 'atelier_review'])
         );
-        expect(pack?.system_prompt).toContain('calm office facilitator');
+        expect(pack?.system_prompt).toContain('discreet operational steward');
         expect(pack?.family_members).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ id: 'researcher', role: 'Researcher', character: 'Sherlock Holmes' }),
             ])
         );
+        expect(pack?.character_doc).toContain('Alfred Pennyworth');
         expect(pack?.character_doc).toContain('not as a roleplay costume');
         expect(pack?.tools_doc).toContain('office_focus_note');
         expect(pack?.tools_doc).toContain('office_kanban_board');
