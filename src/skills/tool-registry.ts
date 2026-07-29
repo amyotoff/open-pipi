@@ -11,6 +11,8 @@ export interface RegisteredSkillTool {
     meta: CapabilityMeta;
     approvalAction?: string;
     approvalReason?: string;
+    /** Arguments to show the owner when asking them to approve this tool. */
+    approvalDetailFields?: string[];
 }
 
 function resolveMeta(skill: SkillManifest, defaults: CapabilityMeta): CapabilityMeta {
@@ -63,6 +65,7 @@ export function buildSkillToolRegistry(
                 },
                 approvalAction: toolMeta?.approval_action,
                 approvalReason: toolMeta?.approval_reason,
+                approvalDetailFields: toolMeta?.approval_detail_fields,
             });
         }
 

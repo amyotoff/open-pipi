@@ -24,6 +24,8 @@ export interface SkillToolMeta {
     approval?: CapabilityMeta['approval'];
     approval_action?: string;
     approval_reason?: string;
+    /** Argument names to show the owner in the approval prompt. */
+    approval_detail_fields?: string[];
 }
 
 export interface SkillManifest {

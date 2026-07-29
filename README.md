@@ -558,6 +558,18 @@ Useful env vars:
 - `OLLAMA_MODEL`
 - `PIPI_LOCAL_ROUTING_ENABLED` (defaults to `true`; safe fallback routes uncertain messages to Gemini)
 
+## Addons
+
+An addon is a capability the runtime does not need: it ships in the repo, costs nothing until you turn it on, and can be deleted without anything else noticing.
+
+| Addon | What it does | Turned on by |
+| --- | --- | --- |
+| [Voice calls](docs/addons.md) | Delegates an outbound phone call to a voice agent — bookings, appointments, checking a fact, relaying a message — and returns a structured result | `pnpm add retell-sdk`, provider env vars, and the `phone` capability in your pack |
+
+Voice calls are also the repo's worked example of a **subagent**: a delegate that runs where the orchestrator cannot watch it, briefed with a task contract and answering with a result contract. [docs/addons.md](docs/addons.md) walks through the pattern — including why it refuses to place a call when you have not said what should happen if the goal turns out to be impossible.
+
+Three gates stand between an addon and doing anything: the pack must enable the capability, the provider must be configured, and the owner must approve the individual action. All three are shut by default.
+
 ### Cost, and the daily limit that stops it
 
 Every model call is recorded with its token counts and a cost, attributed to the space whose turn it was. Local `Ollama` calls are recorded at zero rather than priced by guess.

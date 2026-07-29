@@ -35,9 +35,13 @@ import helperSkill from './helper.skill';
 import helperStatusSkill from './helper_status.skill';
 import brainSkill from './brain.skill';
 import familySkill from './family.skill';
+// Optional addon: dormant unless a pack lists `phone` in enabled_capabilities
+// and a voice provider is configured. See docs/addons.md.
+import phoneSkill from './phone.skill';
 
 const ALL_SKILLS: SkillManifest[] = [
     memorySkill,
+    phoneSkill,
     shoppingSkill,
     todosSkill,
     browsingSkill,
@@ -277,6 +281,7 @@ export function getToolExecutionSpecForContext(
             approval: registration.meta.approval,
             approval_action: registration.approvalAction,
             approval_reason: registration.approvalReason,
+            approval_detail_fields: registration.approvalDetailFields,
             audit_default: 'errors',
         });
     }
