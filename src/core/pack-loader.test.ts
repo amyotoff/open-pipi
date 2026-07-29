@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import path from 'path';
 
 describe('core/pack-loader', () => {
     it('loads the installable Jeeves pack from its folder', async () => {
@@ -60,6 +61,17 @@ describe('core/pack-loader', () => {
                 'office_standup_note',
             ])
         );
+    });
+
+    it('loads pack tools when a materialized snapshot root is relative', async () => {
+        const loader = await import('./pack-loader');
+        const relativeRoot = path.relative(process.cwd(), path.join(__dirname, '../packs/office'));
+        const pack = loader.loadPackFromRoot(relativeRoot);
+
+        expect(pack?.pack_tools.map((tool) => tool.id)).toEqual(
+            expect.arrayContaining(['office_focus_note', 'office_kanban_board', 'office_read_google_doc'])
+        );
+        expect(pack?.pack_tools.every((tool) => path.isAbsolute(tool.script_path))).toBe(true);
     });
 
     it('loads the installable Reporter pack from its folder', async () => {

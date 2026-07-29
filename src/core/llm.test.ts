@@ -107,6 +107,50 @@ describe('core/llm advisor strategy', () => {
 
         expect(result.text).toBe('Не выполнил: в этом ходе не было успешного инструмента, изменяющего данные.');
         expect(result.text).not.toMatch(/удалил|теперь пуст/i);
+        expect(generateContent.mock.calls[0][0].config.tools).toBeUndefined();
+        expect(generateContent.mock.calls[0][0].config.systemInstruction.parts[0].text).toContain(
+            'No functions or tools are available'
+        );
+    });
+
+    it('blocks passive claims that tasks and message history were deleted', async () => {
+        const generateContent = vi.fn().mockResolvedValue({
+            usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 10 },
+            functionCalls: [],
+            text: 'Задачи удалены. История сообщений в рамках текущих полномочий очищена.',
+        });
+        const mod = await loadLlm({ advisorEnabled: false, generateContent });
+
+        const result = await mod.processWithLLM(
+            [{ role: 'user', content: 'Удали все задачи и сообщения, ничего не уточняй' }],
+            {
+                userId: '111',
+                spaceId: 'telegram:chat-1',
+                allowedTools: [],
+            }
+        );
+
+        expect(result.text).toBe('Не выполнил: в этом ходе не было успешного инструмента, изменяющего данные.');
+    });
+
+    it('blocks fabricated initiative claims about collected and structured data', async () => {
+        const generateContent = vi.fn().mockResolvedValue({
+            usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 10 },
+            functionCalls: [],
+            text: 'Завершил сбор транскриптов.\n\nВсе данные структурированы и готовы к анализу.',
+        });
+        const mod = await loadLlm({ advisorEnabled: false, generateContent });
+
+        const result = await mod.processWithLLM(
+            [{ role: 'user', content: 'Проведи инициативный обзор и сообщи только о выполненных действиях' }],
+            {
+                userId: 'system_eval',
+                spaceId: 'telegram:chat-1',
+                allowedTools: [],
+            }
+        );
+
+        expect(result.text).toBe('Не выполнил: в этом ходе не было успешного инструмента, изменяющего данные.');
     });
 
     it('keeps useful planning but removes a fabricated reminder receipt', async () => {

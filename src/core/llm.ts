@@ -45,7 +45,7 @@ const MUTATION_KIND_PATTERNS: Array<{
         toolPattern: /(?:^|_)(?:add|create|apply|attach|link|request)(?:_|$)/i,
         claimPatterns: [
             /(?:^|[^\p{L}\p{N}_])(?:я\s+)?(?:добавил(?:а|и)?|создал(?:а|и)?|применил(?:а|и)?|прикрепил(?:а|и)?)\s+(?:задач[уи]|напоминани[ея]|проект|файл|документ|артефакт|запись|тикет|заявку|ссылку|настройк[уи]|пункт\s+в\s+(?:список|задачи)|товар\s+в\s+список)(?=$|[^\p{L}\p{N}_])/iu,
-            /(?:^|[^\p{L}\p{N}_])(?:задача|напоминание|проект|файл|документ|артефакт|запись|тикет|заявка|ссылка)\s+(?:добавлен[ао]?|создан[ао]?|прикреплен[ао]?|прикреплён[ао]?)(?=$|[^\p{L}\p{N}_])/iu,
+            /(?:^|[^\p{L}\p{N}_])(?:задач(?:а|и)?|напоминани(?:е|я)|проекты?|файлы?|документы?|артефакты?|записи?|тикеты?|заявки?|ссылки?)\s+(?:добавлен[аоы]?|создан[аоы]?|прикреплен[аоы]?|прикреплён[аоы]?)(?=$|[^\p{L}\p{N}_])/iu,
             /\b(?:I(?:'ve| have)?\s+)?(?:added|created|applied|attached|linked)\s+(?:the\s+|a\s+)?(?:task|reminder|project|file|document|artifact|record|ticket|request|link|setting)\b/i,
         ],
     },
@@ -54,7 +54,7 @@ const MUTATION_KIND_PATTERNS: Array<{
         toolPattern: /(?:^|_)(?:update|set|edit|mark|complete|pause|resume|open|close|resolve|upsert|learn)(?:_|$)/i,
         claimPatterns: [
             /(?:^|[^\p{L}\p{N}_])(?:я\s+)?(?:обновил(?:а|и)?|изменил(?:а|и)?|отметил(?:а|и)?|выполнил(?:а|и)?|закрыл(?:а|и)?|поставил(?:а|и)?|перен[её]с(?:ла|ли)?)\s+(?:статус|задач[уи]|напоминани[ея]|проект|файл|документ|артефакт|запись|роль|политику|настройк[уи]|пункт|товар|встречу|дедлайн)(?=$|[^\p{L}\p{N}_])/iu,
-            /(?:^|[^\p{L}\p{N}_])(?:статус|задача|напоминание|проект|файл|документ|артефакт|запись|роль|политика|настройка|пункт|товар|встреча|дедлайн)\s+(?:обновлен[ао]?|обновлён[ао]?|изменен[ао]?|изменён[ао]?|отмечен[ао]?|выполнен[ао]?)(?=$|[^\p{L}\p{N}_])/iu,
+            /(?:^|[^\p{L}\p{N}_])(?:статусы?|задач(?:а|и)?|напоминани(?:е|я)|проекты?|файлы?|документы?|артефакты?|записи?|роли?|политики?|настройки?|пункты?|товары?|встречи?|дедлайны?)\s+(?:обновлен[аоы]?|обновлён[аоы]?|изменен[аоы]?|изменён[аоы]?|отмечен[аоы]?|выполнен[аоы]?)(?=$|[^\p{L}\p{N}_])/iu,
             /\b(?:I(?:'ve| have)?\s+)?(?:updated|changed|edited|marked|completed|closed|moved|paused|resumed)\s+(?:the\s+|a\s+)?(?:status|task|reminder|project|file|document|artifact|record|role|policy|setting|item|meeting|deadline)\b/i,
         ],
     },
@@ -63,7 +63,8 @@ const MUTATION_KIND_PATTERNS: Array<{
         toolPattern: /(?:^|_)(?:delete|remove|clear|cancel|detach|unlink|archive)(?:_|$)/i,
         claimPatterns: [
             /(?:^|[^\p{L}\p{N}_])(?:я\s+)?(?:удалил(?:а|и)?|очистил(?:а|и)?|отменил(?:а|и)?|архивировал(?:а|и)?)\s+(?:все\s+)?(?:задач[уи]|напоминани[ея]|проект|файл|документ|артефакт|запись|сообщени[ея]|список|пункт|товар|встречу)(?=$|[^\p{L}\p{N}_])/iu,
-            /(?:^|[^\p{L}\p{N}_])(?:задача|напоминание|проект|файл|документ|артефакт|запись|сообщение|список|пункт|товар|встреча)\s+(?:удален[ао]?|удалён[ао]?|очищен[ао]?|отменен[ао]?|отменён[ао]?)(?=$|[^\p{L}\p{N}_])/iu,
+            /(?:^|[^\p{L}\p{N}_])(?:задач(?:а|и)?|напоминани(?:е|я)|проекты?|файлы?|документы?|артефакты?|записи?|сообщени(?:е|я)|списки?|пункты?|товары?|встречи?)\s+(?:удален[аоы]?|удалён[аоы]?|очищен[аоы]?|отменен[аоы]?|отменён[аоы]?)(?=$|[^\p{L}\p{N}_])/iu,
+            /(?:^|[^\p{L}\p{N}_])истори[яю]\s+сообщений[^.!?\n]{0,80}\s(?:удален[аоы]?|удалён[аоы]?|очищен[аоы]?)(?=$|[^\p{L}\p{N}_])/iu,
             /(?:^|[^\p{L}\p{N}_])(?:список\s+(?:задач|дел|напоминаний)\s+(?:теперь\s+)?пуст)(?=$|[^\p{L}\p{N}_])/iu,
             /\b(?:I(?:'ve| have)?\s+)?(?:deleted|removed|cleared|cancelled|canceled|detached|unlinked|archived)\s+(?:the\s+|a\s+)?(?:task|reminder|project|file|document|artifact|record|message|list|item|meeting)\b/i,
         ],
@@ -73,6 +74,8 @@ const MUTATION_KIND_PATTERNS: Array<{
         toolPattern: /(?:^|_)(?:remember|save|write|append|record|log)(?:_|$)/i,
         claimPatterns: [
             /(?:^|[^\p{L}\p{N}_])(?:я\s+)?(?:сохранил(?:а|и)?|записал(?:а|и)?|зафиксировал(?:а|и)?|запомнил(?:а|и)?|сохранен[оаы]?|сохранён[оаы]?|записан[оаы]?|зафиксирован[оаы]?)(?=$|[^\p{L}\p{N}_])/iu,
+            /(?:^|[^\p{L}\p{N}_])(?:я\s+)?(?:завершил(?:а|и)?\s+сбор|собрал(?:а|и)?|структурировал(?:а|и)?)\s+(?:данные|транскрипт(?:ы|ов)?|инициативы|решения|контекст)(?=$|[^\p{L}\p{N}_])/iu,
+            /(?:^|[^\p{L}\p{N}_])(?:все\s+)?(?:данные|транскрипты|инициативы|решения)\s+(?:собраны|структурированы|сохранены|зафиксированы)(?=$|[^\p{L}\p{N}_])/iu,
             /\b(?:I(?:'ve| have)?\s+)?(?:saved|wrote|written|recorded|logged|remembered)\b/i,
         ],
     },
@@ -184,7 +187,10 @@ function renderAdvisorConversationSnippet(conversationHistory: any[]): string {
         .join('\n\n');
 }
 
-function buildExecutorSystemInstruction(systemInstruction?: string): string | undefined {
+function buildExecutorSystemInstruction(
+    systemInstruction?: string,
+    noToolsAvailable: boolean = false
+): string | undefined {
     const advisorEnabled = PIPI_ADVISOR_ENABLED && Boolean(GEMINI_ADVISOR_MODEL?.trim());
     const parts: string[] = [];
 
@@ -200,6 +206,16 @@ function buildExecutorSystemInstruction(systemInstruction?: string): string | un
             '- If the required tool was unavailable, blocked, failed, or was not called, say briefly that the action was not completed. Never manufacture a success receipt.',
         ].join('\n')
     );
+
+    if (noToolsAvailable) {
+        parts.push(
+            [
+                'Tool availability for this turn:',
+                '- No functions or tools are available in this turn. Do not attempt a function call.',
+                '- You may still answer, draft, reason, or propose a plan. If the user asks for an external action, state briefly that it was not completed.',
+            ].join('\n')
+        );
+    }
 
     if (advisorEnabled) {
         parts.push(
@@ -393,7 +409,8 @@ export async function processWithLLM(
                 }
 
                 const originalSystemInstruction = messages.find((m) => m.role === 'system')?.content;
-                const systemInstruction = buildExecutorSystemInstruction(originalSystemInstruction);
+                const noToolsAvailable = Array.isArray(context.allowedTools) && context.allowedTools.length === 0;
+                const systemInstruction = buildExecutorSystemInstruction(originalSystemInstruction, noToolsAvailable);
                 const advisorEnabled = PIPI_ADVISOR_ENABLED && Boolean(GEMINI_ADVISOR_MODEL?.trim());
                 addSpanAttributes({
                     'app.llm.executor_model': GEMINI_EXECUTOR_MODEL,
@@ -458,7 +475,7 @@ export async function processWithLLM(
                     (context.taskId || '').startsWith('system:atelier-self-review:');
                 const baseConfig: any = {
                     systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
-                    tools: [{ functionDeclarations: allTools }],
+                    tools: allTools.length > 0 ? [{ functionDeclarations: allTools }] : undefined,
                     temperature: isDeepInitiativeTurn ? 0.4 : 0.3,
                     thinkingConfig: isGemini3Executor
                         ? { thinkingLevel: isDeepInitiativeTurn ? 'high' : 'minimal' }

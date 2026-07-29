@@ -155,7 +155,8 @@ function loadPackFromRootWithCache(root: string, cacheKey: string): Materialized
 }
 
 export function loadPackFromRoot(root: string): MaterializedAgent | null {
-    return loadPackFromRootWithCache(root, `root:${root}`);
+    const resolvedRoot = path.resolve(root);
+    return loadPackFromRootWithCache(resolvedRoot, `root:${resolvedRoot}`);
 }
 
 export function loadInstallablePack(packId: string): MaterializedAgent | null {
@@ -163,5 +164,5 @@ export function loadInstallablePack(packId: string): MaterializedAgent | null {
 }
 
 export function invalidatePackRootCache(root: string): void {
-    packCache.delete(`root:${root}`);
+    packCache.delete(`root:${path.resolve(root)}`);
 }
