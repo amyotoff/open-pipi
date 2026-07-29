@@ -175,11 +175,34 @@ Ask the assistant to make a call. Without configuration it answers plainly rathe
 
 > Calling is not configured on this install, so no call was placed.
 
-### What it costs
+### What it costs, and what stops it
 
 Per-minute, on someone else's meter. Retell bills by the minute at a rate that depends on the model
 and voice; a carrier number is typically a small monthly fee on top. The dashboard's Budget block
 does **not** track this — it counts the assistant's own model spend, not the telephony provider's.
+
+Because the runtime cannot see that meter, the ceiling here is a **count**, not a cost:
+
+```dotenv
+PIPI_DAILY_CALL_LIMIT=10          # 0 switches calling off entirely
+PIPI_CALL_ALLOWED_COUNTRIES=39,31 # empty means anywhere
+```
+
+A call is counted **before** it is dialled, so an attempt that hangs or throws still spends its
+slot. Undercounting would let a crash loop dial without bound, which is the case the limit exists
+for. A nonsensical limit keeps the default rather than removing it.
+
+### What the owner is asked
+
+Approval prompts name the arguments that change the decision, so the question is about *this* call:
+
+> placing a real phone call to a third party on your behalf — phone: +39…, contact_name: Trattoria da Bruno, goal: Book a table for two
+
+A tool declares which arguments matter via `approval_detail_fields`. Without it the owner is asked
+to approve a *category* of action, which is not a decision anyone can make.
+
+Note that an approval is cached per action class for two minutes. Within that window further calls
+do not re-prompt.
 
 ---
 

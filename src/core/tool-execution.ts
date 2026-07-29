@@ -23,6 +23,14 @@ export interface ToolExecutionSpec {
     approval: 'none' | 'explicit';
     approval_action?: string;
     approval_reason?: string;
+    /**
+     * Argument names worth showing the owner when asking for approval.
+     *
+     * "Place a phone call" is not a decision anyone can make; "place a phone
+     * call to +39..." is. Listed per tool because only the tool knows which of
+     * its arguments change what the owner is agreeing to.
+     */
+    approval_detail_fields?: string[];
     audit_default: AuditMode;
     sandbox?: SandboxExecutionSpec;
     mcp?: {
@@ -117,6 +125,7 @@ export function deriveToolExecutionSpec(
             approval: 'none',
             approval_action: base?.approval_action,
             approval_reason: base?.approval_reason,
+            approval_detail_fields: base?.approval_detail_fields,
             audit_default: normalizeAuditMode(base?.audit_default, 'errors'),
             capabilities,
             sandbox: base?.sandbox,
@@ -131,6 +140,7 @@ export function deriveToolExecutionSpec(
             approval: 'none',
             approval_action: base?.approval_action,
             approval_reason: base?.approval_reason,
+            approval_detail_fields: base?.approval_detail_fields,
             audit_default: normalizeAuditMode(base?.audit_default, 'errors'),
             capabilities: ['artifact_write'],
             sandbox: base?.sandbox,
@@ -144,6 +154,7 @@ export function deriveToolExecutionSpec(
         approval: base?.approval || 'none',
         approval_action: base?.approval_action,
         approval_reason: base?.approval_reason,
+        approval_detail_fields: base?.approval_detail_fields,
         audit_default: normalizeAuditMode(base?.audit_default, 'errors'),
         capabilities:
             normalizeToolCapabilities(base?.capabilities).length > 0

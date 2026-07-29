@@ -22,6 +22,8 @@ const skill: SkillManifest = {
             approval: 'explicit',
             approval_action: 'browse_web',
             approval_reason: 'opening an arbitrary external web page in the browser',
+            // "Open a web page" is not something an owner can judge; the URL is.
+            approval_detail_fields: ['url'],
         },
     },
     tools: [

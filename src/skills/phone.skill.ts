@@ -72,6 +72,9 @@ const skill: SkillManifest = {
             approval: 'explicit',
             approval_action: 'delegate_phone_call',
             approval_reason: 'placing a real phone call to a third party on your behalf',
+            // Without these the owner is asked to approve "a phone call" with
+            // no idea to whom, which is not a decision anyone can make.
+            approval_detail_fields: ['phone', 'contact_name', 'goal'],
         },
     },
 
@@ -171,8 +174,20 @@ const skill: SkillManifest = {
                 return '[TOOL_RESULT] Give at least one fallback — what should the agent do if the goal turns out to be impossible?';
             }
 
-            const { getVoiceProvider, registerRetellProvider, buildTaskPayload, inferLanguageFromPhone } =
-                await import('../addons/voice-calls');
+            const {
+                getVoiceProvider,
+                registerRetellProvider,
+                buildTaskPayload,
+                inferLanguageFromPhone,
+                checkCallAllowed,
+                recordCallPlaced,
+                runCall,
+            } = await import('../addons/voice-calls');
+
+            const refusal = checkCallAllowed(phone);
+            if (refusal) {
+                return `[TOOL_RESULT] ${refusal.reason}`;
+            }
 
             // Registered on first use rather than at boot: an install with no
             // calling configured should not pay for this module at startup.
@@ -199,11 +214,17 @@ const skill: SkillManifest = {
                 expected_language: args.expected_language || inferLanguageFromPhone(phone),
             });
 
+            const spaceId = resolveSpaceIdFromExecutionContext(context);
+            // Counted before dialling: a call that hangs or crashes mid-flight
+            // still spent a slot, and undercounting is what lets a crash loop
+            // dial without bound.
+            recordCallPlaced(phone, taskType, spaceId);
+
             try {
-                const outcome = await provider.placeCall(phone, {
+                const outcome = await runCall(provider, phone, {
                     payload,
                     identity: resolveIdentity(context),
-                    metadata: { space_id: resolveSpaceIdFromExecutionContext(context) ?? null },
+                    metadata: { space_id: spaceId ?? null },
                 });
                 const result = outcome.structuredResult;
 

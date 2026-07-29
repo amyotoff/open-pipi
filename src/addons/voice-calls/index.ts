@@ -19,7 +19,17 @@ export {
     buildTaskPayload,
     inferLanguageFromPhone,
 } from './prompt-builder';
+export {
+    allowedCountryPrefixes,
+    CALL_PLACED_EVENT,
+    checkCallAllowed,
+    countCallsPlacedToday,
+    dailyCallLimit,
+    recordCallPlaced,
+    type GuardRefusal,
+} from './guards';
 export { extractCallResult } from './result-extractor';
+export { runCall } from './run-call';
 export { getVoiceProvider, listVoiceProviders, registerVoiceProvider, resetVoiceProviders } from './registry';
 export { RetellVoiceProvider, registerRetellProvider } from './retell-provider';
 export type {

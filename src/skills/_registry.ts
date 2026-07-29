@@ -281,6 +281,7 @@ export function getToolExecutionSpecForContext(
             approval: registration.meta.approval,
             approval_action: registration.approvalAction,
             approval_reason: registration.approvalReason,
+            approval_detail_fields: registration.approvalDetailFields,
             audit_default: 'errors',
         });
     }

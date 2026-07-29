@@ -16,7 +16,6 @@
 
 import { logInfo, logWarn } from '../../utils/logging';
 import { buildAnalysisSchema, buildCallVariables } from './prompt-builder';
-import { extractCallResult } from './result-extractor';
 import { registerVoiceProvider } from './registry';
 import type { CallOptions, CallOutcome, VoiceProvider } from './types';
 
@@ -119,19 +118,15 @@ export class RetellVoiceProvider implements VoiceProvider {
         });
 
         const outcome = await this.waitForCall(client, call.call_id);
-        outcome.structuredResult = extractCallResult(
-            outcome.transcript,
-            outcome.analysis,
-            options.payload.task_type,
-            outcome.status
-        );
 
         logInfo('VOICE', 'call_finished', {
             provider: this.name,
-            status: outcome.structuredResult.status,
-            goal_achieved: outcome.structuredResult.goal_achieved,
+            disconnection: outcome.status,
+            has_analysis: Boolean(outcome.analysis),
         });
 
+        // Reducing this to a result contract is runCall's job, not a
+        // provider's — see run-call.ts.
         return outcome;
     }
 

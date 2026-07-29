@@ -156,6 +156,40 @@ function resolveEffectiveAuditMode(spec: ToolExecutionSpec, context: RuntimeExec
     return normalizeAuditMode(spacePolicy.audit_trail, spec.audit_default);
 }
 
+/** Long values are truncated: an approval prompt has to stay readable in a chat message. */
+const APPROVAL_DETAIL_MAX_CHARS = 120;
+
+/**
+ * What the owner is actually being asked to approve.
+ *
+ * The reason alone describes a *kind* of action — "opening an external page",
+ * "placing a phone call" — which is not something anyone can meaningfully agree
+ * to. Tools that declare `approval_detail_fields` get the arguments that change
+ * the answer appended, so the decision is about this call rather than the
+ * category.
+ */
+export function describeApprovalRequest(spec: ToolExecutionSpec, args: Record<string, unknown>): string {
+    const reason = spec.approval_reason || `running the "${spec.tool_name}" tool`;
+    const fields = spec.approval_detail_fields ?? [];
+
+    const details = fields
+        .map((field) => {
+            const value = args?.[field];
+            if (value == null || value === '') return null;
+
+            const rendered = Array.isArray(value) ? value.join('; ') : String(value);
+            const trimmed = rendered.trim();
+            if (!trimmed) return null;
+
+            return `${field}: ${
+                trimmed.length > APPROVAL_DETAIL_MAX_CHARS ? `${trimmed.slice(0, APPROVAL_DETAIL_MAX_CHARS)}…` : trimmed
+            }`;
+        })
+        .filter((entry): entry is string => entry !== null);
+
+    return details.length > 0 ? `${reason} — ${details.join(', ')}` : reason;
+}
+
 function capabilityBlockMessage(toolName: string, required: string[], allowed: string[]): string {
     return `[TOOL_RESULT] Tool "${toolName}" is blocked by current execution policy. Required: ${required.join(', ')}. Allowed: ${allowed.join(', ')}.`;
 }
@@ -361,7 +395,7 @@ export async function executeToolCall(args: {
                 const result = requireToolApproval(
                     toolName,
                     context,
-                    spec.approval_reason || `running the "${toolName}" tool`,
+                    describeApprovalRequest(spec, normalizedToolArgs),
                     spec.approval_action
                 );
                 if (result) {

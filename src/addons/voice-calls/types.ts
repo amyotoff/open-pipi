@@ -157,9 +157,10 @@ export interface GuardrailIdentity {
 /**
  * A telephony backend.
  *
- * Kept narrow on purpose: place a call, come back when it is over. Which voice,
- * which model, which carrier — all of that is the provider's business and none
- * of it reaches the skill.
+ * Kept narrow on purpose: place a call, come back when it is over, report what
+ * was heard. Turning that into a `CallResultContract` is `runCall`'s job — a
+ * provider that had to remember to do it is a provider that can forget, and the
+ * failure would be a call that went through and returned nothing.
  */
 export interface VoiceProvider {
     readonly name: string;

@@ -12,6 +12,12 @@ All notable changes to Open PiPi will be documented in this file.
   the individual call — and all three are shut by default. The telephony SDK is not a dependency of
   this repo; anyone turning calling on installs it themselves, so an install that never calls
   carries nothing.
+- Approval prompts now name the arguments that change the decision. `browse_web` shows the URL and
+  `delegate_phone_call` shows the number — previously an owner was asked to approve a *category* of
+  action, which is not something anyone can meaningfully agree to.
+- `PIPI_DAILY_CALL_LIMIT` and `PIPI_CALL_ALLOWED_COUNTRIES`: calls bill on a meter the runtime
+  cannot see, so their ceiling is a count rather than a cost. Counted before dialling, so a crash
+  loop cannot dial without bound.
 - `docs/addons.md`: what makes something an addon, and how to write a **subagent** — a delegate that
   runs where the orchestrator cannot supervise it, briefed with a task contract and answering with a
   result contract. The voice addon is the worked example.
