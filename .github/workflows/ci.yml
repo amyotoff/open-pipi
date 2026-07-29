@@ -71,6 +71,11 @@ jobs:
       - name: Build container image
         run: docker build -t open-pipi:ci .
 
+      # Only the production target was ever built here, so the development
+      # image was broken for a long time without anything noticing.
+      - name: Build development container image
+        run: docker build --target dev -t open-pipi:ci-dev .
+
       - name: Build sandbox container image
         run: docker build -f Dockerfile.sandboxd -t open-pipi-sandboxd:ci .
 

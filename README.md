@@ -177,6 +177,12 @@ That stack brings up:
 - `sandboxd`
 - `chromium`
 
+For development on the same machine, add the dev overlay. It builds the image's `dev` target — which keeps `nodemon` and `ts-node`, both stripped from the production image — and mounts `./src`, so an edit on the host restarts the process in the container:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+```
+
 ## Mental Model
 
 | Piece | What it means | Where it lives |

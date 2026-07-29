@@ -18,6 +18,22 @@ RUN pnpm install --frozen-lockfile
 COPY tsconfig.json tsconfig.build.json ./
 COPY src/ ./src/
 RUN pnpm build
+
+# ---- Development stage ----
+# Keeps devDependencies, npm and corepack, because this is the image that runs
+# nodemon and ts-node. docker-compose.dev.yml mounts ./src over the copy baked
+# in above, so edits on the host restart the process in the container.
+#
+# Nothing else should use this image: it carries a compiler toolchain and a
+# package manager, which is exactly what the runtime stage below strips out.
+FROM builder AS dev
+ENV NODE_ENV=development
+CMD ["pnpm", "dev"]
+
+# ---- Pruned dependency tree ----
+# Split from the builder so the dev stage above can keep its devDependencies.
+# Pruning inside the builder would take them from both.
+FROM builder AS pruned
 RUN pnpm prune --prod --ignore-scripts
 
 # ---- Runtime stage ----
@@ -50,7 +66,7 @@ RUN rm -rf /usr/local/lib/node_modules/npm \
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml ./
-COPY --from=builder /app/node_modules ./node_modules
+COPY --from=pruned /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY help.md README.md ./
 
