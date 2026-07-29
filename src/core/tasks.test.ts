@@ -154,6 +154,27 @@ describe('core/tasks', () => {
         expect(taskRuns[0].result).toBe('skipped:channel-off');
     });
 
+    it('skips assistant prompt delivery for an inactive space', async () => {
+        const { db, tasks, mocks } = await loadTasksModule();
+
+        const created = tasks.createAssistantTask(
+            'chat-inactive',
+            'Quiet digest',
+            'Write a short digest for the archived room.',
+            '0 8 * * 1',
+            '111'
+        );
+        db.updateSpaceStatus(db.buildTelegramSpaceId('chat-inactive'), 'ARCHIVED');
+
+        await tasks.runAssistantTask(created.id);
+
+        const taskRuns = db.getTaskRuns(created.id);
+        expect(mocks.handleButlerMessage).not.toHaveBeenCalled();
+        expect(taskRuns).toHaveLength(1);
+        expect(taskRuns[0].status).toBe('success');
+        expect(taskRuns[0].result).toBe('skipped:space-inactive');
+    });
+
     it('runs atelier summary tasks as direct operational notices', async () => {
         const { db, tasks, mocks } = await loadTasksModule();
 

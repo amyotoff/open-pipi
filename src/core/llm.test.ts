@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 async function loadLlm(options?: {
     advisorEnabled?: boolean;
     maxAdvisorCalls?: number;
+    executorModel?: string;
     generateContent?: ReturnType<typeof vi.fn>;
     registeredTools?: Array<{ name: string }>;
     coreTools?: Array<{ name: string }>;
@@ -20,7 +21,7 @@ async function loadLlm(options?: {
 
     vi.doMock('../config', () => ({
         GEMINI_API_KEY: 'test-key',
-        GEMINI_EXECUTOR_MODEL: 'gemini-2.5-flash',
+        GEMINI_EXECUTOR_MODEL: options?.executorModel || 'gemini-2.5-flash',
         GEMINI_ADVISOR_MODEL: 'gemini-3-pro-preview',
         PIPI_ADVISOR_ENABLED: options?.advisorEnabled ?? true,
         PIPI_ADVISOR_MAX_CALLS_PER_TURN: options?.maxAdvisorCalls ?? 1,
@@ -86,6 +87,77 @@ afterEach(() => {
 });
 
 describe('core/llm advisor strategy', () => {
+    it('uses high thinking for Gemini 3 initiative work and keeps routine turns minimal', async () => {
+        const generateContent = vi.fn().mockResolvedValue({
+            usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 10 },
+            functionCalls: [],
+            text: 'Done',
+        });
+        const mod = await loadLlm({
+            executorModel: 'gemini-3-flash-preview',
+            generateContent,
+        });
+
+        await mod.processWithLLM([{ role: 'user', content: 'Review useful initiative' }], {
+            userId: 'system_cron',
+            spaceId: 'telegram:chat-1',
+            taskId: 'task:telegram:chat-1:daily_initiative',
+        });
+        await mod.processWithLLM([{ role: 'user', content: 'Say hi' }], {
+            userId: '111',
+            spaceId: 'telegram:chat-1',
+        });
+
+        expect(generateContent.mock.calls[0][0].config.thinkingConfig).toEqual({ thinkingLevel: 'high' });
+        expect(generateContent.mock.calls[1][0].config.thinkingConfig).toEqual({ thinkingLevel: 'minimal' });
+    });
+
+    it('preserves Gemini 3 thought signatures across tool-call rounds', async () => {
+        const functionCallPart = {
+            functionCall: {
+                name: 'atelier_list_requests',
+                args: { scope: 'pack' },
+            },
+            thoughtSignature: 'signed-thought-state',
+        };
+        const generateContent = vi
+            .fn()
+            .mockResolvedValueOnce({
+                usageMetadata: { promptTokenCount: 30, candidatesTokenCount: 10 },
+                functionCalls: [functionCallPart.functionCall],
+                candidates: [
+                    {
+                        content: {
+                            role: 'model',
+                            parts: [functionCallPart],
+                        },
+                    },
+                ],
+            })
+            .mockResolvedValueOnce({
+                usageMetadata: { promptTokenCount: 40, candidatesTokenCount: 10 },
+                functionCalls: [],
+                text: 'NO_REQUEST: existing capabilities are sufficient',
+            });
+        const mod = await loadLlm({
+            executorModel: 'gemini-3-flash-preview',
+            generateContent,
+            registeredTools: [{ name: 'atelier_list_requests' }],
+        });
+
+        await mod.processWithLLM([{ role: 'user', content: 'Run the private review' }], {
+            userId: 'system_self_review',
+            spaceId: 'telegram:chat-1',
+            taskId: 'system:atelier-self-review:2026-07-29T12:00:00.000Z',
+            allowedTools: ['atelier_list_requests'],
+        });
+
+        expect(generateContent.mock.calls[1][0].contents).toContainEqual({
+            role: 'model',
+            parts: [functionCallPart],
+        });
+    });
+
     it('lets the executor consult the advisor model and then continue the turn', async () => {
         const generateContent = vi
             .fn()

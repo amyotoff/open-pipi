@@ -303,10 +303,17 @@ export async function processWithLLM(
                     }
                 };
 
+                const isGemini3Executor = /^gemini-3(?:[.-]|$)/i.test(GEMINI_EXECUTOR_MODEL);
+                const isDeepInitiativeTurn =
+                    /(?:^|[:_-])daily_initiative(?:$|[:_-])/i.test(context.taskId || '') ||
+                    (context.taskId || '').startsWith('system:atelier-self-review:');
                 const baseConfig: any = {
                     systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
                     tools: [{ functionDeclarations: allTools }],
-                    temperature: 0.7,
+                    temperature: isDeepInitiativeTurn ? 0.4 : 0.3,
+                    thinkingConfig: isGemini3Executor
+                        ? { thinkingLevel: isDeepInitiativeTurn ? 'high' : 'minimal' }
+                        : undefined,
                 };
 
                 const generateGemini = async (args: {
@@ -370,7 +377,9 @@ export async function processWithLLM(
                     {
                         model: GEMINI_EXECUTOR_MODEL,
                         label: `${GEMINI_EXECUTOR_MODEL}-nothink`,
-                        extra: { thinkingConfig: { thinkingBudget: 0 } },
+                        extra: {
+                            thinkingConfig: isGemini3Executor ? { thinkingLevel: 'minimal' } : { thinkingBudget: 0 },
+                        },
                     },
                 ];
 
@@ -712,11 +721,19 @@ export async function processWithLLM(
                         });
                     }
 
+                    const rawModelParts = response.candidates?.[0]?.content?.parts;
                     conversationHistory.push({
                         role: 'model',
-                        parts: response.functionCalls.map((c: any) => ({
-                            functionCall: { name: c.name, args: c.args },
-                        })),
+                        // Gemini 3 attaches a thought_signature to function-call
+                        // parts and requires that exact part on the follow-up
+                        // request. Rebuilding only {name,args} silently drops it
+                        // and makes every multi-round tool call fail with 400.
+                        parts:
+                            Array.isArray(rawModelParts) && rawModelParts.some((part: any) => part?.functionCall)
+                                ? rawModelParts
+                                : response.functionCalls.map((c: any) => ({
+                                      functionCall: { name: c.name, args: c.args },
+                                  })),
                     });
 
                     conversationHistory.push({
@@ -743,13 +760,14 @@ export async function processWithLLM(
                     'Модель завершила работу без финального текста. Попробуй переформулировать запрос.';
 
                 const dailyCost = getDailyTokenCost();
-                if (dailyCost.cost_usd >= 1.8 && dailyCost.cost_usd < 2.0) {
+                const isInternalTurn = context.userId.startsWith('system_');
+                if (!isInternalTurn && dailyCost.cost_usd >= 1.8 && dailyCost.cost_usd < 2.0) {
                     setTimeout(() => {
                         void notifyDailyCost(
                             `Кстати, сегодня уже $${dailyCost.cost_usd.toFixed(2)} потратил на разговоры. Если так пойдёт, дойдём до $2 — буду вынужден намекнуть на экономию.`
                         );
                     }, 2000);
-                } else if (dailyCost.cost_usd >= 2.0) {
+                } else if (!isInternalTurn && dailyCost.cost_usd >= 2.0) {
                     setTimeout(() => {
                         void notifyDailyCost(
                             `Всё, господа. $2 потрачено. Больше не разговариваю сегодня. Шучу. Но если серьёзно — может стоит притормозить?`

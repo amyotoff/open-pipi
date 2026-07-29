@@ -552,6 +552,17 @@ function buildTaskPrompt(task: Task): string | null {
                 ? signals.join('\n')
                 : 'No urgent signals detected. Look for improvement opportunities or pending research.'
         );
+        parts.push(
+            [
+                '',
+                'ACTIVE INITIATIVE DECISION POLICY:',
+                '- Think actively before deciding whether to write. A quiet first glance is not enough: inspect the relevant tasks, todos, Atelier requests, memory, and workspace state.',
+                '- Do substantial analysis and tool work privately. The public message must stay short.',
+                '- Send only when you found a material risk, blocker, missed commitment, useful new evidence, completed action, or genuinely valuable artifact.',
+                '- Routine housekeeping, diary/memory maintenance, and the fact that you performed a review are not by themselves worth a message.',
+                '- If a real review produces nothing material for people, reply exactly [NO_SEND].',
+            ].join('\n')
+        );
     }
 
     return parts.join('\n');
@@ -561,6 +572,9 @@ async function runAtelierSummaryTask(task: Task): Promise<string> {
     const space = getSpace(task.space_id);
     if (!space?.external_ref) {
         return 'skipped:no-space';
+    }
+    if (space.status?.toUpperCase() !== 'ACTIVE') {
+        return 'skipped:space-inactive';
     }
 
     const pending = getDb()
@@ -596,6 +610,9 @@ async function runPromptTask(task: Task): Promise<string> {
     const space = getSpace(task.space_id);
     if (!space?.external_ref || !space.channel) {
         return 'skipped:unsupported-space';
+    }
+    if (space.status?.toUpperCase() !== 'ACTIVE') {
+        return 'skipped:space-inactive';
     }
 
     const settings = resolveSpaceOperationalSettings(space.policy_json);
@@ -681,6 +698,7 @@ export function registerScheduledTasks(): number {
     clearScheduledTasks();
 
     for (const task of listTasks(undefined, 'active').filter(shouldScheduleTask)) {
+        if (getSpace(task.space_id)?.status?.toUpperCase() !== 'ACTIVE') continue;
         scheduleTask(task);
     }
 

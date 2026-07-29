@@ -206,6 +206,25 @@ describe('agents/butler', () => {
         expect(mod.mocks.storeMessage).not.toHaveBeenCalled();
     });
 
+    it('suppresses repeated no-send sentinels and a stale brief suffix', async () => {
+        const mod = await loadButler();
+        mod.mocks.processWithLLM.mockResolvedValueOnce({
+            text: '[NO_SEND]\n[NO_SEND]\n\nBrief: HTML-файл прикреплю отдельным сообщением.',
+        });
+
+        await mod.handleButlerMessage({
+            channel: 'telegram',
+            channelRef: 'chat-1',
+            senderId: 'system_cron',
+            text: '[SYSTEM TASK] Morning briefing.',
+            spaceId: 'telegram:chat-1',
+            taskId: 'task:telegram:chat-1:briefing_morning',
+        });
+
+        expect(mod.mocks.sendMessageToChat).not.toHaveBeenCalled();
+        expect(mod.mocks.storeMessage).not.toHaveBeenCalled();
+    });
+
     it('does not suppress no-send sentinel text in direct user replies', async () => {
         const mod = await loadButler();
         mod.mocks.processWithLLM.mockResolvedValueOnce({ text: 'no send' });

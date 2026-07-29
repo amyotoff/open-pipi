@@ -306,6 +306,9 @@ describe('core/context-composer', () => {
         expect(result.systemPrompt).toContain('[PACK_TOOLS]');
         expect(result.systemPrompt).toContain('office_focus_note');
         expect(result.systemPrompt).toContain('[MEMORY]');
+        expect(result.systemPrompt).toContain('[RESPONSE_CONTRACT]');
+        expect(result.systemPrompt).toContain('Think and use tools as deeply as the work requires');
+        expect(result.systemPrompt).toContain('Default to at most 6 short lines');
         expect(mod.mocks.getMemoryContext).toHaveBeenCalledWith(
             expect.objectContaining({
                 residentId: '111',

@@ -106,6 +106,67 @@ const CROSS_SPACE_STOP_WORDS = new Set([
     'another',
 ]);
 
+function isSystemCronMessage(message: Message): boolean {
+    return !message.is_bot && (message.sender_id || message.sender_tg_id) === 'system_cron';
+}
+
+function isNoSendHistoryNoise(message: Message): boolean {
+    if (!message.is_bot) return false;
+
+    const lines = message.content
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .filter((line) => !/^brief:\s/i.test(line));
+
+    return (
+        lines.length > 0 &&
+        lines.every((line) => {
+            const normalized = line
+                .replace(/^["'`]+|["'`.!?]+$/g, '')
+                .replace(/^\[\s*|\s*\]$/g, '')
+                .replace(/[\s-]+/g, '_')
+                .toUpperCase();
+            return normalized === 'NO_SEND';
+        })
+    );
+}
+
+/**
+ * Scheduled prompts and their immediate bot reports have their own task-run
+ * audit trail. Keeping them in ordinary chat history caused the model to
+ * imitate old rituals and repeated NO_SEND sentinels. A scheduled turn still
+ * receives its current prompt, but not prior cron conversations.
+ */
+function filterOperationalHistory(messages: Message[], currentSenderId: string): Message[] {
+    const filtered: Message[] = [];
+    let suppressNextBot = false;
+
+    for (const message of messages) {
+        if (isSystemCronMessage(message)) {
+            suppressNextBot = true;
+            continue;
+        }
+
+        if (suppressNextBot && message.is_bot) {
+            suppressNextBot = false;
+            continue;
+        }
+        suppressNextBot = false;
+
+        if (!isNoSendHistoryNoise(message)) {
+            filtered.push(message);
+        }
+    }
+
+    if (currentSenderId === 'system_cron') {
+        const currentPrompt = [...messages].reverse().find(isSystemCronMessage);
+        if (currentPrompt) filtered.push(currentPrompt);
+    }
+
+    return filtered;
+}
+
 function formatPrivateTimestamp(iso: string): string {
     return iso.substring(0, 16).replace('T', ' ');
 }
@@ -377,7 +438,7 @@ export interface ComposeConversationInput {
 
 export function composeConversationContext(input: ComposeConversationInput): ConversationContext {
     const { spaceId, senderId, messageLimit = 40 } = input;
-    const recentMessages = getRecentMessagesForSpace(spaceId, messageLimit);
+    const recentMessages = filterOperationalHistory(getRecentMessagesForSpace(spaceId, messageLimit), senderId);
     const space = getSpace(spaceId);
     const assistantAgent = materializeAgentForSpace(spaceId);
     const systemPrompt = assistantAgent.system_prompt;
@@ -477,6 +538,16 @@ export function composeConversationContext(input: ComposeConversationInput): Con
 
     const systemParts = [
         systemPrompt,
+        space?.channel === 'telegram'
+            ? `\n[RESPONSE_CONTRACT]
+- Think and use tools as deeply as the work requires; keep the visible reply proportional.
+- Lead with the answer, decision, or completed outcome. Do not restate the request.
+- Default to at most 6 short lines, 3 bullets, and roughly 700 characters.
+- Expand only when the user explicitly asks for detail or when omitting detail would make the result unsafe or unusable.
+- Do not append generic offers such as "I can also..." or narrate routine internal work.
+- Put long plans or evidence into an artifact and send only the takeaway plus the link.
+- For scheduled initiative, investigate actively before deciding. Silence is correct only after a genuine review finds nothing material to report.`
+            : '',
         `\n[ASSISTANT_PACK]\nPack: ${assistantAgent.id}\nPersona: ${assistantAgent.persona_id}\nCapabilities: ${assistantAgent.enabled_capabilities.join(', ')}`,
         assistantAgent.skills_doc ? `\n[SKILLS]\n${assistantAgent.skills_doc}` : '',
         groundingContext ? `\n${groundingContext}` : '',

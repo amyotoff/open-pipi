@@ -15,14 +15,26 @@ function messageOptions(options: MessageOptions): MessageOptions | undefined {
 }
 
 function isNoSendSentinel(text: string): boolean {
-    const normalized = text
-        .trim()
-        .replace(/^["'`]+|["'`.!?]+$/g, '')
-        .replace(/^\[\s*|\s*\]$/g, '')
-        .replace(/[\s-]+/g, '_')
-        .toUpperCase();
+    const meaningfulLines = text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        // A malformed repeated sentinel used to reach addDailyBriefLink, which
+        // appended this operational note and made the noise even harder to
+        // recognize on the next turn.
+        .filter((line) => !/^brief:\s/i.test(line));
 
-    return normalized === 'NO_SEND';
+    if (meaningfulLines.length === 0) return false;
+
+    return meaningfulLines.every((line) => {
+        const normalized = line
+            .replace(/^["'`]+|["'`.!?]+$/g, '')
+            .replace(/^\[\s*|\s*\]$/g, '')
+            .replace(/[\s-]+/g, '_')
+            .toUpperCase();
+
+        return normalized === 'NO_SEND';
+    });
 }
 
 function addDailyBriefLink(input: { taskId?: string; spaceId: string; responseText: string }): {

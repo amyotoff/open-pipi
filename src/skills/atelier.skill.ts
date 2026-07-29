@@ -13,6 +13,24 @@ import { resolveSpaceIdFromExecutionContext, RuntimeExecutionContext } from '../
 
 type ExecutionContext = Partial<RuntimeExecutionContext>;
 
+const SELF_REVIEW_TASK_PREFIX = 'system:atelier-self-review:';
+const selfReviewRequestTasks = new Set<string>();
+
+function hasSelfReviewRequestBudget(context?: ExecutionContext): boolean {
+    const taskId = context?.taskId;
+    return !taskId?.startsWith(SELF_REVIEW_TASK_PREFIX) || !selfReviewRequestTasks.has(taskId);
+}
+
+function consumeSelfReviewRequestBudget(context?: ExecutionContext): void {
+    const taskId = context?.taskId;
+    if (!taskId?.startsWith(SELF_REVIEW_TASK_PREFIX)) return;
+
+    selfReviewRequestTasks.add(taskId);
+    if (selfReviewRequestTasks.size > 200) {
+        selfReviewRequestTasks.delete(selfReviewRequestTasks.values().next().value!);
+    }
+}
+
 function requireAtelierContext(
     context?: ExecutionContext
 ): { ok: true; spaceId: string; packId: string; userId: string } | { ok: false; message: string } {
@@ -174,7 +192,7 @@ function formatTicketSummaryLine(
 const skill: SkillManifest = {
     name: 'atelier',
     description: 'Log and inspect capability gaps for the current space and assistant pack',
-    version: '1.0.0',
+    version: '1.1.0',
     meta: {
         run_mode: 'inline',
         approval: 'none',
@@ -311,6 +329,9 @@ const skill: SkillManifest = {
         ) {
             const access = requireAtelierContext(context);
             if (!access.ok) return access.message;
+            if (!hasSelfReviewRequestBudget(context)) {
+                return '[TOOL_RESULT] This private self-review already used its one Atelier request. Do not request another capability in this cycle.';
+            }
 
             const result = createCapabilityGapRequest({
                 space_id: access.spaceId,
@@ -323,6 +344,7 @@ const skill: SkillManifest = {
                 user_request: args.user_request,
                 hardware_needed: args.hardware_needed,
             });
+            consumeSelfReviewRequestBudget(context);
 
             if (result.deduped) {
                 return `[TOOL_RESULT] Atelier request updated for gap "${result.request.capability_gap}" in pack "${access.packId}" and space "${access.spaceId}". Votes: ${result.votes}.`;
@@ -456,6 +478,16 @@ const skill: SkillManifest = {
                 .join('\n')}`;
         },
     },
+    crons: [
+        {
+            expression: '17 * * * *',
+            description: '48-hour private self-improvement Atelier review',
+            handler: async () => {
+                const { runAtelierSelfReviewIfDue } = await import('../core/atelier-self-review');
+                await runAtelierSelfReviewIfDue();
+            },
+        },
+    ],
 };
 
 export default skill;
