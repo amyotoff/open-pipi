@@ -545,6 +545,8 @@ export function composeConversationContext(input: ComposeConversationInput): Con
 - Default to at most 6 short lines, 3 bullets, and roughly 700 characters.
 - Expand only when the user explicitly asks for detail or when omitting detail would make the result unsafe or unusable.
 - Do not append generic offers such as "I can also..." or narrate routine internal work.
+- Never end with future-availability filler such as "if new information appears", "if you need anything", "let me know", or "I am here". Finish after the useful content.
+- Do not proactively mention Google Docs, document structure, or Google Docs follow-ups. Discuss Google Docs only when the current human message explicitly asks about Google Docs.
 - Put long plans or evidence into an artifact and send only the takeaway plus the link.
 - For scheduled initiative, investigate actively before deciding. Silence is correct only after a genuine review finds nothing material to report.`
             : '',

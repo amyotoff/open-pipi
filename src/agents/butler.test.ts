@@ -164,6 +164,74 @@ describe('agents/butler', () => {
         expect(mod.mocks.sendMessageToChat).toHaveBeenCalledWith('chat-1', 'Simple reply');
     });
 
+    it('removes unsolicited future-availability tails from replies', async () => {
+        const mod = await loadButler();
+        mod.mocks.processWithOllama.mockResolvedValueOnce({
+            text: 'Рад стараться! Буду следить за порядком.\n\nЕсли появятся новые вводные по структуре Google Docs, я на связи.',
+            fromOllama: true,
+        });
+
+        await mod.handleButlerMessage(null, 'chat-1', '111', 'Спасибо');
+
+        expect(mod.mocks.sendMessageToChat).toHaveBeenCalledWith('chat-1', 'Рад стараться! Буду следить за порядком.');
+        expect(mod.mocks.storeMessage).toHaveBeenCalledWith(
+            expect.objectContaining({ content: 'Рад стараться! Буду следить за порядком.' })
+        );
+    });
+
+    it('suppresses a reply that consists only of a generic availability tail', async () => {
+        const mod = await loadButler();
+        mod.mocks.processWithLLM.mockResolvedValueOnce({
+            text: 'Если что-то понадобится, пишите — я на связи.',
+        });
+
+        await mod.handleButlerMessage(null, 'chat-1', '111', 'Research the best option');
+
+        expect(mod.mocks.sendMessageToChat).not.toHaveBeenCalled();
+        expect(mod.mocks.storeMessage).not.toHaveBeenCalled();
+    });
+
+    it('keeps useful conditional instructions', async () => {
+        const mod = await loadButler();
+        mod.mocks.processWithLLM.mockResolvedValueOnce({
+            text: 'Если появятся ошибки, перезапусти сервис один раз.',
+        });
+
+        await mod.handleButlerMessage(null, 'chat-1', '111', 'Research the best option');
+
+        expect(mod.mocks.sendMessageToChat).toHaveBeenCalledWith(
+            'chat-1',
+            'Если появятся ошибки, перезапусти сервис один раз.'
+        );
+    });
+
+    it('removes unsolicited Google Docs mentions when the current message did not ask about them', async () => {
+        const mod = await loadButler();
+        mod.mocks.processWithOllama.mockResolvedValueOnce({
+            text: 'Готово.\n\nСтруктуру Google Docs тоже продолжу отслеживать.',
+            fromOllama: true,
+        });
+
+        await mod.handleButlerMessage(null, 'chat-1', '111', 'Спасибо');
+
+        expect(mod.mocks.sendMessageToChat).toHaveBeenCalledWith('chat-1', 'Готово.');
+        expect(mod.mocks.storeMessage).toHaveBeenCalledWith(expect.objectContaining({ content: 'Готово.' }));
+    });
+
+    it('keeps Google Docs information when the current message explicitly asks for it', async () => {
+        const mod = await loadButler();
+        mod.mocks.processWithLLM.mockResolvedValueOnce({
+            text: 'Google Docs доступен, структура документа прочитана.',
+        });
+
+        await mod.handleButlerMessage(null, 'chat-1', '111', 'Проверь Google Docs');
+
+        expect(mod.mocks.sendMessageToChat).toHaveBeenCalledWith(
+            'chat-1',
+            'Google Docs доступен, структура документа прочитана.'
+        );
+    });
+
     it('routes complex messages through Gemini flow', async () => {
         const mod = await loadButler();
         await mod.handleButlerMessage(null, 'chat-1', '111', 'Research the best option');

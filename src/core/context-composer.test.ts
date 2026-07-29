@@ -309,6 +309,8 @@ describe('core/context-composer', () => {
         expect(result.systemPrompt).toContain('[RESPONSE_CONTRACT]');
         expect(result.systemPrompt).toContain('Think and use tools as deeply as the work requires');
         expect(result.systemPrompt).toContain('Default to at most 6 short lines');
+        expect(result.systemPrompt).toContain('Never end with future-availability filler');
+        expect(result.systemPrompt).toContain('Do not proactively mention Google Docs');
         expect(mod.mocks.getMemoryContext).toHaveBeenCalledWith(
             expect.objectContaining({
                 residentId: '111',

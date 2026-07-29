@@ -37,6 +37,50 @@ function isNoSendSentinel(text: string): boolean {
     });
 }
 
+const UNSOLICITED_TAIL_START =
+    /^(?:если\s+(?:(?:появятся|будут|возникнут)\s+(?:новые\s+)?(?:вводные|вопросы|задачи|изменения)|(?:что(?:-то)?\s+)?понадобится|нужно\s+будет)|могу\s+(?:также|ещ[её])|также\s+могу|я\s+на\s+связи|обращай(?:ся|тесь)|дай(?:те)?\s+знать|пиши(?:те)?\b|let\s+me\s+know|feel\s+free|i\s+can\s+also|i(?:'m|\s+am)\s+(?:here|available))/i;
+const GOOGLE_DOCS_TOPIC = /(?:google\s+docs?|google[-\s]?док(?:умент)?|гугл[-\s]?док(?:умент)?)/i;
+
+/**
+ * Models like to append empty invitations to continue the conversation.
+ * Removing only trailing paragraphs/sentences keeps useful conditional
+ * instructions intact while preventing "if anything changes, I'm here" noise.
+ */
+function stripUnsolicitedTail(text: string): string {
+    const blocks = text
+        .trim()
+        .split(/\n{2,}/)
+        .map((block) => block.trim())
+        .filter(Boolean);
+
+    while (blocks.length > 0 && UNSOLICITED_TAIL_START.test(blocks[blocks.length - 1])) {
+        blocks.pop();
+    }
+
+    if (blocks.length === 0) return '';
+
+    const lastIndex = blocks.length - 1;
+    blocks[lastIndex] = blocks[lastIndex]
+        .replace(
+            /(?:\s+)(если\s+(?:(?:появятся|будут|возникнут)\s+(?:новые\s+)?(?:вводные|вопросы|задачи|изменения)|(?:что(?:-то)?\s+)?понадобится|нужно\s+будет)[\s\S]*)$/i,
+            ''
+        )
+        .trim();
+
+    return blocks.filter(Boolean).join('\n\n').trim();
+}
+
+function stripUnsolicitedGoogleDocs(text: string, currentMessage: string): string {
+    if (GOOGLE_DOCS_TOPIC.test(currentMessage)) return text;
+
+    return text
+        .split(/\r?\n/)
+        .filter((line) => !GOOGLE_DOCS_TOPIC.test(line))
+        .join('\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
 function addDailyBriefLink(input: { taskId?: string; spaceId: string; responseText: string }): {
     text: string;
     pin: boolean;
@@ -212,6 +256,17 @@ export async function handleButlerMessage(
                     engine: 'gemini',
                     ...summarizeText(responseText),
                 });
+            }
+
+            const unsanitizedResponseText = responseText;
+            responseText = stripUnsolicitedGoogleDocs(stripUnsolicitedTail(responseText), input.text);
+            if (!responseText && unsanitizedResponseText.trim()) {
+                addSpanEvent('assistant.butler.reply_suppressed', { reason: 'unsolicited_tail_or_topic' });
+                logInfo('BUTLER', 'reply_suppressed', {
+                    task_id: input.taskId,
+                    reason: 'unsolicited_tail_or_topic',
+                });
+                return;
             }
 
             if ((input.taskId || input.suppressNoSend) && isNoSendSentinel(responseText)) {
