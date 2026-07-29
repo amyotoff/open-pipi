@@ -31,4 +31,29 @@ describe('formatTelegramText', () => {
         expect(result.html).toBe('<b>A&amp;B &lt;draft&gt;</b>\n• https://example.com?a=1&amp;b=2');
         expect(result.plain).toBe('A&B <draft>\n• https://example.com?a=1&b=2');
     });
+
+    it('renders markdown headings and removes horizontal-rule markup', () => {
+        const result = formatTelegramText(
+            [
+                '### 🟢 Кристина (Продажи и Контент)',
+                '**Приоритет 1: Запуск воронки**',
+                '- **Реферальная программа:** Разработать условия.',
+                '',
+                '---',
+                '',
+                '### **🔵 Леша (Продукт и Инфраструктура)**',
+            ].join('\n')
+        );
+
+        expect(result.html).toBe(
+            [
+                '<b>🟢 Кристина (Продажи и Контент)</b>',
+                '<b>Приоритет 1: Запуск воронки</b>',
+                '• <b>Реферальная программа:</b> Разработать условия.',
+                '',
+                '<b>🔵 Леша (Продукт и Инфраструктура)</b>',
+            ].join('\n')
+        );
+        expect(result.plain).not.toMatch(/###|---/);
+    });
 });

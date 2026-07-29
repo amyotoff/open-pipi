@@ -37,8 +37,28 @@ function normalizeListMarkers(text: string): string {
         .join('\n');
 }
 
+function normalizeBlockMarkers(text: string): string {
+    return text
+        .split('\n')
+        .map((line) => {
+            const heading = line.match(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/);
+            if (heading) {
+                const title = heading[1];
+                return /^\*\*[^*\n]+\*\*$/.test(title) ? title : `**${title}**`;
+            }
+
+            if (/^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+                return '';
+            }
+
+            return line;
+        })
+        .join('\n')
+        .replace(/\n{3,}/g, '\n\n');
+}
+
 export function formatTelegramText(text: string): TelegramFormattedText {
-    const normalized = normalizeListMarkers(text);
+    const normalized = normalizeListMarkers(normalizeBlockMarkers(text));
     const html = normalized
         .split('\n')
         .map((line) => formatInlineHtml(escapeTelegramHtml(line)))

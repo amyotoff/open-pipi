@@ -38,7 +38,17 @@ export const BOT_DISPLAY_NAME = (process.env.BOT_DISPLAY_NAME || 'PiPi').trim() 
 
 // Names the assistant responds to when mentioned in group chats.
 // Operators extend the defaults via a comma-separated BOT_NAME_ALIASES.
-const DEFAULT_BOT_NAME_ALIASES = ['pipi', 'пипи', 'jeeves', 'jivs', 'дживс'];
+const DEFAULT_BOT_NAME_ALIASES = [
+    'pipi',
+    'пипи',
+    'jeeves',
+    'jivs',
+    'дживс',
+    'скрепыш',
+    'скрепыша',
+    'скрепышу',
+    'скрепышем',
+];
 export const BOT_NAME_ALIASES: string[] = [
     ...new Set(
         [...DEFAULT_BOT_NAME_ALIASES, BOT_DISPLAY_NAME, ...(process.env.BOT_NAME_ALIASES || '').split(',')]

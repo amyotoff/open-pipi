@@ -8,6 +8,7 @@ async function loadLlm(options?: {
     registeredTools?: Array<{ name: string }>;
     coreTools?: Array<{ name: string }>;
     backingToolNames?: string[];
+    toolResults?: Record<string, string>;
 }) {
     vi.resetModules();
 
@@ -15,6 +16,9 @@ async function loadLlm(options?: {
     const logTokenUsage = vi.fn();
     const recordLlmRequest = vi.fn();
     const executeToolCall = vi.fn(async ({ toolName, toolArgs, context, handlers, metaHandler }) => {
+        if (options?.toolResults && toolName in options.toolResults) {
+            return options.toolResults[toolName];
+        }
         if (!metaHandler) return '';
         return (await metaHandler(toolName, toolArgs, context, handlers)) ?? '';
     });
@@ -87,6 +91,149 @@ afterEach(() => {
 });
 
 describe('core/llm advisor strategy', () => {
+    it('removes an unsupported deletion claim and reports that nothing changed', async () => {
+        const generateContent = vi.fn().mockResolvedValue({
+            usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 10 },
+            functionCalls: [],
+            text: 'Удалил все задачи. Список задач теперь пуст.',
+        });
+        const mod = await loadLlm({ advisorEnabled: false, generateContent });
+
+        const result = await mod.processWithLLM([{ role: 'user', content: 'Удали все задачи' }], {
+            userId: '111',
+            spaceId: 'telegram:chat-1',
+            allowedTools: [],
+        });
+
+        expect(result.text).toBe('Не выполнил: в этом ходе не было успешного инструмента, изменяющего данные.');
+        expect(result.text).not.toMatch(/удалил|теперь пуст/i);
+    });
+
+    it('keeps useful planning but removes a fabricated reminder receipt', async () => {
+        const generateContent = vi.fn().mockResolvedValue({
+            usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 10 },
+            functionCalls: [],
+            text: [
+                'План на день:',
+                '1. Подготовить смету.',
+                '2. Позвонить поставщику.',
+                '',
+                'Установил напоминание на 15:00.',
+            ].join('\n'),
+        });
+        const mod = await loadLlm({ advisorEnabled: false, generateContent });
+
+        const result = await mod.processWithLLM(
+            [{ role: 'user', content: 'Составь план и установи напоминание на 15:00' }],
+            {
+                userId: '111',
+                spaceId: 'telegram:chat-1',
+                allowedTools: [],
+            }
+        );
+
+        expect(result.text).toContain('План на день:');
+        expect(result.text).toContain('Подготовить смету.');
+        expect(result.text).not.toContain('Установил напоминание');
+        expect(result.text).toContain('Не выполнил:');
+    });
+
+    it('does not mistake an in-reply text rewrite for an external data mutation', async () => {
+        const generateContent = vi.fn().mockResolvedValue({
+            usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 10 },
+            functionCalls: [],
+            text: 'Обновил формулировку:\n\n«Запускаем продажи первого сентября».',
+        });
+        const mod = await loadLlm({ advisorEnabled: false, generateContent });
+
+        const result = await mod.processWithLLM([{ role: 'user', content: 'Обнови формулировку' }], {
+            userId: '111',
+            spaceId: 'telegram:chat-1',
+            allowedTools: [],
+        });
+
+        expect(result.text).toBe('Обновил формулировку:\n\n«Запускаем продажи первого сентября».');
+    });
+
+    it('allows an action claim after a matching mutating tool succeeds', async () => {
+        const functionCallPart = {
+            functionCall: {
+                name: 'reminder_set',
+                args: { content: 'Проверить смету', remind_at: '2026-07-30T15:00:00+02:00' },
+            },
+            thoughtSignature: 'signed-reminder-state',
+        };
+        const generateContent = vi
+            .fn()
+            .mockResolvedValueOnce({
+                usageMetadata: { promptTokenCount: 30, candidatesTokenCount: 10 },
+                functionCalls: [functionCallPart.functionCall],
+                candidates: [{ content: { role: 'model', parts: [functionCallPart] } }],
+            })
+            .mockResolvedValueOnce({
+                usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 10 },
+                functionCalls: [],
+                text: 'Установил напоминание на 15:00.',
+            });
+        const mod = await loadLlm({
+            advisorEnabled: false,
+            executorModel: 'gemini-3-flash-preview',
+            generateContent,
+            registeredTools: [{ name: 'reminder_set' }],
+            toolResults: {
+                reminder_set: '[TOOL_RESULT] Reminder set (ID: 42) for 2026-07-30 15:00.',
+            },
+        });
+
+        const result = await mod.processWithLLM([{ role: 'user', content: 'Установи напоминание на 15:00' }], {
+            userId: '111',
+            spaceId: 'telegram:chat-1',
+            allowedTools: ['reminder_set'],
+        });
+
+        expect(result.text).toBe('Установил напоминание на 15:00.');
+        expect(mod.executeToolCall).toHaveBeenCalledWith(
+            expect.objectContaining({
+                toolName: 'reminder_set',
+            })
+        );
+    });
+
+    it('blocks an action claim when a mutating tool returns a failure receipt', async () => {
+        const generateContent = vi
+            .fn()
+            .mockResolvedValueOnce({
+                usageMetadata: { promptTokenCount: 30, candidatesTokenCount: 10 },
+                functionCalls: [
+                    {
+                        name: 'reminder_set',
+                        args: { content: 'Проверить смету' },
+                    },
+                ],
+            })
+            .mockResolvedValueOnce({
+                usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 10 },
+                functionCalls: [],
+                text: 'Установил напоминание на 15:00.',
+            });
+        const mod = await loadLlm({
+            advisorEnabled: false,
+            generateContent,
+            registeredTools: [{ name: 'reminder_set' }],
+            toolResults: {
+                reminder_set: '[TOOL_RESULT] reminder_set requires remind_at or a recurring schedule.',
+            },
+        });
+
+        const result = await mod.processWithLLM([{ role: 'user', content: 'Установи напоминание на 15:00' }], {
+            userId: '111',
+            spaceId: 'telegram:chat-1',
+            allowedTools: ['reminder_set'],
+        });
+
+        expect(result.text).toBe('Не выполнил: в этом ходе не было успешного инструмента, изменяющего данные.');
+    });
+
     it('uses high thinking for Gemini 3 initiative work and keeps routine turns minimal', async () => {
         const generateContent = vi.fn().mockResolvedValue({
             usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 10 },

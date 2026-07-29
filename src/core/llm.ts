@@ -35,6 +35,69 @@ const LONG_TASK_MESSAGES = [
 ];
 const ADVISOR_TOOL_NAME = 'consult_advisor';
 const MAX_ADVISOR_CONTEXT_TURNS = 8;
+const MUTATION_KIND_PATTERNS: Array<{
+    kind: string;
+    toolPattern: RegExp;
+    claimPatterns: RegExp[];
+}> = [
+    {
+        kind: 'create',
+        toolPattern: /(?:^|_)(?:add|create|apply|attach|link|request)(?:_|$)/i,
+        claimPatterns: [
+            /(?:^|[^\p{L}\p{N}_])(?:я\s+)?(?:добавил(?:а|и)?|создал(?:а|и)?|применил(?:а|и)?|прикрепил(?:а|и)?)\s+(?:задач[уи]|напоминани[ея]|проект|файл|документ|артефакт|запись|тикет|заявку|ссылку|настройк[уи]|пункт\s+в\s+(?:список|задачи)|товар\s+в\s+список)(?=$|[^\p{L}\p{N}_])/iu,
+            /(?:^|[^\p{L}\p{N}_])(?:задача|напоминание|проект|файл|документ|артефакт|запись|тикет|заявка|ссылка)\s+(?:добавлен[ао]?|создан[ао]?|прикреплен[ао]?|прикреплён[ао]?)(?=$|[^\p{L}\p{N}_])/iu,
+            /\b(?:I(?:'ve| have)?\s+)?(?:added|created|applied|attached|linked)\s+(?:the\s+|a\s+)?(?:task|reminder|project|file|document|artifact|record|ticket|request|link|setting)\b/i,
+        ],
+    },
+    {
+        kind: 'update',
+        toolPattern: /(?:^|_)(?:update|set|edit|mark|complete|pause|resume|open|close|resolve|upsert|learn)(?:_|$)/i,
+        claimPatterns: [
+            /(?:^|[^\p{L}\p{N}_])(?:я\s+)?(?:обновил(?:а|и)?|изменил(?:а|и)?|отметил(?:а|и)?|выполнил(?:а|и)?|закрыл(?:а|и)?|поставил(?:а|и)?|перен[её]с(?:ла|ли)?)\s+(?:статус|задач[уи]|напоминани[ея]|проект|файл|документ|артефакт|запись|роль|политику|настройк[уи]|пункт|товар|встречу|дедлайн)(?=$|[^\p{L}\p{N}_])/iu,
+            /(?:^|[^\p{L}\p{N}_])(?:статус|задача|напоминание|проект|файл|документ|артефакт|запись|роль|политика|настройка|пункт|товар|встреча|дедлайн)\s+(?:обновлен[ао]?|обновлён[ао]?|изменен[ао]?|изменён[ао]?|отмечен[ао]?|выполнен[ао]?)(?=$|[^\p{L}\p{N}_])/iu,
+            /\b(?:I(?:'ve| have)?\s+)?(?:updated|changed|edited|marked|completed|closed|moved|paused|resumed)\s+(?:the\s+|a\s+)?(?:status|task|reminder|project|file|document|artifact|record|role|policy|setting|item|meeting|deadline)\b/i,
+        ],
+    },
+    {
+        kind: 'delete',
+        toolPattern: /(?:^|_)(?:delete|remove|clear|cancel|detach|unlink|archive)(?:_|$)/i,
+        claimPatterns: [
+            /(?:^|[^\p{L}\p{N}_])(?:я\s+)?(?:удалил(?:а|и)?|очистил(?:а|и)?|отменил(?:а|и)?|архивировал(?:а|и)?)\s+(?:все\s+)?(?:задач[уи]|напоминани[ея]|проект|файл|документ|артефакт|запись|сообщени[ея]|список|пункт|товар|встречу)(?=$|[^\p{L}\p{N}_])/iu,
+            /(?:^|[^\p{L}\p{N}_])(?:задача|напоминание|проект|файл|документ|артефакт|запись|сообщение|список|пункт|товар|встреча)\s+(?:удален[ао]?|удалён[ао]?|очищен[ао]?|отменен[ао]?|отменён[ао]?)(?=$|[^\p{L}\p{N}_])/iu,
+            /(?:^|[^\p{L}\p{N}_])(?:список\s+(?:задач|дел|напоминаний)\s+(?:теперь\s+)?пуст)(?=$|[^\p{L}\p{N}_])/iu,
+            /\b(?:I(?:'ve| have)?\s+)?(?:deleted|removed|cleared|cancelled|canceled|detached|unlinked|archived)\s+(?:the\s+|a\s+)?(?:task|reminder|project|file|document|artifact|record|message|list|item|meeting)\b/i,
+        ],
+    },
+    {
+        kind: 'save',
+        toolPattern: /(?:^|_)(?:remember|save|write|append|record|log)(?:_|$)/i,
+        claimPatterns: [
+            /(?:^|[^\p{L}\p{N}_])(?:я\s+)?(?:сохранил(?:а|и)?|записал(?:а|и)?|зафиксировал(?:а|и)?|запомнил(?:а|и)?|сохранен[оаы]?|сохранён[оаы]?|записан[оаы]?|зафиксирован[оаы]?)(?=$|[^\p{L}\p{N}_])/iu,
+            /\b(?:I(?:'ve| have)?\s+)?(?:saved|wrote|written|recorded|logged|remembered)\b/i,
+        ],
+    },
+    {
+        kind: 'schedule',
+        toolPattern: /(?:^|_)(?:schedule|remind|reminder|task_create|set_reminder)(?:_|$)/i,
+        claimPatterns: [
+            /(?:^|[^\p{L}\p{N}_])(?:я\s+)?(?:установил(?:а|и)?|запланировал(?:а|и)?|назначил(?:а|и)?)\s+(?:новое\s+)?(?:напоминание|задачу|встречу)(?=$|[^\p{L}\p{N}_])/iu,
+            /(?:^|[^\p{L}\p{N}_])(?:напоминание|задача|встреча)\s+(?:успешно\s+)?(?:установлен[оа]?|создан[оа]?|запланирован[оа]?|назначен[оа]?)(?=$|[^\p{L}\p{N}_])/iu,
+            /\b(?:I(?:'ve| have)?\s+)?(?:set|scheduled)\s+(?:the\s+|a\s+)?(?:reminder|task|meeting)\b/i,
+        ],
+    },
+    {
+        kind: 'send',
+        toolPattern: /(?:^|_)(?:send|message|notify|call)(?:_|$)/i,
+        claimPatterns: [
+            /(?:^|[^\p{L}\p{N}_])(?:я\s+)?(?:отправил(?:а|и)?|послал(?:а|и)?|уведомил(?:а|и)?|позвонил(?:а|и)?|отправлен[оаы]?)(?=$|[^\p{L}\p{N}_])/iu,
+            /\b(?:I(?:'ve| have)?\s+)?(?:sent|notified|called)\b/i,
+        ],
+    },
+];
+const TOOL_RESULT_FAILURE_PATTERN =
+    /\b(?:error executing|no handler found|approval required|blocked|requires\b|permission|denied|not found|could not|couldn't|cannot|can't|failed|failure|unavailable|disabled|invalid|unknown|no changes?|nothing (?:was )?(?:changed|deleted|removed|updated))\b/i;
+const MUTATION_REQUEST_PATTERN =
+    /(?:^|[^\p{L}\p{N}_])(?:удал(?:и|ить|ил)|очист(?:и|ить|ил)|обнов(?:и|ить|ил)|созда(?:й|ть|л)|установ(?:и|ить|ил)|зафиксир(?:уй|овать|овал)|отмет(?:ь|ить|ил)|добав(?:ь|ить|ил)|сохран(?:и|ить|ил)|отправ(?:ь|ить|ил)|измен(?:и|ить|ил)|перен(?:еси|ести|ес|ёс)|закр(?:ой|ыть|ыл)|выполн(?:и|ить|ил)|напомни|поставь|запиши|delete|clear|update|create|set|record|mark|add|save|send|change|move|close|complete|schedule|cancel)(?=$|[^\p{L}\p{N}_])/iu;
 
 let ai: GoogleGenAI | null = null;
 
@@ -129,6 +192,15 @@ function buildExecutorSystemInstruction(systemInstruction?: string): string | un
         parts.push(systemInstruction.trim());
     }
 
+    parts.push(
+        [
+            'Execution integrity policy:',
+            '- Never say or imply that you changed data, created or cancelled a reminder, updated a status, saved memory or a file, deleted anything, or sent a message unless a successful tool result in this same turn proves that exact action happened.',
+            '- A plan, intention, recommendation, or remembered conversation is not execution. Clearly distinguish proposed work from completed work.',
+            '- If the required tool was unavailable, blocked, failed, or was not called, say briefly that the action was not completed. Never manufacture a success receipt.',
+        ].join('\n')
+    );
+
     if (advisorEnabled) {
         parts.push(
             [
@@ -143,6 +215,83 @@ function buildExecutorSystemInstruction(systemInstruction?: string): string | un
     }
 
     return parts.length > 0 ? parts.join('\n\n') : undefined;
+}
+
+function inferMutationKinds(toolName: string, toolArgs?: any): Set<string> {
+    const operation = typeof toolArgs?.operation === 'string' ? toolArgs.operation : '';
+    const action = typeof toolArgs?.action === 'string' ? toolArgs.action : '';
+    const subject = `${toolName} ${operation} ${action}`.trim();
+    const kinds = new Set<string>();
+
+    for (const candidate of MUTATION_KIND_PATTERNS) {
+        if (candidate.toolPattern.test(subject)) {
+            kinds.add(candidate.kind);
+        }
+    }
+
+    return kinds;
+}
+
+function isSuccessfulMutationResult(result: string): boolean {
+    const normalized = result.replace(/\s+/g, ' ').trim();
+    if (!normalized || TOOL_RESULT_FAILURE_PATTERN.test(normalized)) return false;
+    if (/\b(?:cleared|updated|removed|deleted|cancelled|canceled)\s+0\b/i.test(normalized)) return false;
+    return true;
+}
+
+function findClaimedMutationKinds(text: string): Set<string> {
+    const kinds = new Set<string>();
+
+    for (const candidate of MUTATION_KIND_PATTERNS) {
+        if (candidate.claimPatterns.some((pattern) => pattern.test(text))) {
+            kinds.add(candidate.kind);
+        }
+    }
+
+    return kinds;
+}
+
+function truthfulNonExecutionMessage(latestUserMessage: string): string {
+    if (/[а-яё]/i.test(latestUserMessage)) {
+        return 'Не выполнил: в этом ходе не было успешного инструмента, изменяющего данные.';
+    }
+    return 'Not completed: no data-changing tool succeeded in this turn.';
+}
+
+function enforceExecutionIntegrity(
+    draft: string,
+    latestUserMessage: string,
+    successfulMutationKinds: Set<string>
+): { text: string; guarded: boolean; removedSections: number } {
+    const sections = draft.split(/(\n{2,})/);
+    let removedSections = 0;
+
+    const kept = sections.filter((section) => {
+        if (/^\n{2,}$/.test(section)) return true;
+        const claimedKinds = findClaimedMutationKinds(section);
+        if (claimedKinds.size === 0) return true;
+
+        const unsupported = [...claimedKinds].some((kind) => !successfulMutationKinds.has(kind));
+        if (unsupported) {
+            removedSections += 1;
+            return false;
+        }
+        return true;
+    });
+
+    if (removedSections === 0) {
+        return { text: draft, guarded: false, removedSections: 0 };
+    }
+
+    const sanitized = kept
+        .join('')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+    const requestedMutation = MUTATION_REQUEST_PATTERN.test(latestUserMessage);
+    const notice = truthfulNonExecutionMessage(latestUserMessage);
+    const text = requestedMutation ? [sanitized, notice].filter(Boolean).join('\n\n') : sanitized || notice;
+
+    return { text, guarded: true, removedSections };
 }
 
 async function handleMetaTool(
@@ -668,6 +817,8 @@ export async function processWithLLM(
 
                 const MAX_TOOL_ROUNDS = 3;
                 let toolRounds = 0;
+                const successfulMutationKinds = new Set<string>();
+                const successfulMutatingTools = new Set<string>();
 
                 for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
                     if (!response.functionCalls || response.functionCalls.length === 0) break;
@@ -713,6 +864,14 @@ export async function processWithLLM(
                             });
                         }
 
+                        const mutationKinds = inferMutationKinds(call.name, call.args);
+                        if (mutationKinds.size > 0 && isSuccessfulMutationResult(result)) {
+                            successfulMutatingTools.add(call.name);
+                            for (const kind of mutationKinds) {
+                                successfulMutationKinds.add(kind);
+                            }
+                        }
+
                         functionResponseParts.push({
                             functionResponse: {
                                 name: call.name,
@@ -755,9 +914,26 @@ export async function processWithLLM(
                 }
 
                 addSpanAttributes({ 'app.llm.tool_rounds': toolRounds, 'app.llm.advisor_calls': advisorCalls });
-                const textResponse =
+                const draftResponse =
                     response.text ||
                     'Модель завершила работу без финального текста. Попробуй переформулировать запрос.';
+                const guardedResponse = enforceExecutionIntegrity(
+                    draftResponse,
+                    latestUserMessage,
+                    successfulMutationKinds
+                );
+                addSpanAttributes({
+                    'app.llm.action_claim_guarded': guardedResponse.guarded,
+                    'app.llm.action_claim_sections_removed': guardedResponse.removedSections,
+                    'app.llm.successful_mutating_tools': successfulMutatingTools.size,
+                });
+                if (guardedResponse.guarded) {
+                    logWarn('LLM', 'unsupported_action_claim_removed', {
+                        removed_sections: guardedResponse.removedSections,
+                        successful_mutating_tools: [...successfulMutatingTools],
+                    });
+                }
+                const textResponse = guardedResponse.text;
 
                 const dailyCost = getDailyTokenCost();
                 const isInternalTurn = context.userId.startsWith('system_');

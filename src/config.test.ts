@@ -158,6 +158,17 @@ describe('config', () => {
             expect(config.BOOTSTRAP_OWNER_MODE).toBe(false);
             expect(config.PIPI_PLATFORM).toBe('auto');
         });
+
+        it('responds to the Скрепыш name without requiring extra environment aliases', async () => {
+            const config = await loadConfig({
+                BOT_DISPLAY_NAME: undefined,
+                BOT_NAME_ALIASES: undefined,
+            });
+
+            expect(config.BOT_NAME_ALIASES).toEqual(
+                expect.arrayContaining(['скрепыш', 'скрепыша', 'скрепышу', 'скрепышем'])
+            );
+        });
     });
 
     describe('resolveRuntimePlatform', () => {
