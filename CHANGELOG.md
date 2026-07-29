@@ -4,6 +4,18 @@ All notable changes to Open PiPi will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Voice calls, as the first optional addon (`src/addons/voice-calls`): delegate an outbound phone
+  call to a voice agent and get a structured result back. Three gates stand in front of it — the
+  pack must enable the `phone` capability, a provider must be configured, and the owner must approve
+  the individual call — and all three are shut by default. The telephony SDK is not a dependency of
+  this repo; anyone turning calling on installs it themselves, so an install that never calls
+  carries nothing.
+- `docs/addons.md`: what makes something an addon, and how to write a **subagent** — a delegate that
+  runs where the orchestrator cannot supervise it, briefed with a task contract and answering with a
+  result contract. The voice addon is the worked example.
+
 ## [2.6.0] — 2026-07-29
 
 Transports become replaceable. A `space` already owned behavior, memory, and permissions; this
