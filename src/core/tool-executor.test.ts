@@ -115,7 +115,12 @@ describe('core/tool-executor', () => {
         const result = await mod.executeToolCall({
             toolName: 'note_tool',
             toolArgs: { hello: 'world' },
-            context: { chatId: 'chat-1', userId: '111', spaceId: 'telegram:chat-1' },
+            context: {
+                chatId: 'chat-1',
+                userId: '111',
+                spaceId: 'telegram:chat-1',
+                turnId: 'turn-42',
+            },
             handlers: {
                 note_tool: vi.fn(async () => fullResult),
             },
@@ -125,6 +130,7 @@ describe('core/tool-executor', () => {
         const auditRows = db.getDb().prepare('SELECT * FROM tool_execution_log').all() as any[];
         expect(auditRows).toHaveLength(1);
         expect(auditRows[0].tool_name).toBe('note_tool');
+        expect(auditRows[0].task_id).toBe('turn-42');
         expect(auditRows[0].status).toBe('success');
         expect(auditRows[0].audit_mode).toBe('all');
         expect(auditRows[0].result_preview).toContain('done nicely');
@@ -133,6 +139,7 @@ describe('core/tool-executor', () => {
         const callRows = db.getDb().prepare('SELECT * FROM tool_logs').all() as any[];
         expect(callRows).toHaveLength(1);
         expect(callRows[0].tool_name).toBe('note_tool');
+        expect(callRows[0].task_id).toBe('turn-42');
         expect(callRows[0].status).toBe('success');
         expect(callRows[0].result_text).toBe(fullResult);
         expect(JSON.parse(callRows[0].args_json)).toEqual({ hello: 'world' });

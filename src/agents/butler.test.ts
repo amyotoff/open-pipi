@@ -234,10 +234,41 @@ describe('agents/butler', () => {
 
     it('routes complex messages through Gemini flow', async () => {
         const mod = await loadButler();
-        await mod.handleButlerMessage(null, 'chat-1', '111', 'Research the best option');
+        await mod.handleButlerMessage({
+            channel: 'telegram',
+            channelRef: 'chat-1',
+            senderId: '111',
+            text: 'Research the best option',
+            spaceId: 'telegram:chat-1',
+            correlationId: 'turn-42',
+        });
 
-        expect(mod.mocks.processWithLLM).toHaveBeenCalled();
-        expect(mod.mocks.sendMessageToChat).toHaveBeenCalledWith('chat-1', 'Complex reply');
+        expect(mod.mocks.processWithLLM).toHaveBeenCalledWith(
+            expect.any(Array),
+            expect.objectContaining({
+                turnId: 'turn-42',
+            })
+        );
+        expect(mod.mocks.sendMessageToChat).toHaveBeenCalledWith('chat-1', 'Complex reply', {
+            correlationId: 'turn-42',
+        });
+    });
+
+    it('does not send or store an empty reply after finalization failure', async () => {
+        const mod = await loadButler();
+        mod.mocks.processWithLLM.mockResolvedValueOnce({ text: '' });
+
+        await mod.handleButlerMessage({
+            channel: 'telegram',
+            channelRef: 'chat-1',
+            senderId: '111',
+            text: 'Research the best option',
+            spaceId: 'telegram:chat-1',
+            correlationId: 'turn-43',
+        });
+
+        expect(mod.mocks.sendMessageToChat).not.toHaveBeenCalled();
+        expect(mod.mocks.storeMessage).not.toHaveBeenCalled();
     });
 
     it('suppresses task replies when the model returns the no-send sentinel', async () => {

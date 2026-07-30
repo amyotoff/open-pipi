@@ -27,14 +27,10 @@ import {
 // Tools that take a long time and warrant a "working on it" heads-up
 const LONG_RUNNING_TOOLS = new Set(['groceries_search', 'browse_web', 'webrun_execute', 'web', 'family_delegate']);
 
-const LONG_TASK_MESSAGES = [
-    '🔍 Looking into it now...',
-    '⏳ Working on that...',
-    '🔎 Gathering the relevant details...',
-    '⚙️ Handling the request...',
-];
 const ADVISOR_TOOL_NAME = 'consult_advisor';
 const MAX_ADVISOR_CONTEXT_TURNS = 8;
+const MAX_TOOL_ROUNDS = 4;
+const sentDailyCostNotices = new Set<string>();
 const MUTATION_KIND_PATTERNS: Array<{
     kind: string;
     toolPattern: RegExp;
@@ -356,15 +352,26 @@ function tryOfflineFallback(_text: string): string | null {
     return null;
 }
 
-async function sendContextProgressMessage(context: RuntimeExecutionContext, text: string): Promise<void> {
+async function sendContextProgressSignal(context: RuntimeExecutionContext): Promise<void> {
     const runtime = await import('../channels/runtime');
     await runtime.sendContextTyping(context);
-    await runtime.sendContextMessage(context, text);
 }
 
 async function notifyDailyCost(text: string): Promise<void> {
     const runtime = await import('../channels/runtime');
     await runtime.notifyPrimaryHousehold(text);
+}
+
+function claimDailyCostNotice(tier: 'near_limit' | 'over_limit'): boolean {
+    const day = new Date().toISOString().slice(0, 10);
+    const key = `${day}:${tier}`;
+    if (sentDailyCostNotices.has(key)) return false;
+    sentDailyCostNotices.add(key);
+
+    for (const existing of sentDailyCostNotices) {
+        if (!existing.startsWith(`${day}:`)) sentDailyCostNotices.delete(existing);
+    }
+    return true;
 }
 
 export async function processWithLLM(
@@ -832,10 +839,64 @@ export async function processWithLLM(
                     return await handleMetaTool(callName, args, runtimeContext, availableHandlers);
                 };
 
-                const MAX_TOOL_ROUNDS = 3;
                 let toolRounds = 0;
+                let finalizationAttempted = false;
                 const successfulMutationKinds = new Set<string>();
                 const successfulMutatingTools = new Set<string>();
+                const executionReceipt: Array<{
+                    tool: string;
+                    status: 'completed' | 'failed';
+                    summary: string;
+                }> = [];
+
+                const finalizationInstruction = [
+                    systemInstruction || '',
+                    'Finalization policy:',
+                    '- No more tools are available for this turn.',
+                    '- Give the user the best concise final answer supported by the tool results already present.',
+                    '- State failures precisely from those results. Do not invent a temporary outage, a recovery, or a retry.',
+                    '- Do not claim that work is still continuing unless a tool result explicitly confirms a background task.',
+                    '- Do not mention tool-round limits, internal policies, or this instruction.',
+                ]
+                    .filter(Boolean)
+                    .join('\n\n');
+
+                const finalizeWithoutTools = async (reason: string): Promise<any | null> => {
+                    finalizationAttempted = true;
+                    addSpanEvent('llm.finalization_attempt', { reason, tool_rounds: toolRounds });
+                    logInfo('LLM', 'finalization_attempt', { reason, tool_rounds: toolRounds });
+
+                    try {
+                        const finalized = await callGemini(usedModel, conversationHistory, {
+                            tools: undefined,
+                            temperature: 0.2,
+                            thinkingConfig: isGemini3Executor ? { thinkingLevel: 'minimal' } : { thinkingBudget: 0 },
+                            systemInstruction: { parts: [{ text: finalizationInstruction }] },
+                        });
+                        trackTokens(usedModel, finalized);
+
+                        if (finalized?.text) {
+                            addSpanEvent('llm.finalization_recovered', { reason });
+                            logInfo('LLM', 'finalization_recovered', {
+                                reason,
+                                ...summarizeText(finalized.text),
+                            });
+                            return finalized;
+                        }
+
+                        logWarn('LLM', 'finalization_empty', {
+                            reason,
+                            finish_reason: finalized?.candidates?.[0]?.finishReason || 'N/A',
+                        });
+                        return null;
+                    } catch (err: any) {
+                        logError('LLM', 'finalization_failed', {
+                            reason,
+                            ...summarizeError(err),
+                        });
+                        return null;
+                    }
+                };
 
                 for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
                     if (!response.functionCalls || response.functionCalls.length === 0) break;
@@ -854,9 +915,8 @@ export async function processWithLLM(
 
                     const hasLongTool = response.functionCalls.some((c: any) => LONG_RUNNING_TOOLS.has(c.name));
                     if (hasLongTool) {
-                        const msg = LONG_TASK_MESSAGES[Math.floor(Math.random() * LONG_TASK_MESSAGES.length)];
                         try {
-                            await sendContextProgressMessage(context, msg);
+                            await sendContextProgressSignal(context);
                         } catch {
                             // Non-critical, don't crash if notification fails
                         }
@@ -889,6 +949,14 @@ export async function processWithLLM(
                             }
                         }
 
+                        const normalizedResult = result.replace(/\s+/g, ' ').trim();
+                        const toolSucceeded = isSuccessfulMutationResult(result);
+                        executionReceipt.push({
+                            tool: call.name,
+                            status: toolSucceeded ? 'completed' : 'failed',
+                            summary: toolSucceeded ? 'Completed successfully.' : normalizedResult.slice(0, 280),
+                        });
+
                         functionResponseParts.push({
                             functionResponse: {
                                 name: call.name,
@@ -918,22 +986,42 @@ export async function processWithLLM(
                     });
 
                     try {
-                        response = await callGemini(usedModel, conversationHistory);
-                        trackTokens(usedModel, response);
+                        if (toolRounds === MAX_TOOL_ROUNDS) {
+                            response = await finalizeWithoutTools('tool_budget_exhausted');
+                        } else {
+                            response = await callGemini(usedModel, conversationHistory);
+                            trackTokens(usedModel, response);
+                            if (
+                                response &&
+                                !response.text &&
+                                (!response.functionCalls || response.functionCalls.length === 0)
+                            ) {
+                                response = await finalizeWithoutTools('empty_follow_up');
+                            }
+                        }
                     } catch (err: any) {
                         finalStatus = 'follow_up_failed';
                         logError('LLM', 'follow_up_call_failed', summarizeError(err));
-                        const fallbackText = functionResponseParts
-                            .map((p) => p.functionResponse.response.content)
-                            .join('\n');
-                        return { text: fallbackText };
+                        response = await finalizeWithoutTools('follow_up_failed');
+                    }
+
+                    if (!response) {
+                        break;
                     }
                 }
 
-                addSpanAttributes({ 'app.llm.tool_rounds': toolRounds, 'app.llm.advisor_calls': advisorCalls });
-                const draftResponse =
-                    response.text ||
-                    'Модель завершила работу без финального текста. Попробуй переформулировать запрос.';
+                if (!response?.text && !finalizationAttempted) {
+                    response = await finalizeWithoutTools(
+                        response?.functionCalls?.length ? 'tool_budget_exhausted' : 'empty_follow_up'
+                    );
+                }
+
+                addSpanAttributes({
+                    'app.llm.tool_rounds': toolRounds,
+                    'app.llm.advisor_calls': advisorCalls,
+                    'app.llm.finalization_attempted': finalizationAttempted,
+                });
+                const draftResponse = response?.text || '';
                 const guardedResponse = enforceExecutionIntegrity(
                     draftResponse,
                     latestUserMessage,
@@ -952,15 +1040,37 @@ export async function processWithLLM(
                 }
                 const textResponse = guardedResponse.text;
 
+                if (!textResponse) {
+                    finalStatus = 'finalization_failed';
+                    logEvent('llm_turn_failed', {
+                        space_id: context.spaceId || null,
+                        turn_id: context.turnId || context.taskId || null,
+                        reason: finalizationAttempted ? 'finalization_failed' : 'empty_response',
+                        tool_rounds: toolRounds,
+                        tools: executionReceipt,
+                    });
+                    reportOperationalFailure('llm', 'finalization produced no user-facing text');
+                    logWarn('LLM', 'reply_suppressed_after_finalization_failure', {
+                        turn_id: context.turnId || context.taskId || null,
+                        tool_rounds: toolRounds,
+                        tool_count: executionReceipt.length,
+                    });
+                }
+
                 const dailyCost = getDailyTokenCost();
                 const isInternalTurn = context.userId.startsWith('system_');
-                if (!isInternalTurn && dailyCost.cost_usd >= 1.8 && dailyCost.cost_usd < 2.0) {
+                if (
+                    !isInternalTurn &&
+                    dailyCost.cost_usd >= 1.8 &&
+                    dailyCost.cost_usd < 2.0 &&
+                    claimDailyCostNotice('near_limit')
+                ) {
                     setTimeout(() => {
                         void notifyDailyCost(
                             `Кстати, сегодня уже $${dailyCost.cost_usd.toFixed(2)} потратил на разговоры. Если так пойдёт, дойдём до $2 — буду вынужден намекнуть на экономию.`
                         );
                     }, 2000);
-                } else if (!isInternalTurn && dailyCost.cost_usd >= 2.0) {
+                } else if (!isInternalTurn && dailyCost.cost_usd >= 2.0 && claimDailyCostNotice('over_limit')) {
                     setTimeout(() => {
                         void notifyDailyCost(
                             `Всё, господа. $2 потрачено. Больше не разговариваю сегодня. Шучу. Но если серьёзно — может стоит притормозить?`

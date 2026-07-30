@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-async function loadComposer(options?: { spacePolicyJson?: string; recentMessages?: any[]; searchMessages?: any[] }) {
+async function loadComposer(options?: {
+    spacePolicyJson?: string;
+    recentMessages?: any[];
+    searchMessages?: any[];
+    failureReceipt?: any;
+}) {
     vi.resetModules();
 
     const defaultRecentMessages = [
@@ -84,6 +89,7 @@ async function loadComposer(options?: { spacePolicyJson?: string; recentMessages
     ]);
     const getAllResidents = vi.fn(() => []);
     const searchMessages = vi.fn(() => options?.searchMessages || []);
+    const getLatestLlmFailureReceipt = vi.fn(() => options?.failureReceipt || null);
     const materializeAgentForSpace = vi.fn(() => ({
         id: 'office',
         persona_id: 'facilitator',
@@ -219,6 +225,7 @@ async function loadComposer(options?: { spacePolicyJson?: string; recentMessages
         getDirectContactStatuses,
         getMemoryEntries,
         searchMessages,
+        getLatestLlmFailureReceipt,
         buildTelegramSpaceId: vi.fn((chatId: string) => `telegram:${chatId}`),
         getSpace: vi.fn(() => mockedSpace),
         getSpaceByChannelRef: vi.fn(() => mockedSpace),
@@ -246,6 +253,7 @@ async function loadComposer(options?: { spacePolicyJson?: string; recentMessages
             getRecentDirectMessagesForPerson,
             getDirectContactStatuses,
             searchMessages,
+            getLatestLlmFailureReceipt,
             materializeAgentForSpace,
             getMemoryContext,
         },
@@ -363,6 +371,48 @@ describe('core/context-composer', () => {
         expect(result.systemPrompt).toContain('Bob last contacted the assistant in DM');
         expect(mod.mocks.getRecentDirectMessagesForPerson).toHaveBeenCalledWith('telegram', '111', 8);
         expect(mod.mocks.getDirectContactStatuses).toHaveBeenCalledWith('telegram', ['111', '222']);
+    });
+
+    it('grounds questions about the previous failure in the execution receipt', async () => {
+        const mod = await loadComposer({
+            recentMessages: [
+                {
+                    id: 'm1',
+                    chat_jid: 'chat-1',
+                    space_id: 'telegram:chat-1',
+                    sender_tg_id: '111',
+                    content: 'а что ты пытался сделать?',
+                    timestamp: '2026-03-25T09:05:00.000Z',
+                    is_bot: 0,
+                },
+            ],
+            failureReceipt: {
+                space_id: 'telegram:chat-1',
+                turn_id: 'turn-42',
+                reason: 'finalization_failed',
+                tool_rounds: 1,
+                tools: [
+                    {
+                        tool: 'file_search',
+                        status: 'failed',
+                        summary: 'Workspace file access is not available in this space.',
+                    },
+                ],
+                timestamp: '2026-03-25T09:04:00.000Z',
+            },
+        });
+
+        const result = mod.composeConversationContext({
+            spaceId: 'telegram:chat-1',
+            senderId: '111',
+            channelRef: 'chat-1',
+        });
+
+        expect(result.systemPrompt).toContain('[LAST_EXECUTION_RECEIPT]');
+        expect(result.systemPrompt).toContain('file_search: failed');
+        expect(result.systemPrompt).toContain('Workspace file access is not available');
+        expect(result.systemPrompt).toContain('Do not claim that the failure was temporary');
+        expect(mod.mocks.getLatestLlmFailureReceipt).toHaveBeenCalledWith('telegram:chat-1');
     });
 
     it('adds external group self-regulation guidance for attached partner spaces', async () => {

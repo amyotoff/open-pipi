@@ -1295,6 +1295,19 @@ export interface ToolLogSummary {
     by_tool: Array<{ tool_name: string; count: number }>;
 }
 
+export interface LlmFailureReceipt {
+    space_id: string;
+    turn_id: string | null;
+    reason: string;
+    tool_rounds: number;
+    tools: Array<{
+        tool: string;
+        status: 'completed' | 'failed';
+        summary: string;
+    }>;
+    timestamp: string;
+}
+
 export interface MemoryEntry {
     id?: number;
     scope_type: string;
@@ -3446,6 +3459,46 @@ export function logEvent(event_type: string, details: Record<string, any>): void
     `
         )
         .run(event_type, JSON.stringify(details), nowIso());
+}
+
+export function getLatestLlmFailureReceipt(
+    spaceId: string,
+    maxAgeMs: number = 30 * 60 * 1000
+): LlmFailureReceipt | null {
+    const rows = getDb()
+        .prepare(
+            `
+        SELECT details, timestamp
+        FROM event_log
+        WHERE event_type = 'llm_turn_failed'
+        ORDER BY id DESC
+        LIMIT 50
+    `
+        )
+        .all() as Array<{ details: string; timestamp: string }>;
+    const cutoff = Date.now() - maxAgeMs;
+
+    for (const row of rows) {
+        const timestampMs = Date.parse(row.timestamp);
+        if (Number.isFinite(timestampMs) && timestampMs < cutoff) continue;
+
+        try {
+            const details = JSON.parse(row.details) as Partial<LlmFailureReceipt>;
+            if (details.space_id !== spaceId) continue;
+            return {
+                space_id: spaceId,
+                turn_id: typeof details.turn_id === 'string' ? details.turn_id : null,
+                reason: typeof details.reason === 'string' ? details.reason : 'unknown',
+                tool_rounds: Number.isFinite(details.tool_rounds) ? Number(details.tool_rounds) : 0,
+                tools: Array.isArray(details.tools) ? details.tools.slice(0, 8) : [],
+                timestamp: row.timestamp,
+            };
+        } catch {
+            continue;
+        }
+    }
+
+    return null;
 }
 
 function uniqueStringList(values: Array<string | null | undefined>): string[] {

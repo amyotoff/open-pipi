@@ -522,6 +522,40 @@ describe('db module', () => {
         expect(usage.input_tokens).toBe(1000);
     });
 
+    it('returns the latest recent LLM failure receipt for a space', async () => {
+        const dbModule = await loadDbModule();
+        dbModule.initDatabase();
+
+        dbModule.logEvent('llm_turn_failed', {
+            space_id: 'telegram:chat-1',
+            turn_id: 'turn-42',
+            reason: 'finalization_failed',
+            tool_rounds: 1,
+            tools: [
+                {
+                    tool: 'file_search',
+                    status: 'failed',
+                    summary: 'Workspace file access is not available in this space.',
+                },
+            ],
+        });
+
+        expect(dbModule.getLatestLlmFailureReceipt('telegram:chat-1')).toEqual(
+            expect.objectContaining({
+                turn_id: 'turn-42',
+                reason: 'finalization_failed',
+                tool_rounds: 1,
+                tools: [
+                    expect.objectContaining({
+                        tool: 'file_search',
+                        status: 'failed',
+                    }),
+                ],
+            })
+        );
+        expect(dbModule.getLatestLlmFailureReceipt('telegram:other')).toBeNull();
+    });
+
     it('prices gemini-3-pro-preview token usage with the correct tier', async () => {
         const dbModule = await loadDbModule();
         dbModule.initDatabase();

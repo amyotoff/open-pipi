@@ -6,6 +6,7 @@ import {
     getDirectContactStatuses,
     getRecentDirectMessagesForPerson,
     getRecentMessagesForSpace,
+    getLatestLlmFailureReceipt,
     getResident,
     searchMessages,
     Message,
@@ -55,6 +56,8 @@ const ONBOARDING_MAX_AGE_DAYS = 14;
 const ONBOARDING_MEMORY_THRESHOLD = 15;
 const PRIVATE_CONTINUITY_MESSAGE_LIMIT = 8;
 const CROSS_SPACE_MESSAGE_LIMIT = 8;
+const EXECUTION_FOLLOW_UP_PATTERN =
+    /(что\s+ты\s+(пытал|делал|запускал)|что\s+(случилось|произошло)|почему\s+(не|ты)|what\s+(did you try|happened|failed)|why\s+did)/i;
 
 const CROSS_SPACE_TRIGGER_PATTERN =
     /(друг(ой|ом|их)|внешн|партнер|партнёр|клиент|чат[аеуы]?|групп[аеуы]?|там\b|что\s+там|че\s+там|чё\s+там|other chat|another chat|client chat|partner chat)/i;
@@ -450,6 +453,14 @@ export function composeConversationContext(input: ComposeConversationInput): Con
     const effectiveAuthority = getMemberEffectiveAuthority(spaceId, senderId);
     const channelRef = input.channelRef || resolveChannelRefFromExecutionContext({ spaceId, channel: space?.channel });
     const groundingContext = getGroundingContext(spaceId);
+    const latestUserText =
+        [...recentMessages]
+            .reverse()
+            .find((message) => !message.is_bot)
+            ?.content.trim() || '';
+    const lastFailureReceipt = EXECUTION_FOLLOW_UP_PATTERN.test(latestUserText)
+        ? getLatestLlmFailureReceipt(spaceId)
+        : null;
 
     const name = resident?.nickname || resident?.display_name || resident?.username || 'Unknown';
     let residentContext = resident
@@ -574,6 +585,24 @@ export function composeConversationContext(input: ComposeConversationInput): Con
         `\n[HTML_ARTIFACTS]\nFor long or complex plans, research, reports, meeting notes, decision memos, or work breakdowns, prefer html_artifact_create and then reply with a short summary plus the returned link. Do not send a giant wall of text when an HTML artifact would be easier to read.`,
         privateContinuityBlock,
     ];
+
+    if (lastFailureReceipt) {
+        const toolLines =
+            lastFailureReceipt.tools.length > 0
+                ? lastFailureReceipt.tools
+                      .map((entry) => `- ${entry.tool}: ${entry.status}${entry.summary ? ` — ${entry.summary}` : ''}`)
+                      .join('\n')
+                : '- No tool execution receipt was recorded.';
+        systemParts.push(
+            `\n[LAST_EXECUTION_RECEIPT]\n` +
+                `This is the authoritative record for the user's follow-up about the previous failed turn.\n` +
+                `Turn: ${lastFailureReceipt.turn_id || 'unknown'}\n` +
+                `Stop reason: ${lastFailureReceipt.reason}\n` +
+                `Tool rounds: ${lastFailureReceipt.tool_rounds}\n` +
+                `${toolLines}\n` +
+                `Do not claim that the failure was temporary, recovered, retried, or still running unless this receipt explicitly says so.`
+        );
+    }
 
     if (activeProject) {
         const formatLinkList = (values: string[]) => (values.length > 0 ? values.slice(0, 5).join(', ') : 'none');

@@ -209,7 +209,7 @@ function beginAuditLog(
     const spacePolicy = resolveSpacePolicyForContext(context);
     return beginToolExecutionLog({
         space_id: context.spaceId || null,
-        task_id: context.taskId || null,
+        task_id: context.turnId || context.taskId || null,
         tool_name: spec.tool_name,
         run_mode: spec.run_mode,
         audit_mode: auditMode,
@@ -265,6 +265,7 @@ function recordToolOutcome(args: {
 }): void {
     const { logId, auditMode, startedMs, toolName, toolArgs, spec, context, outcome } = args;
     const durationMs = Date.now() - startedMs;
+    const executionRef = context.turnId || context.taskId || null;
 
     addSpanAttributes({
         'app.tool.name': toolName,
@@ -274,6 +275,7 @@ function recordToolOutcome(args: {
         'app.tool.duration_ms': durationMs,
         'app.space_id': context.spaceId,
         'app.task_id': context.taskId,
+        'app.turn_id': context.turnId,
     });
     if (outcome.error) {
         addSpanEvent('tool.error', {
@@ -295,7 +297,7 @@ function recordToolOutcome(args: {
     finalizeAuditLog(logId, auditMode, outcome.status, durationMs, outcome.result, outcome.error);
     insertToolLog({
         space_id: context.spaceId || null,
-        task_id: context.taskId || null,
+        task_id: executionRef,
         tool_name: toolName,
         run_mode: spec.run_mode,
         audit_mode: auditMode,
@@ -317,6 +319,7 @@ function recordToolOutcome(args: {
         capabilities: spec.capabilities,
         audit_mode: auditMode,
         task_id: context.taskId || null,
+        turn_id: context.turnId || null,
         ...(outcome.event || {}),
     });
 }
@@ -336,6 +339,7 @@ export async function executeToolCall(args: {
                 tool_name: toolName,
                 space_id: context.spaceId,
                 task_id: context.taskId,
+                turn_id: context.turnId,
             },
         },
         async () => {

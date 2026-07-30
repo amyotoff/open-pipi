@@ -7,6 +7,7 @@ export interface RuntimeExecutionContext {
     channel?: string;
     channelRef?: string;
     taskId?: string;
+    turnId?: string;
     toolExecutionId?: number;
     /** Exact tool names exposed to a restricted nested model run. */
     allowedTools?: string[];

@@ -9,12 +9,16 @@ async function loadLlm(options?: {
     coreTools?: Array<{ name: string }>;
     backingToolNames?: string[];
     toolResults?: Record<string, string>;
+    dailyCost?: number;
 }) {
     vi.resetModules();
 
     const generateContent = options?.generateContent || vi.fn();
     const logTokenUsage = vi.fn();
     const recordLlmRequest = vi.fn();
+    const sendContextTyping = vi.fn(async () => undefined);
+    const sendContextMessage = vi.fn(async () => ({ success: true }));
+    const notifyPrimaryHousehold = vi.fn(async () => undefined);
     const executeToolCall = vi.fn(async ({ toolName, toolArgs, context, handlers, metaHandler }) => {
         if (options?.toolResults && toolName in options.toolResults) {
             return options.toolResults[toolName];
@@ -35,7 +39,12 @@ async function loadLlm(options?: {
     vi.doMock('../db', () => ({
         logEvent: vi.fn(),
         logTokenUsage,
-        getDailyTokenCost: vi.fn(() => ({ input_tokens: 0, output_tokens: 0, cost_usd: 0, calls: 0 })),
+        getDailyTokenCost: vi.fn(() => ({
+            input_tokens: 0,
+            output_tokens: 0,
+            cost_usd: options?.dailyCost || 0,
+            calls: 0,
+        })),
     }));
     vi.doMock('./healthcheck', () => ({
         guardLLMCall: vi.fn(() => null),
@@ -60,6 +69,11 @@ async function loadLlm(options?: {
         handleCoreToolboxTool: vi.fn(async () => null),
     }));
     vi.doMock('./tool-executor', () => ({ executeToolCall }));
+    vi.doMock('../channels/runtime', () => ({
+        sendContextTyping,
+        sendContextMessage,
+        notifyPrimaryHousehold,
+    }));
     vi.doMock('../observability', () => ({
         addSpanAttributes: vi.fn(),
         addSpanEvent: vi.fn(),
@@ -82,7 +96,16 @@ async function loadLlm(options?: {
     }));
 
     const mod = await import('./llm');
-    return { ...mod, executeToolCall, generateContent, logTokenUsage, recordLlmRequest };
+    return {
+        ...mod,
+        executeToolCall,
+        generateContent,
+        logTokenUsage,
+        recordLlmRequest,
+        sendContextTyping,
+        sendContextMessage,
+        notifyPrimaryHousehold,
+    };
 }
 
 afterEach(() => {
@@ -491,5 +514,168 @@ describe('core/llm advisor strategy', () => {
         // Without this the dashboard can say what the assistant cost but not
         // which conversation ran up the bill.
         expect(mod.logTokenUsage).toHaveBeenCalledWith(expect.any(String), 90, 30, 'telegram:-100');
+    });
+});
+
+describe('core/llm tool-loop completion', () => {
+    const toolCall = (round: number, name = 'workspace_status') => ({
+        usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 },
+        functionCalls: [{ name, args: { round } }],
+    });
+
+    it('allows four tool rounds and forces a tool-free final response', async () => {
+        const generateContent = vi
+            .fn()
+            .mockResolvedValueOnce(toolCall(1))
+            .mockResolvedValueOnce(toolCall(2))
+            .mockResolvedValueOnce(toolCall(3))
+            .mockResolvedValueOnce(toolCall(4))
+            .mockResolvedValueOnce({
+                usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 },
+                functionCalls: [],
+                text: 'Grounded final answer',
+            });
+        const mod = await loadLlm({
+            advisorEnabled: false,
+            generateContent,
+            registeredTools: [{ name: 'workspace_status' }],
+            toolResults: { workspace_status: '[TOOL_RESULT] Workspace is available.' },
+        });
+
+        const result = await mod.processWithLLM([{ role: 'user', content: 'Inspect the workspace thoroughly.' }], {
+            userId: '111',
+            spaceId: 'telegram:chat-1',
+            turnId: 'turn-42',
+        });
+
+        expect(result).toEqual({ text: 'Grounded final answer' });
+        expect(mod.executeToolCall).toHaveBeenCalledTimes(4);
+        expect(generateContent).toHaveBeenCalledTimes(5);
+        expect(generateContent.mock.calls[4][0].config.tools).toBeUndefined();
+        expect(generateContent.mock.calls[4][0].config.systemInstruction.parts[0].text).toContain(
+            'No more tools are available'
+        );
+    });
+
+    it('recovers an empty post-tool response with one tool-free finalization call', async () => {
+        const generateContent = vi
+            .fn()
+            .mockResolvedValueOnce(toolCall(1))
+            .mockResolvedValueOnce({ functionCalls: [] })
+            .mockResolvedValueOnce({ functionCalls: [], text: 'Recovered from the actual tool result.' });
+        const mod = await loadLlm({
+            advisorEnabled: false,
+            generateContent,
+            registeredTools: [{ name: 'workspace_status' }],
+            toolResults: { workspace_status: '[TOOL_RESULT] Workspace is unavailable.' },
+        });
+
+        const result = await mod.processWithLLM([{ role: 'user', content: 'Check the workspace.' }], {
+            userId: '111',
+            spaceId: 'telegram:chat-1',
+        });
+
+        expect(result).toEqual({ text: 'Recovered from the actual tool result.' });
+        expect(generateContent).toHaveBeenCalledTimes(3);
+        expect(generateContent.mock.calls[2][0].config.tools).toBeUndefined();
+    });
+
+    it('returns no chat text when both the follow-up and finalization are empty', async () => {
+        const generateContent = vi
+            .fn()
+            .mockResolvedValueOnce(toolCall(1))
+            .mockResolvedValueOnce({ functionCalls: [] })
+            .mockResolvedValueOnce({ functionCalls: [] });
+        const mod = await loadLlm({
+            advisorEnabled: false,
+            generateContent,
+            registeredTools: [{ name: 'workspace_status' }],
+            toolResults: { workspace_status: '[TOOL_RESULT] Workspace is unavailable.' },
+        });
+
+        const result = await mod.processWithLLM([{ role: 'user', content: 'Check the workspace.' }], {
+            userId: '111',
+            spaceId: 'telegram:chat-1',
+        });
+
+        expect(result).toEqual({ text: '' });
+        expect(result.text).not.toContain('Модель завершила работу');
+    });
+
+    it('recovers a failed post-tool API call without leaking raw tool output', async () => {
+        const generateContent = vi
+            .fn()
+            .mockResolvedValueOnce(toolCall(1))
+            .mockRejectedValueOnce(new Error('upstream follow-up failed'))
+            .mockResolvedValueOnce({
+                functionCalls: [],
+                text: 'Не удалось получить итог от workspace; работа остановлена.',
+            });
+        const mod = await loadLlm({
+            advisorEnabled: false,
+            generateContent,
+            registeredTools: [{ name: 'workspace_status' }],
+            toolResults: {
+                workspace_status: '[TOOL_RESULT] Internal workspace receipt that must not be sent verbatim.',
+            },
+        });
+
+        const result = await mod.processWithLLM([{ role: 'user', content: 'Check the workspace.' }], {
+            userId: '111',
+            spaceId: 'telegram:chat-1',
+        });
+
+        expect(result.text).toBe('Не удалось получить итог от workspace; работа остановлена.');
+        expect(result.text).not.toContain('[TOOL_RESULT]');
+        expect(generateContent.mock.calls[2][0].config.tools).toBeUndefined();
+    });
+
+    it('uses only a transient typing action for long-running tools', async () => {
+        const generateContent = vi
+            .fn()
+            .mockResolvedValueOnce(toolCall(1, 'web'))
+            .mockResolvedValueOnce({ functionCalls: [], text: 'Research complete.' });
+        const mod = await loadLlm({
+            advisorEnabled: false,
+            generateContent,
+            registeredTools: [{ name: 'web' }],
+            toolResults: { web: '[TOOL_RESULT] Research evidence.' },
+        });
+
+        await mod.processWithLLM([{ role: 'user', content: 'Research this.' }], {
+            userId: '111',
+            spaceId: 'telegram:chat-1',
+            channel: 'telegram',
+            channelRef: 'chat-1',
+        });
+
+        expect(mod.sendContextTyping).toHaveBeenCalledTimes(1);
+        expect(mod.sendContextMessage).not.toHaveBeenCalled();
+    });
+
+    it('emits each daily cost warning tier at most once per process day', async () => {
+        vi.useFakeTimers();
+        try {
+            const generateContent = vi.fn().mockResolvedValue({ functionCalls: [], text: 'Done.' });
+            const mod = await loadLlm({
+                advisorEnabled: false,
+                generateContent,
+                dailyCost: 2.1,
+            });
+
+            await mod.processWithLLM([{ role: 'user', content: 'First request' }], {
+                userId: '111',
+                spaceId: 'telegram:chat-1',
+            });
+            await mod.processWithLLM([{ role: 'user', content: 'Second request' }], {
+                userId: '111',
+                spaceId: 'telegram:chat-1',
+            });
+            await vi.runAllTimersAsync();
+
+            expect(mod.notifyPrimaryHousehold).toHaveBeenCalledTimes(1);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });

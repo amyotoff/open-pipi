@@ -248,6 +248,7 @@ export async function handleButlerMessage(
                     channel: input.channel,
                     channelRef: input.channelRef,
                     taskId: input.taskId,
+                    turnId: input.correlationId,
                 });
                 responseText = response.text;
                 addSpanAttributes({ 'app.butler.engine': 'gemini' });
