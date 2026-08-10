@@ -62,6 +62,11 @@ export interface TelegramNormalizerInput {
 
 const TRANSPORT = 'telegram';
 
+function containsExactMention(text: string, username: string): boolean {
+    const escaped = username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(^|[^A-Za-z0-9_])@${escaped}(?![A-Za-z0-9_])`, 'i').test(text);
+}
+
 /** Telegram's chat types collapse into the closed set Core shares with every transport. */
 export function normalizeTelegramEndpointType(chatType: string | undefined): TransportEndpointType {
     if (chatType === 'private') return 'direct';
@@ -129,15 +134,13 @@ export function isAddressedToTelegramBot(input: TelegramNormalizerInput): boolea
     const botId = input.bot?.id === undefined ? undefined : String(input.bot.id);
 
     if (botUsername) {
-        const text = readTelegramText(input.message).toLowerCase();
-        if (text.includes(`@${botUsername.toLowerCase()}`)) return true;
+        if (containsExactMention(readTelegramText(input.message), botUsername)) return true;
     }
 
     const replyTo = input.message.reply_to_message;
     if (!replyTo?.from) return false;
 
-    if (replyTo.from.is_bot) return true;
-    if (botUsername && replyTo.from.username === botUsername) return true;
+    if (botUsername && replyTo.from.username?.toLowerCase() === botUsername.toLowerCase()) return true;
     return Boolean(botId && replyTo.from.id !== undefined && String(replyTo.from.id) === botId);
 }
 

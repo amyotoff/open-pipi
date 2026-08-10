@@ -106,7 +106,7 @@ export function resolveAllowedCapabilities(policy: SpacePolicy): ToolCapability[
         return policy.allowed_capabilities;
     }
 
-    const capabilities = new Set<ToolCapability>(['shell_none', 'artifact_write']);
+    const capabilities = new Set<ToolCapability>(['shell_none', 'artifact_write', 'home_automation']);
 
     for (const rule of IMPLICIT_CAPABILITY_RULES) {
         if (!rule.enabled(policy)) {

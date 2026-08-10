@@ -141,6 +141,90 @@ function inspectOptionalChannel(
           );
 }
 
+const HOME_ASSISTANT_ENTITY_ID = /^[a-z][a-z0-9_]*\.[a-z0-9_]+$/;
+const HOME_ASSISTANT_CONTROL_DOMAINS = new Set(['light', 'switch']);
+
+function inspectHomeAssistant(env: DoctorInput['env']): DoctorCheck | null {
+    const tokenConfigured = hasConfiguredValue(env.HOME_ASSISTANT_TOKEN);
+    const readEntities = (env.HOME_ASSISTANT_READ_ENTITIES || '')
+        .split(',')
+        .map((entry) => entry.trim().toLowerCase())
+        .filter(Boolean);
+    const controlEntities = (env.HOME_ASSISTANT_CONTROL_ENTITIES || '')
+        .split(',')
+        .map((entry) => entry.trim().toLowerCase())
+        .filter(Boolean);
+
+    if (!tokenConfigured && readEntities.length === 0 && controlEntities.length === 0) return null;
+    if (!tokenConfigured) {
+        return check(
+            'home-assistant',
+            'Home Assistant',
+            'fail',
+            'HOME_ASSISTANT_TOKEN is required when Home Assistant entity allowlists are configured.'
+        );
+    }
+
+    let url: URL;
+    try {
+        url = new URL((env.HOME_ASSISTANT_URL || 'http://127.0.0.1:8123').trim());
+    } catch {
+        return check('home-assistant', 'Home Assistant', 'fail', 'HOME_ASSISTANT_URL is not a valid absolute URL.');
+    }
+    if (
+        !['http:', 'https:'].includes(url.protocol) ||
+        Boolean(url.username || url.password || url.search || url.hash) ||
+        Boolean(url.pathname && url.pathname !== '/')
+    ) {
+        return check(
+            'home-assistant',
+            'Home Assistant',
+            'fail',
+            'HOME_ASSISTANT_URL must be an http(s) server-root URL without credentials, query, or fragment.'
+        );
+    }
+
+    const invalidEntities = [...readEntities, ...controlEntities].filter(
+        (entityId) => !HOME_ASSISTANT_ENTITY_ID.test(entityId)
+    );
+    if (invalidEntities.length > 0) {
+        return check(
+            'home-assistant',
+            'Home Assistant',
+            'fail',
+            `Home Assistant allowlists contain invalid entity IDs: ${invalidEntities.join(', ')}.`
+        );
+    }
+
+    const unsafeControlDomains = controlEntities.filter(
+        (entityId) => !HOME_ASSISTANT_CONTROL_DOMAINS.has(entityId.split('.')[0])
+    );
+    if (unsafeControlDomains.length > 0) {
+        return check(
+            'home-assistant',
+            'Home Assistant',
+            'fail',
+            `Control is limited to light and switch entities; remove: ${unsafeControlDomains.join(', ')}.`
+        );
+    }
+
+    if (readEntities.length === 0 && controlEntities.length === 0) {
+        return check(
+            'home-assistant',
+            'Home Assistant',
+            'warn',
+            'The token is configured, but both entity allowlists are empty; only the status check is available.'
+        );
+    }
+
+    return check(
+        'home-assistant',
+        'Home Assistant',
+        'pass',
+        `${new Set([...readEntities, ...controlEntities]).size} exact entities are exposed to Open PiPi.`
+    );
+}
+
 export function inspectDoctor(input: DoctorInput, io: DoctorIO = defaultIO): DoctorCheck[] {
     const checks: DoctorCheck[] = [];
     const nodeMajor = Number(input.nodeVersion.split('.')[0]);
@@ -307,6 +391,9 @@ export function inspectDoctor(input: DoctorInput, io: DoctorIO = defaultIO): Doc
         io
     );
     if (gmail) checks.push(gmail);
+
+    const homeAssistant = inspectHomeAssistant(input.env);
+    if (homeAssistant) checks.push(homeAssistant);
 
     return checks;
 }

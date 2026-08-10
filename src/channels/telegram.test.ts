@@ -77,7 +77,7 @@ vi.mock('./members-command', () => ({
 }));
 
 vi.mock('./operator-commands', () => ({
-    runApprovalTelegramCommand: vi.fn(),
+    runApprovalTelegramCommandAsync: vi.fn(),
     runBackupTelegramCommand: vi.fn(),
     runChannelTelegramCommand: vi.fn(),
     runPackTelegramCommandAsync: vi.fn(),

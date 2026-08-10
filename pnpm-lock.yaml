@@ -9,7 +9,7 @@ overrides:
   '@opentelemetry/core': ^2.9.0
   protobufjs: ^7.6.3
   qs: ^6.15.2
-  undici: ^7.28.0
+  undici: ^7.29.0
   ws: ^8.21.0
 
 importers:
@@ -2248,8 +2248,8 @@ packages:
   undici-types@7.18.2:
     resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
 
-  undici@7.28.0:
-    resolution: {integrity: sha512-cRZYrTDwWznlnRiPjggAGxZXanty6M8RV1ff8Wm4LWXBp7/IG8v5DnOm74DtUBp9OONpK75YlPnIjQqX0dBDtA==}
+  undici@7.29.0:
+    resolution: {integrity: sha512-IDxfleLmmbSskfWSUATiN1nfn2rDuvnMOqb5CWR92iIfojA0Ud+ulOAAEQ57LPr9rWmsreUyf5lwyao+7GNNVw==}
     engines: {node: '>=20.18.1'}
 
   unpipe@1.0.0:
@@ -2498,7 +2498,7 @@ snapshots:
       discord-api-types: 0.38.49
       magic-bytes.js: 1.13.0
       tslib: 2.8.1
-      undici: 7.28.0
+      undici: 7.29.0
     optional: true
 
   '@discordjs/util@1.2.0':
@@ -3613,7 +3613,7 @@ snapshots:
       lodash.snakecase: 4.1.1
       magic-bytes.js: 1.13.0
       tslib: 2.8.1
-      undici: 7.28.0
+      undici: 7.29.0
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -4751,7 +4751,7 @@ snapshots:
 
   undici-types@7.18.2: {}
 
-  undici@7.28.0:
+  undici@7.29.0:
     optional: true
 
   unpipe@1.0.0: {}

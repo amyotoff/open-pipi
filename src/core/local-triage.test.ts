@@ -22,6 +22,20 @@ describe('core/local-triage', () => {
         expect(classifyWithOllama).not.toHaveBeenCalled();
     });
 
+    it('routes smart-home commands to the tool-capable model', async () => {
+        const { classifyMessageRoute } = await import('./local-triage');
+
+        await expect(classifyMessageRoute('Выключи лампу в спальне')).resolves.toEqual({
+            route: 'complex',
+            source: 'rule_complex',
+        });
+        await expect(classifyMessageRoute('Set the kitchen brightness to 40%')).resolves.toEqual({
+            route: 'complex',
+            source: 'rule_complex',
+        });
+        expect(classifyWithOllama).not.toHaveBeenCalled();
+    });
+
     it('uses local semantic triage and defaults safely to complex', async () => {
         const { classifyMessageRoute } = await import('./local-triage');
         classifyWithOllama.mockResolvedValueOnce('SIMPLE');

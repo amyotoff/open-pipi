@@ -162,9 +162,12 @@ describe('telegram normalizer', () => {
             expect(
                 isAddressedToTelegramBot(buildInput({ message: { message_id: 1, text: 'hey @PiPi_Bot help' } }))
             ).toBe(true);
+            expect(
+                isAddressedToTelegramBot(buildInput({ message: { message_id: 1, text: 'hey @pipi_bot_backup' } }))
+            ).toBe(false);
         });
 
-        it('recognizes a reply to the assistant by username, by id, or by bot flag', () => {
+        it('recognizes a reply to the assistant only by its exact username or id', () => {
             const replyingTo = (from: Record<string, unknown>) =>
                 isAddressedToTelegramBot(
                     buildInput({
@@ -174,7 +177,7 @@ describe('telegram normalizer', () => {
 
             expect(replyingTo({ id: 900900 })).toBe(true);
             expect(replyingTo({ id: 5, username: 'pipi_bot' })).toBe(true);
-            expect(replyingTo({ id: 5, is_bot: true })).toBe(true);
+            expect(replyingTo({ id: 5, username: 'other_bot', is_bot: true })).toBe(false);
         });
 
         it('stays false for ordinary chatter and replies between people', () => {

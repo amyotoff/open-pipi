@@ -8,6 +8,10 @@ async function loadOperatorCommands(options?: {
     handlers?: Record<string, any>;
     assistantPack?: Record<string, any>;
     runtimeBackup?: Record<string, any>;
+    approvalContinuation?: {
+        execute?: ReturnType<typeof vi.fn>;
+        format?: ReturnType<typeof vi.fn>;
+    };
 }) {
     vi.resetModules();
     vi.doMock('../db', () => makeDbModuleMock(db));
@@ -42,6 +46,19 @@ async function loadOperatorCommands(options?: {
         getLatestRuntimeBackup: vi.fn(() => null),
         listRuntimeBackups: vi.fn(() => []),
         ...options?.runtimeBackup,
+    }));
+    vi.doMock('../core/approval-continuation', () => ({
+        executeApprovedToolContinuations:
+            options?.approvalContinuation?.execute ||
+            vi.fn(async () => [
+                {
+                    actionClass: 'home_assistant_control_test',
+                    toolName: 'home_assistant_control',
+                    result: '[TOOL_RESULT] executed',
+                },
+            ]),
+        formatApprovedToolContinuationReply:
+            options?.approvalContinuation?.format || vi.fn(() => 'Approved Home Assistant action executed.'),
     }));
 
     return await import('./operator-commands');
@@ -315,6 +332,56 @@ describe('channels/operator-commands', () => {
         expect(approvals.listPendingApprovalActions({ chatId: 'chat-new', userId: '111' })).toEqual([]);
     });
 
+    it('executes a resumable approval once through the async command path', async () => {
+        const execute = vi.fn(async () => [
+            {
+                actionClass: 'home_assistant_control_exact',
+                toolName: 'home_assistant_control',
+                result: '[TOOL_RESULT] executed',
+            },
+        ]);
+        const commands = await loadOperatorCommands({ approvalContinuation: { execute } });
+        const approvals = await import('../utils/approvals');
+        const context = { chatId: 'chat-ha', userId: '111', spaceId: 'telegram:chat-ha' };
+        approvals.requireResumableSingleUseToolApproval(
+            'home_assistant_control',
+            context,
+            'turning off light.kitchen',
+            'home_assistant_control_exact',
+            { entity_id: 'light.kitchen', action: 'turn_off' }
+        );
+
+        const result = await commands.runApprovalTelegramCommandAsync('approve', {
+            chatId: 'chat-ha',
+            chatType: 'private',
+            userId: '111',
+            text: '/approve home_assistant_control_exact',
+        });
+        const replay = await commands.runApprovalTelegramCommandAsync('approve', {
+            chatId: 'chat-ha',
+            chatType: 'private',
+            userId: '111',
+            text: '/approve home_assistant_control_exact',
+        });
+
+        expect(result).toContain('Approved Home Assistant action executed');
+        expect(replay).toContain('No pending approvals');
+        expect(execute).toHaveBeenCalledTimes(1);
+        const audit = db
+            .prepare(
+                "SELECT event_type, details FROM event_log WHERE event_type = 'approval_decision' ORDER BY id DESC"
+            )
+            .get() as { event_type: string; details: string };
+        expect(JSON.parse(audit.details)).toMatchObject({
+            space_id: 'telegram:chat-ha',
+            user_id: '111',
+            action_class: 'home_assistant_control_exact',
+            tool_name: 'home_assistant_control',
+            decision: 'approved',
+            source: 'command',
+        });
+    });
+
     it('shows current pack and available packs for /pack', async () => {
         const commands = await loadOperatorCommands();
 
@@ -329,6 +396,24 @@ describe('channels/operator-commands', () => {
         expect(result).toContain('jeeves (jeeves_persona) ← current');
         expect(result).toContain('tutor (tutor_persona)');
         expect(result).toContain('/pack mutate <id>');
+    });
+
+    it('allows an explicit same-pack refresh for pinned spaces', async () => {
+        const spaceSetPack = vi.fn(async () => '[TOOL_RESULT] refreshed jeeves snapshot');
+        const commands = await loadOperatorCommands({ handlers: { space_set_pack: spaceSetPack } });
+
+        const result = await commands.runPackTelegramCommandAsync({
+            chatId: 'chat-refresh',
+            chatType: 'private',
+            userId: '111',
+            text: '/pack mutate jeeves',
+        });
+
+        expect(result).toContain('refreshed jeeves snapshot');
+        expect(spaceSetPack).toHaveBeenCalledWith(
+            { pack_id: 'jeeves' },
+            { chatId: 'chat-refresh', userId: '111', spaceId: 'telegram:chat-refresh' }
+        );
     });
 
     it('returns backup status hint when no backups exist yet', async () => {

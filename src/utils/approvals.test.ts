@@ -46,6 +46,110 @@ describe('tool approvals', () => {
         expect(followUp).toBeNull();
     });
 
+    it('consumes single-use approval after one matching action', async () => {
+        const approvals = await loadApprovalsModule();
+        const context = { chatId: 'chat-physical', userId: 'user-physical' };
+        const actionClass = 'home_assistant_control_a1b2c3';
+
+        approvals.requireSingleUseToolApproval(
+            'home_assistant_control',
+            context,
+            'turning on light.kitchen',
+            actionClass
+        );
+        approvals.approvePendingAction(context, actionClass);
+
+        expect(
+            approvals.requireSingleUseToolApproval(
+                'home_assistant_control',
+                context,
+                'turning on light.kitchen',
+                actionClass
+            )
+        ).toBeNull();
+        expect(
+            approvals.requireSingleUseToolApproval(
+                'home_assistant_control',
+                context,
+                'turning on light.kitchen',
+                actionClass
+            )
+        ).toMatch(/Требуется явное подтверждение/i);
+    });
+
+    it('returns one cloned continuation only to the matching scope and user', async () => {
+        const approvals = await loadApprovalsModule();
+        const context = { spaceId: 'telegram:home', chatId: 'home', userId: 'owner' };
+        const toolArgs = { entity_id: 'light.kitchen', action: 'turn_off', nested: { marker: 'original' } };
+
+        approvals.requireResumableSingleUseToolApproval(
+            'home_assistant_control',
+            context,
+            'turning off light.kitchen',
+            'home_assistant_control_exact',
+            toolArgs
+        );
+        toolArgs.nested.marker = 'mutated';
+
+        expect(approvals.recordApprovalResponse({ ...context, userId: 'someone-else' }, 'да')).toEqual({
+            granted: [],
+            denied: [],
+        });
+        const approved = approvals.recordApprovalResponse(context, 'да');
+
+        expect(approved).toMatchObject({ granted: ['home_assistant_control_exact'], denied: [] });
+        expect(approved.continuations).toEqual([
+            {
+                actionClass: 'home_assistant_control_exact',
+                toolName: 'home_assistant_control',
+                toolArgs: {
+                    entity_id: 'light.kitchen',
+                    action: 'turn_off',
+                    nested: { marker: 'original' },
+                },
+            },
+        ]);
+        expect(approvals.recordApprovalResponse(context, 'да')).toEqual({ granted: [], denied: [] });
+    });
+
+    it('fails closed on mixed affirmative and negative language', async () => {
+        const approvals = await loadApprovalsModule();
+        const context = { chatId: 'chat-mixed', userId: 'owner' };
+
+        for (const text of ['да не надо', 'yes, cancel']) {
+            approvals.requireResumableSingleUseToolApproval(
+                'home_assistant_control',
+                context,
+                'turning off light.kitchen',
+                'home_assistant_control_exact',
+                { entity_id: 'light.kitchen', action: 'turn_off' }
+            );
+            const response = approvals.recordApprovalResponse(context, text);
+
+            expect(response).toEqual({ granted: [], denied: ['home_assistant_control_exact'] });
+            expect(response.continuations).toBeUndefined();
+        }
+    });
+
+    it('requires an unambiguous full affirmative for a resumable physical call', async () => {
+        const approvals = await loadApprovalsModule();
+        const context = { chatId: 'chat-physical-words', userId: 'owner' };
+        approvals.requireResumableSingleUseToolApproval(
+            'home_assistant_control',
+            context,
+            'turning off light.kitchen',
+            'home_assistant_control_exact',
+            { entity_id: 'light.kitchen', action: 'turn_off' }
+        );
+
+        expect(approvals.recordApprovalResponse(context, 'ок')).toEqual({ granted: [], denied: [] });
+        expect(approvals.listPendingApprovalActions(context)).toEqual(['home_assistant_control_exact']);
+        expect(approvals.recordApprovalResponse(context, 'да')).toMatchObject({
+            granted: ['home_assistant_control_exact'],
+            denied: [],
+        });
+    });
+
     it('does not auto-grant when more than one action class is pending', async () => {
         const approvals = await loadApprovalsModule();
         const context = { chatId: 'chat-3', userId: 'user-3' };

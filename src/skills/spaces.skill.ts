@@ -16,6 +16,7 @@ import { resolveSpaceIdFromExecutionContext, RuntimeExecutionContext } from '../
 import { validateWorkspaceRootPath } from '../core/workspace-path';
 import { normalizeAuditMode } from '../core/tool-execution';
 import { appendTimelineEvent } from '../core/timeline';
+import { refreshSpaceBehaviorSnapshot } from '../core/space-behavior';
 
 type ExecutionContext = Partial<RuntimeExecutionContext>;
 
@@ -208,19 +209,25 @@ ${participantLines}`;
 
             const previousPackId = getSpace(access.spaceId)?.assistant_pack_id || 'jeeves';
             updateSpaceAssistantPack(access.spaceId, packId);
+            refreshSpaceBehaviorSnapshot(access.spaceId);
             const { ensureDefaultAssistantTasksForSpace, registerScheduledTasks } = await import('../core/tasks');
             ensureDefaultAssistantTasksForSpace(access.spaceId);
             registerScheduledTasks();
             const pack = getAssistantPack(packId);
             appendTimelineEvent({
                 spaceId: access.spaceId,
-                type: 'space.pack_changed',
+                type: previousPackId === packId ? 'space.pack_refreshed' : 'space.pack_changed',
                 refType: 'space',
                 refId: access.spaceId,
-                summary: `Switched pack from "${previousPackId}" to "${pack.id}".`,
+                summary:
+                    previousPackId === packId
+                        ? `Refreshed pack "${pack.id}" from its installed source.`
+                        : `Switched pack from "${previousPackId}" to "${pack.id}".`,
                 details: { from: previousPackId, to: pack.id },
             });
-            return `[TOOL_RESULT] Space ${access.spaceId} now uses pack "${pack.id}" with persona "${pack.persona_id}". Default scheduled tasks were reseeded for this space.`;
+            return previousPackId === packId
+                ? `[TOOL_RESULT] Space ${access.spaceId} refreshed pack "${pack.id}" from its installed source. Default scheduled tasks were reconciled.`
+                : `[TOOL_RESULT] Space ${access.spaceId} now uses pack "${pack.id}" with persona "${pack.persona_id}". Default scheduled tasks were reseeded for this space.`;
         },
 
         async space_set_policy(

@@ -31,8 +31,13 @@ describe('skill tool registry', () => {
                 approval: 'explicit',
                 approval_action: 'remember_private_data',
                 approval_reason: 'storing private data',
+                approval_action_fields: ['content'],
+                approval_single_use: true,
+                approval_resume: true,
             },
         };
+        const preflight = vi.fn((args: Record<string, unknown>) => args);
+        skill.preflight = { memory_remember: preflight };
 
         const registry = buildSkillToolRegistry([skill], defaults);
         const registration = registry.get('memory_remember');
@@ -47,6 +52,10 @@ describe('skill tool registry', () => {
         });
         expect(registration?.approvalAction).toBe('remember_private_data');
         expect(registration?.approvalReason).toBe('storing private data');
+        expect(registration?.approvalActionFields).toEqual(['content']);
+        expect(registration?.approvalSingleUse).toBe(true);
+        expect(registration?.approvalResume).toBe(true);
+        expect(registration?.preflight).toBe(preflight);
         await expect(registration?.handler({}, undefined)).resolves.toBe('memory_remember result');
     });
 
@@ -92,6 +101,15 @@ describe('skill tool registry', () => {
 
         expect(() => buildSkillToolRegistry([skill], defaults)).toThrow(
             'Skill "memory" defines metadata for unknown tool "memory_forget".'
+        );
+    });
+
+    it('rejects preflight for an unknown tool', () => {
+        const skill = makeSkill('memory', 'memory_remember');
+        skill.preflight = { memory_forget: vi.fn((args) => args) };
+
+        expect(() => buildSkillToolRegistry([skill], defaults)).toThrow(
+            'Skill "memory" defines preflight for unknown tool "memory_forget".'
         );
     });
 });

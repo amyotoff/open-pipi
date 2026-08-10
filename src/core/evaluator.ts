@@ -372,7 +372,10 @@ async function evaluateToolPolicyBlock(context: ScenarioContext): Promise<Evalua
         )
         .get(space.id) as { status: string; error: string | null; tool_name: string } | undefined;
 
-    if (!result.includes('blocked by current execution policy')) {
+    if (
+        !result.includes('blocked by current execution policy') &&
+        !result.includes('not allowed in the current execution context')
+    ) {
         throw new Error(`Expected policy block result, got "${result}".`);
     }
     if (handlerCalled) {

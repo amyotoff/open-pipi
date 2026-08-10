@@ -25,6 +25,19 @@ All notable changes to Open PiPi will be documented in this file.
 - `docs/addons.md`: what makes something an addon, and how to write a **subagent** — a delegate that
   runs where the orchestrator cannot supervise it, briefed with a task contract and answering with a
   result contract. The voice addon is the worked example.
+- Optional Home Assistant addon and Jeeves `home_operator` subagent for exact-allowlisted reads and
+  `light`/`switch` actions on a local Home Assistant instance. Existing pinned Jeeves spaces can
+  explicitly refresh their installed pack with `/pack mutate jeeves`.
+
+### Security
+
+- Physical Home Assistant actions require a host owner to approve one exact canonical call. The
+  approval is single-use, resumes without asking a model to reconstruct its arguments, and is
+  revalidated against the current pack, policy, owner role, and entity allowlist before execution.
+- Smart-home tool inputs reject unknown fields and arbitrary services, URLs, targets, and service
+  data; tokens remain adapter-only and sanitized entity state is treated as untrusted device data.
+- The production `undici` override now requires `7.29.0` or newer, resolving
+  `GHSA-4cwx-7wf7-3272` inherited through `discord.js`.
 
 ## [2.6.0] — 2026-07-29
 

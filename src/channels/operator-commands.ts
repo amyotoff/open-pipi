@@ -5,6 +5,7 @@ import {
     getDb,
     getSpace,
     listSpaces,
+    logEvent,
     Space,
     updateSpacePolicy,
 } from '../db';
@@ -17,12 +18,15 @@ import { getRegisteredHandlers } from '../skills/_registry';
 import {
     approvePendingAction,
     denyPendingAction,
+    listPendingApprovalDetails,
     listPendingApprovalActions,
     type ApprovalActionClass,
+    type ApprovedToolContinuation,
 } from '../utils/approvals';
 import { getChannel } from './_registry';
 import { getAssistantPack, getAssistantPackIds, materializeAgentForPack } from '../core/assistant-pack';
 import { createRuntimeBackup, getLatestRuntimeBackup, listRuntimeBackups } from '../core/runtime-backup';
+import { executeApprovedToolContinuations, formatApprovedToolContinuationReply } from '../core/approval-continuation';
 
 type TelegramOperatorContext = {
     chatId: string;
@@ -377,17 +381,27 @@ function resolveRequestedApprovalAction(
     return pending.includes(value) ? value : null;
 }
 
-export function runApprovalTelegramCommand(command: 'approve' | 'deny', context: TelegramOperatorContext): string {
-    ensureTelegramOperatorSpace(context);
+function resolveApprovalTelegramCommand(
+    command: 'approve' | 'deny',
+    context: TelegramOperatorContext
+): { text: string; continuations: ApprovedToolContinuation[] } {
+    const spaceId = ensureTelegramOperatorSpace(context);
 
     const scope = { chatId: context.chatId, userId: context.userId, spaceId: buildTelegramSpaceId(context.chatId) };
     const pending = listPendingApprovalActions(scope);
+    const pendingTools = new Map(
+        listPendingApprovalDetails(scope).map(({ actionClass, toolName }) => [actionClass, toolName])
+    );
     const parts = parseSubcommand(context.text, command);
     const requestedAction = resolveRequestedApprovalAction(parts[0], pending);
     if (requestedAction === null) {
-        return pending.length > 0
-            ? `[TOOL_RESULT] Approval "${parts[0]}" is not pending. Pending: ${pending.join(', ')}.`
-            : '[TOOL_RESULT] No pending approvals for this space.';
+        return {
+            text:
+                pending.length > 0
+                    ? `[TOOL_RESULT] Approval "${parts[0]}" is not pending. Pending: ${pending.join(', ')}.`
+                    : '[TOOL_RESULT] No pending approvals for this space.',
+            continuations: [],
+        };
     }
 
     const result =
@@ -398,18 +412,64 @@ export function runApprovalTelegramCommand(command: 'approve' | 'deny', context:
     if (result.error) {
         const remaining = listPendingApprovalActions(scope);
         if (remaining.length === 0) {
-            return '[TOOL_RESULT] No pending approvals for this space.';
+            return { text: '[TOOL_RESULT] No pending approvals for this space.', continuations: [] };
         }
 
         if (!requestedAction && remaining.length > 1) {
-            return `[TOOL_RESULT] More than one approval is pending: ${remaining.join(', ')}. Use /${command} <action>.`;
+            return {
+                text: `[TOOL_RESULT] More than one approval is pending: ${remaining.join(', ')}. Use /${command} <action>.`,
+                continuations: [],
+            };
         }
 
-        return `[TOOL_RESULT] ${result.error} Pending: ${remaining.join(', ')}.`;
+        return {
+            text: `[TOOL_RESULT] ${result.error} Pending: ${remaining.join(', ')}.`,
+            continuations: [],
+        };
     }
 
     const actions = command === 'approve' ? result.granted : result.denied;
-    return `[TOOL_RESULT] ${command === 'approve' ? 'Approved' : 'Denied'}: ${actions.join(', ')}.`;
+    for (const actionClass of actions) {
+        logEvent('approval_decision', {
+            space_id: spaceId,
+            user_id: context.userId,
+            channel: 'telegram',
+            channel_ref: context.chatId,
+            action_class: actionClass,
+            tool_name:
+                result.continuations?.find((item) => item.actionClass === actionClass)?.toolName ||
+                pendingTools.get(actionClass) ||
+                null,
+            decision: command === 'approve' ? 'approved' : 'denied',
+            source: 'command',
+        });
+    }
+    return {
+        text: `[TOOL_RESULT] ${command === 'approve' ? 'Approved' : 'Denied'}: ${actions.join(', ')}.`,
+        continuations: result.continuations || [],
+    };
+}
+
+export function runApprovalTelegramCommand(command: 'approve' | 'deny', context: TelegramOperatorContext): string {
+    return resolveApprovalTelegramCommand(command, context).text;
+}
+
+export async function runApprovalTelegramCommandAsync(
+    command: 'approve' | 'deny',
+    context: TelegramOperatorContext
+): Promise<string> {
+    const resolution = resolveApprovalTelegramCommand(command, context);
+    if (resolution.continuations.length === 0) return resolution.text;
+
+    const results = await executeApprovedToolContinuations(resolution.continuations, {
+        userId: context.userId,
+        spaceId: buildTelegramSpaceId(context.chatId),
+        chatId: context.chatId,
+        channel: 'telegram',
+        channelRef: context.chatId,
+    });
+    const executed = formatApprovedToolContinuationReply(results);
+    return executed ? `[TOOL_RESULT] ${executed}` : resolution.text;
 }
 
 // ---------------------------------------------------------------------------
@@ -438,7 +498,7 @@ export function runPackTelegramCommand(context: TelegramOperatorContext): string
             ? `⚠ Pack "${currentPackId}" is not installed. Bot is running naked.\nPick a pack: /pack mutate <id>`
             : `Current pack: ${currentPackId} (${currentAgent.persona_id})`;
 
-        return `${header}\n\nAvailable packs:\n${packLines.join('\n')}\n\nSwitch: /pack mutate <id>`;
+        return `${header}\n\nAvailable packs:\n${packLines.join('\n')}\n\nSwitch or refresh the current pack: /pack mutate <id>`;
     }
 
     if (subcommand === 'mutate') {
@@ -449,10 +509,6 @@ export function runPackTelegramCommand(context: TelegramOperatorContext): string
 
         if (!availableIds.includes(targetId)) {
             return `Unknown pack "${targetId}".\nAvailable: ${availableIds.join(', ')}`;
-        }
-
-        if (targetId === currentPackId && !isNaked) {
-            return `Already on pack "${targetId}". Nothing to do.`;
         }
 
         const handlers = getRegisteredHandlers();
@@ -467,7 +523,7 @@ export function runPackTelegramCommand(context: TelegramOperatorContext): string
         return `__async:pack:${targetId}`;
     }
 
-    return `Usage:\n/pack\n/pack mutate <id>`;
+    return `Usage:\n/pack\n/pack mutate <id> — switch, or refresh when <id> is already current`;
 }
 
 export async function runPackTelegramCommandAsync(context: TelegramOperatorContext): Promise<string> {
