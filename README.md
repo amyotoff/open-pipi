@@ -577,6 +577,33 @@ Voice calls are also the repo's worked example of a **subagent**: a delegate tha
 
 Three gates stand between an addon and doing anything: the pack must enable the capability, the provider must be configured, and the owner must approve the individual action. All three are shut by default.
 
+### Home Assistant on the same Raspberry Pi
+
+Jeeves delegates an explicit smart-home request to the bounded `home_operator` family member. The
+subagent can discover and read only exact allowlisted entities. Physical control is limited to
+`turn_on`, `turn_off`, and light brightness, and every exact action needs one-time confirmation from
+the host owner.
+
+Create a dedicated non-admin Home Assistant user and long-lived access token, then configure Open
+PiPi privately — never paste the token into chat:
+
+```dotenv
+HOME_ASSISTANT_URL=http://127.0.0.1:8123
+HOME_ASSISTANT_TOKEN=...
+HOME_ASSISTANT_READ_ENTITIES=sensor.hall_temperature,sensor.living_room_humidity
+HOME_ASSISTANT_CONTROL_ENTITIES=light.kitchen,switch.coffee
+```
+
+For a native install on the same Pi, loopback is normally correct. From a container, use a private
+Home Assistant service name or LAN address reachable from that container; its own `127.0.0.1` is not
+the Pi host. Do not expose port 8123 directly to the internet.
+
+Validate the secret-safe configuration with `pnpm setup:check -- --json`, restart Open PiPi, and run
+`/pack mutate jeeves` once in existing Jeeves spaces so their pinned pack snapshot gains
+`home_operator`. Start with a read such as “what is the hall temperature?” before approving a
+control action. The complete threat model, entity restrictions, Docker note, and troubleshooting
+steps are in [the Home Assistant guide](docs/home-assistant.md).
+
 ### Cost, and the daily limit that stops it
 
 Every model call is recorded with its token counts and a cost, attributed to the space whose turn it was. Local `Ollama` calls are recorded at zero rather than priced by guess.
