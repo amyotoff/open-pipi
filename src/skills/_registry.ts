@@ -35,6 +35,7 @@ import helperSkill from './helper.skill';
 import helperStatusSkill from './helper_status.skill';
 import brainSkill from './brain.skill';
 import familySkill from './family.skill';
+import homeAssistantSkill from './home-assistant.skill';
 // Optional addon: dormant unless a pack lists `phone` in enabled_capabilities
 // and a voice provider is configured. See docs/addons.md.
 import phoneSkill from './phone.skill';
@@ -66,6 +67,7 @@ const ALL_SKILLS: SkillManifest[] = [
     helperStatusSkill,
     brainSkill,
     familySkill,
+    homeAssistantSkill,
 ];
 
 const DEFAULT_CAPABILITY_META: CapabilityMeta = {
@@ -141,7 +143,19 @@ function isSkillAllowedForContext(skill: SkillManifest, context: RuntimeExecutio
         return false;
     }
 
+    if (
+        meta.delegated_only &&
+        (!context.allowedTools ||
+            !skill.tools.some((tool) => Boolean(tool.name && context.allowedTools!.includes(tool.name))))
+    ) {
+        return false;
+    }
+
     if (meta.visibility === 'owner' && !isOwnerContext(context)) {
+        return false;
+    }
+
+    if (meta.host_owner_only && getResident(context.userId)?.role !== 'owner') {
         return false;
     }
 
@@ -170,11 +184,36 @@ function getSkillToolRegistrationForContext(
     context?: RuntimeExecutionContext
 ): RegisteredSkillTool | undefined {
     const registration = SKILL_TOOL_REGISTRY.get(toolName);
-    if (!registration || (context && !isSkillAllowedForContext(registration.skill, context))) {
+    if (
+        !registration ||
+        (context &&
+            (!isSkillAllowedForContext(registration.skill, context) ||
+                !isToolAllowedByRuntimeContext(toolName, context)))
+    ) {
         return undefined;
     }
 
     return registration;
+}
+
+/** Undefined means the name is not a static skill tool (for example a core primitive). */
+export function isRegisteredSkillToolAllowedForContext(
+    toolName: string,
+    context?: RuntimeExecutionContext
+): boolean | undefined {
+    const registration = SKILL_TOOL_REGISTRY.get(toolName);
+    if (!registration) return undefined;
+    if (!context) return true;
+    return isSkillAllowedForContext(registration.skill, context) && isToolAllowedByRuntimeContext(toolName, context);
+}
+
+export function preflightToolArgsForContext(
+    toolName: string,
+    args: Record<string, unknown>,
+    context?: RuntimeExecutionContext
+): Record<string, unknown> {
+    const registration = getSkillToolRegistrationForContext(toolName, context);
+    return registration?.preflight ? registration.preflight(args) : args;
 }
 
 export function getRegisteredToolsForContext(context?: RuntimeExecutionContext): FunctionDeclaration[] {
@@ -258,10 +297,15 @@ export function getRegisteredCapabilitiesForContext(context?: RuntimeExecutionCo
         return getRegisteredCapabilities();
     }
 
-    return getRegisteredCapabilities().filter((capability) => {
-        const skill = ALL_SKILLS.find((item) => item.name === capability.skill);
-        return skill ? isSkillAllowedForContext(skill, context) : false;
-    });
+    return getRegisteredCapabilities()
+        .filter((capability) => {
+            const skill = ALL_SKILLS.find((item) => item.name === capability.skill);
+            return skill ? isSkillAllowedForContext(skill, context) : false;
+        })
+        .map((capability) => ({
+            ...capability,
+            tools: capability.tools.filter((toolName) => isToolAllowedByRuntimeContext(toolName, context)),
+        }));
 }
 
 export function getToolExecutionSpecForContext(
@@ -282,6 +326,9 @@ export function getToolExecutionSpecForContext(
             approval_action: registration.approvalAction,
             approval_reason: registration.approvalReason,
             approval_detail_fields: registration.approvalDetailFields,
+            approval_action_fields: registration.approvalActionFields,
+            approval_single_use: registration.approvalSingleUse,
+            approval_resume: registration.approvalResume,
             audit_default: 'errors',
         });
     }

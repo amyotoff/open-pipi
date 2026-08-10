@@ -1,4 +1,10 @@
-export type ToolCapability = 'workspace_read' | 'artifact_write' | 'web_browse' | 'external_http' | 'shell_none';
+export type ToolCapability =
+    | 'workspace_read'
+    | 'artifact_write'
+    | 'web_browse'
+    | 'external_http'
+    | 'home_automation'
+    | 'shell_none';
 
 export type ToolRunMode = 'inline' | 'sidecar' | 'sandbox' | 'mcp';
 export type AuditMode = 'off' | 'errors' | 'all';
@@ -31,6 +37,12 @@ export interface ToolExecutionSpec {
      * its arguments change what the owner is agreeing to.
      */
     approval_detail_fields?: string[];
+    /** Bind the approval class to a digest of these normalized arguments. */
+    approval_action_fields?: string[];
+    /** Consume a matching grant after one execution. */
+    approval_single_use?: boolean;
+    /** Store and resume the exact tool call after an affirmative reply. */
+    approval_resume?: boolean;
     audit_default: AuditMode;
     sandbox?: SandboxExecutionSpec;
     mcp?: {
@@ -44,6 +56,7 @@ const KNOWN_TOOL_CAPABILITIES: ToolCapability[] = [
     'artifact_write',
     'web_browse',
     'external_http',
+    'home_automation',
     'shell_none',
 ];
 
@@ -65,6 +78,10 @@ const TOOL_CAPABILITY_OVERRIDES: Record<string, ToolCapability[]> = {
     reporter_create_draft: ['artifact_write'],
     html_artifact_create: ['artifact_write'],
     html_artifact_list: ['workspace_read'],
+    home_assistant_status: ['home_automation'],
+    home_assistant_list_entities: ['home_automation'],
+    home_assistant_get_state: ['home_automation'],
+    home_assistant_control: ['home_automation'],
 };
 
 export function normalizeAuditMode(value: unknown, fallback: AuditMode = 'errors'): AuditMode {
@@ -126,6 +143,9 @@ export function deriveToolExecutionSpec(
             approval_action: base?.approval_action,
             approval_reason: base?.approval_reason,
             approval_detail_fields: base?.approval_detail_fields,
+            approval_action_fields: base?.approval_action_fields,
+            approval_single_use: base?.approval_single_use,
+            approval_resume: base?.approval_resume,
             audit_default: normalizeAuditMode(base?.audit_default, 'errors'),
             capabilities,
             sandbox: base?.sandbox,
@@ -141,6 +161,9 @@ export function deriveToolExecutionSpec(
             approval_action: base?.approval_action,
             approval_reason: base?.approval_reason,
             approval_detail_fields: base?.approval_detail_fields,
+            approval_action_fields: base?.approval_action_fields,
+            approval_single_use: base?.approval_single_use,
+            approval_resume: base?.approval_resume,
             audit_default: normalizeAuditMode(base?.audit_default, 'errors'),
             capabilities: ['artifact_write'],
             sandbox: base?.sandbox,
@@ -155,6 +178,9 @@ export function deriveToolExecutionSpec(
         approval_action: base?.approval_action,
         approval_reason: base?.approval_reason,
         approval_detail_fields: base?.approval_detail_fields,
+        approval_action_fields: base?.approval_action_fields,
+        approval_single_use: base?.approval_single_use,
+        approval_resume: base?.approval_resume,
         audit_default: normalizeAuditMode(base?.audit_default, 'errors'),
         capabilities:
             normalizeToolCapabilities(base?.capabilities).length > 0

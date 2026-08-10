@@ -13,7 +13,7 @@ const OBVIOUS_SIMPLE_PATTERNS = [
 ];
 
 const DEFINITELY_COMPLEX_PATTERN =
-    /(https?:\/\/|найди|поищи|исследуй|research|search|сравни|compare|проанализ|analy[sz]e|создай|create|запиши|remember|запомни|напомни|remind|schedule|удали|delete|отправь|send|позвони|call|забронируй|book|купи|buy|обнови|update|файл|document|документ|таблиц|spreadsheet|почт|email|crm|calendar|календар)/i;
+    /(https?:\/\/|найди|поищи|исследуй|research|search|сравни|compare|проанализ|analy[sz]e|создай|create|запиши|remember|запомни|напомни|remind|schedule|удали|delete|отправь|send|позвони|call|забронируй|book|купи|buy|обнови|update|файл|document|документ|таблиц|spreadsheet|почт|email|crm|calendar|календар|home\s*assistant|умн(?:ый|ого|ом)\s+дом|включи|выключи|зажги|погаси|яркост|ламп|turn\s+(?:on|off)|brightness)/i;
 
 export function isObviouslySimpleMessage(text: string): boolean {
     const normalized = text.toLowerCase().trim();

@@ -106,7 +106,7 @@
             "@opentelemetry/core": "^2.9.0",
             "protobufjs": "^7.6.3",
             "qs": "^6.15.2",
-            "undici": "^7.28.0",
+            "undici": "^7.29.0",
             "ws": "^8.21.0"
         },
         "onlyBuiltDependencies": [

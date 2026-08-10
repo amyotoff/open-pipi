@@ -27,7 +27,7 @@ import { executeChannelCommand } from '../core/channel-commands';
 import { getRegisteredHandlers } from '../skills/_registry';
 import { MEMBERS_USAGE, parseMembersCommandRequest } from './members-command';
 import {
-    runApprovalTelegramCommand,
+    runApprovalTelegramCommandAsync,
     runBackupTelegramCommand,
     runChannelTelegramCommand,
     runPackTelegramCommandAsync,
@@ -314,7 +314,7 @@ bot.command('approve', async (ctx) => {
     const chatId = ctx.chat?.id.toString();
     if (!senderId || !chatId || !isOwner(senderId)) return;
 
-    const result = runApprovalTelegramCommand('approve', {
+    const result = await runApprovalTelegramCommandAsync('approve', {
         chatId,
         chatType: ctx.chat?.type,
         userId: senderId,
@@ -328,7 +328,7 @@ bot.command('deny', async (ctx) => {
     const chatId = ctx.chat?.id.toString();
     if (!senderId || !chatId || !isOwner(senderId)) return;
 
-    const result = runApprovalTelegramCommand('deny', {
+    const result = await runApprovalTelegramCommandAsync('deny', {
         chatId,
         chatType: ctx.chat?.type,
         userId: senderId,

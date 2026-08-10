@@ -571,6 +571,7 @@ An addon is a capability the runtime does not need: it ships in the repo, costs 
 | Addon | What it does | Turned on by |
 | --- | --- | --- |
 | [Voice calls](docs/addons.md) | Delegates an outbound phone call to a voice agent — bookings, appointments, checking a fact, relaying a message — and returns a structured result | `pnpm add retell-sdk`, provider env vars, and the `phone` capability in your pack |
+| [Home Assistant](docs/home-assistant.md) | Delegates allowlisted smart-home reads and physical actions to a bounded family subagent on the local network | A dedicated non-admin token, exact entity allowlists, the Jeeves `home_operator`, and one-time owner approval for each action |
 
 Voice calls are also the repo's worked example of a **subagent**: a delegate that runs where the orchestrator cannot watch it, briefed with a task contract and answering with a result contract. [docs/addons.md](docs/addons.md) walks through the pattern — including why it refuses to place a call when you have not said what should happen if the goal turns out to be impossible.
 

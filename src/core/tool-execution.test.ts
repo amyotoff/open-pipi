@@ -34,7 +34,14 @@ describe('core/tool-execution', () => {
         });
 
         it('keeps all known capabilities', () => {
-            const all = ['workspace_read', 'artifact_write', 'web_browse', 'external_http', 'shell_none'];
+            const all = [
+                'workspace_read',
+                'artifact_write',
+                'web_browse',
+                'external_http',
+                'home_automation',
+                'shell_none',
+            ];
             expect(normalizeToolCapabilities(all)).toEqual(all);
         });
     });
@@ -43,6 +50,7 @@ describe('core/tool-execution', () => {
         it('returns override for known tools', () => {
             expect(defaultCapabilitiesForTool('browse_web')).toEqual(['web_browse', 'external_http']);
             expect(defaultCapabilitiesForTool('workspace_save_artifact')).toEqual(['artifact_write']);
+            expect(defaultCapabilitiesForTool('home_assistant_control')).toEqual(['home_automation']);
         });
 
         it('returns shell_none for unknown tools', () => {

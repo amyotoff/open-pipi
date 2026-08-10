@@ -12,6 +12,11 @@ describe('core/pack-loader', () => {
         expect(pack?.enabled_capabilities).toContain('shopping');
         expect(pack?.enabled_capabilities).toContain('memory');
         expect(pack?.enabled_capabilities).toContain('grounding');
+        expect(pack?.enabled_capabilities).toContain('family');
+        expect(pack?.enabled_capabilities).toContain('home_assistant');
+        expect(pack?.family_members).toEqual(
+            expect.arrayContaining([expect.objectContaining({ id: 'home_operator' })])
+        );
         expect(
             pack?.core_toolbox.primitives.find((entry) => entry.id === 'personal_context')?.backing_capabilities
         ).toEqual(expect.arrayContaining(['memory', 'history', 'members', 'spaces']));

@@ -294,4 +294,196 @@ describe('skills registry policy filtering', () => {
         expect(handlers.reminder_set).toBeUndefined();
         expect(handlers.workspace_save_artifact).toBeUndefined();
     });
+
+    it('exposes Home Assistant tools only to the allowlisted owner subagent', async () => {
+        const { db, registry } = await loadRegistryWithDb();
+
+        db.upsertResident({ tg_id: '111', username: 'alice', display_name: 'Alice', role: 'owner' });
+        db.upsertResident({ tg_id: '222', username: 'bob', display_name: 'Bob', role: 'member' });
+        db.upsertResident({ tg_id: '333', username: 'cara', display_name: 'Cara', role: 'member' });
+        db.upsertSpace({
+            id: db.buildTelegramSpaceId('home'),
+            kind: 'group_chat',
+            title: 'Home',
+            channel: 'telegram',
+            external_ref: 'home',
+            assistant_pack_id: 'jeeves',
+            policy_json: JSON.stringify({ browser: true }),
+        });
+        packBySpace.set(db.buildTelegramSpaceId('home'), 'jeeves');
+        db.ensureSpaceMembership(db.buildTelegramSpaceId('home'), '111', 'owner');
+        db.ensureSpaceMembership(db.buildTelegramSpaceId('home'), '222', 'member');
+        db.ensureSpaceMembership(db.buildTelegramSpaceId('home'), '333', 'admin');
+
+        const parentTools = registry.getRegisteredToolsForContext({ chatId: 'home', userId: '111' });
+        expect(parentTools.map((tool) => tool.name)).not.toContain('home_assistant_get_state');
+
+        const allowedTools = ['home_assistant_get_state'];
+        const ownerContext = { chatId: 'home', userId: '111', allowedTools };
+        const memberContext = { chatId: 'home', userId: '222', allowedTools };
+        const adminContext = { chatId: 'home', userId: '333', allowedTools };
+        const ownerTools = registry.getRegisteredToolsForContext(ownerContext);
+        const ownerHandlers = registry.getRegisteredHandlersForContext(ownerContext);
+        const memberTools = registry.getRegisteredToolsForContext(memberContext);
+        const adminTools = registry.getRegisteredToolsForContext(adminContext);
+        const capabilities = registry.getRegisteredCapabilitiesForContext(ownerContext);
+
+        expect(ownerTools.map((tool) => tool.name)).toEqual(allowedTools);
+        expect(ownerHandlers.home_assistant_get_state).toBeTypeOf('function');
+        expect(ownerHandlers.home_assistant_control).toBeUndefined();
+        expect(registry.getToolDeclarationForContext('home_assistant_get_state', ownerContext)).toBeDefined();
+        expect(registry.getToolDeclarationForContext('home_assistant_control', ownerContext)).toBeUndefined();
+        expect(capabilities.find((capability) => capability.skill === 'home_assistant')?.tools).toEqual(allowedTools);
+        expect(memberTools).toEqual([]);
+        expect(adminTools).toEqual([]);
+        expect(
+            registry
+                .getRegisteredToolsForContext({ chatId: 'home', userId: '111', allowedTools: [] })
+                .map((tool) => tool.name)
+        ).not.toContain('home_assistant_get_state');
+
+        process.env.HOME_ASSISTANT_TOKEN = 'test-token';
+        process.env.HOME_ASSISTANT_CONTROL_ENTITIES = 'light.kitchen';
+        const fetchMock = vi.fn();
+        vi.stubGlobal('fetch', fetchMock);
+        const executor = await import('../core/tool-executor');
+        const approvals = await import('../utils/approvals');
+        const bypassAttempt = await executor.executeToolCall({
+            toolName: 'home_assistant_control',
+            toolArgs: { entity_id: 'light.kitchen', action: 'turn_off' },
+            context: ownerContext,
+            handlers: registry.getRegisteredHandlers(),
+        });
+
+        expect(bypassAttempt).toContain('not allowed in the current execution context');
+        expect(approvals.listPendingApprovalActions(ownerContext)).toEqual([]);
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('resumes one approved Home Assistant call through the current registry and executor', async () => {
+        const { db, registry } = await loadRegistryWithDb();
+        const spaceId = db.buildTelegramSpaceId('home-resume');
+        db.upsertResident({ tg_id: '111', username: 'alice', display_name: 'Alice', role: 'owner' });
+        db.upsertSpace({
+            id: spaceId,
+            kind: 'private',
+            title: 'Home',
+            channel: 'telegram',
+            external_ref: 'home-resume',
+            assistant_pack_id: 'jeeves',
+            policy_json: JSON.stringify({ browser: false, audit_trail: 'all' }),
+        });
+        packBySpace.set(spaceId, 'jeeves');
+        db.ensureSpaceMembership(spaceId, '111', 'owner');
+        process.env.HOME_ASSISTANT_URL = 'http://127.0.0.1:8123';
+        process.env.HOME_ASSISTANT_TOKEN = 'test-token';
+        process.env.HOME_ASSISTANT_CONTROL_ENTITIES = 'light.kitchen';
+
+        const fetchMock = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+            const url = String(input);
+            if (url.endsWith('/api/services/light/turn_off')) {
+                expect(init?.method).toBe('POST');
+                return new Response('[]', { status: 200 });
+            }
+            if (url.endsWith('/api/states/light.kitchen')) {
+                return new Response(
+                    JSON.stringify({
+                        entity_id: 'light.kitchen',
+                        state: 'off',
+                        attributes: { friendly_name: 'Kitchen light' },
+                    }),
+                    { status: 200 }
+                );
+            }
+            throw new Error(`Unexpected URL: ${url}`);
+        });
+        vi.stubGlobal('fetch', fetchMock);
+
+        const executor = await import('../core/tool-executor');
+        const approvals = await import('../utils/approvals');
+        const continuation = await import('../core/approval-continuation');
+        const context = {
+            chatId: 'home-resume',
+            userId: '111',
+            spaceId,
+            allowedTools: ['home_assistant_control'],
+        };
+        const toolArgs = { entity_id: 'light.kitchen', action: 'turn_off' };
+
+        const blocked = await executor.executeToolCall({
+            toolName: 'home_assistant_control',
+            toolArgs,
+            context,
+            handlers: registry.getRegisteredHandlersForContext(context),
+        });
+        expect(blocked).toContain('Требуется явное подтверждение');
+        expect(fetchMock).not.toHaveBeenCalled();
+
+        const approved = approvals.recordApprovalResponse(context, 'да');
+        expect(approved.continuations).toHaveLength(1);
+        const [result] = await continuation.executeApprovedToolContinuations(approved.continuations!, context);
+
+        expect(result.result).toContain('"accepted": true');
+        expect(result.result).toContain('"verified": true');
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(approvals.recordApprovalResponse(context, 'да')).toEqual({ granted: [], denied: [] });
+        expect(db.getDb().prepare('SELECT status, error FROM tool_execution_log ORDER BY id').all()).toEqual([
+            { status: 'blocked', error: 'approval_required' },
+            { status: 'success', error: null },
+        ]);
+    });
+
+    it('revalidates the control allowlist before resuming and revokes a blocked grant', async () => {
+        const { db, registry } = await loadRegistryWithDb();
+        const spaceId = db.buildTelegramSpaceId('home-revalidate');
+        db.upsertResident({ tg_id: '111', username: 'alice', display_name: 'Alice', role: 'owner' });
+        db.upsertSpace({
+            id: spaceId,
+            kind: 'private',
+            title: 'Home',
+            channel: 'telegram',
+            external_ref: 'home-revalidate',
+            assistant_pack_id: 'jeeves',
+            policy_json: JSON.stringify({ browser: false }),
+        });
+        packBySpace.set(spaceId, 'jeeves');
+        db.ensureSpaceMembership(spaceId, '111', 'owner');
+        process.env.HOME_ASSISTANT_TOKEN = 'test-token';
+        process.env.HOME_ASSISTANT_CONTROL_ENTITIES = 'light.kitchen';
+        const fetchMock = vi.fn();
+        vi.stubGlobal('fetch', fetchMock);
+
+        const executor = await import('../core/tool-executor');
+        const approvals = await import('../utils/approvals');
+        const continuation = await import('../core/approval-continuation');
+        const context = {
+            chatId: 'home-revalidate',
+            userId: '111',
+            spaceId,
+            allowedTools: ['home_assistant_control'],
+        };
+        const toolArgs = { entity_id: 'light.kitchen', action: 'turn_off' };
+        await executor.executeToolCall({
+            toolName: 'home_assistant_control',
+            toolArgs,
+            context,
+            handlers: registry.getRegisteredHandlersForContext(context),
+        });
+
+        process.env.HOME_ASSISTANT_CONTROL_ENTITIES = '';
+        const approved = approvals.recordApprovalResponse(context, 'да');
+        const [blocked] = await continuation.executeApprovedToolContinuations(approved.continuations!, context);
+        expect(blocked.result).toContain('not in the Home Assistant control allowlist');
+        expect(fetchMock).not.toHaveBeenCalled();
+
+        process.env.HOME_ASSISTANT_CONTROL_ENTITIES = 'light.kitchen';
+        const retry = await executor.executeToolCall({
+            toolName: 'home_assistant_control',
+            toolArgs,
+            context,
+            handlers: registry.getRegisteredHandlersForContext(context),
+        });
+        expect(retry).toContain('Требуется явное подтверждение');
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
 });

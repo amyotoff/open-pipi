@@ -6,7 +6,18 @@ const PENDING_TTL_MS = 10 * 60 * 1000;
 export type ApprovalActionClass = string;
 type ApprovalDecision = 'approve' | 'deny';
 type ApprovalContext = Partial<RuntimeExecutionContext> & { userId: string; chatId?: string };
-type ApprovalState = { prompt: string; expiresAt: number; actionClass: ApprovalActionClass; toolName: string };
+export type ApprovedToolContinuation = {
+    actionClass: ApprovalActionClass;
+    toolName: string;
+    toolArgs: Record<string, unknown>;
+};
+type ApprovalState = {
+    prompt: string;
+    expiresAt: number;
+    actionClass: ApprovalActionClass;
+    toolName: string;
+    continuation?: Omit<ApprovedToolContinuation, 'actionClass'>;
+};
 
 const pendingApprovals = new Map<string, ApprovalState>();
 const grantedApprovals = new Map<string, number>();
@@ -46,11 +57,16 @@ function isNegative(text: string): boolean {
     return /(^|[\s,!.?])(?:нет|неа|отмена|cancel|стоп|не надо|не нужно)(?=$|[\s,!.?])/i.test(text);
 }
 
+function isStrongAffirmative(text: string): boolean {
+    return /^\s*(?:да|yes|разрешаю|подтверждаю|go ahead)\s*[!.]?\s*$/i.test(text);
+}
+
 type PendingApprovalDescriptor = {
     actionClass: ApprovalActionClass;
     toolName: string;
     prompt: string;
     expiresAt: number;
+    continuation?: Omit<ApprovedToolContinuation, 'actionClass'>;
 };
 
 function listPendingDescriptors(context: ApprovalContext, now = Date.now()): PendingApprovalDescriptor[] {
@@ -66,6 +82,7 @@ function listPendingDescriptors(context: ApprovalContext, now = Date.now()): Pen
             toolName: approval.toolName,
             prompt: approval.prompt,
             expiresAt: approval.expiresAt,
+            continuation: approval.continuation,
         }))
         .sort((left, right) => left.actionClass.localeCompare(right.actionClass));
 }
@@ -74,7 +91,13 @@ function resolveDecision(
     context: ApprovalContext,
     decision: ApprovalDecision,
     requestedActionClass?: ApprovalActionClass
-): { granted: ApprovalActionClass[]; denied: ApprovalActionClass[]; pending: ApprovalActionClass[]; error?: string } {
+): {
+    granted: ApprovalActionClass[];
+    denied: ApprovalActionClass[];
+    pending: ApprovalActionClass[];
+    continuations?: ApprovedToolContinuation[];
+    error?: string;
+} {
     const now = Date.now();
     const scope = approvalScope(context);
     if (!scope) {
@@ -113,7 +136,12 @@ function resolveDecision(
 
     if (decision === 'approve') {
         grantedApprovals.set(key, now + GRANT_TTL_MS);
-        return { granted: [actionClass], denied: [], pending: pendingActions.filter((item) => item !== actionClass) };
+        return {
+            granted: [actionClass],
+            denied: [],
+            pending: pendingActions.filter((item) => item !== actionClass),
+            ...(matched.continuation ? { continuations: [{ actionClass, ...matched.continuation }] } : {}),
+        };
     }
 
     grantedApprovals.delete(key);
@@ -124,6 +152,12 @@ export function listPendingApprovalActions(context: ApprovalContext): ApprovalAc
     return listPendingDescriptors(context).map((item) => item.actionClass);
 }
 
+export function listPendingApprovalDetails(
+    context: ApprovalContext
+): Array<{ actionClass: ApprovalActionClass; toolName: string }> {
+    return listPendingDescriptors(context).map(({ actionClass, toolName }) => ({ actionClass, toolName }));
+}
+
 export function approvePendingAction(context: ApprovalContext, requestedActionClass?: ApprovalActionClass) {
     return resolveDecision(context, 'approve', requestedActionClass);
 }
@@ -132,11 +166,19 @@ export function denyPendingAction(context: ApprovalContext, requestedActionClass
     return resolveDecision(context, 'deny', requestedActionClass);
 }
 
-export function requireToolApproval(
+export function revokeApprovalGrant(context: ApprovalContext, actionClass: ApprovalActionClass): void {
+    const scope = approvalScope(context);
+    if (!scope) return;
+    grantedApprovals.delete(approvalKey(scope, context.userId, actionClass));
+}
+
+function requireApproval(
     toolName: string,
     context: ApprovalContext | undefined,
     prompt: string,
-    requestedActionClass?: ApprovalActionClass
+    requestedActionClass: ApprovalActionClass | undefined,
+    consumeGrant: boolean,
+    continuation?: Omit<ApprovedToolContinuation, 'actionClass'>
 ): string | null {
     if (!context?.userId) {
         return `[TOOL_RESULT] Действие "${toolName}" требует явного подтверждения пользователя, но контекст пользователя недоступен.`;
@@ -155,6 +197,7 @@ export function requireToolApproval(
     const key = approvalKey(scope, context.userId, actionClass);
     const grantedUntil = grantedApprovals.get(key);
     if (grantedUntil && grantedUntil > now) {
+        if (consumeGrant) grantedApprovals.delete(key);
         return null;
     }
 
@@ -163,15 +206,61 @@ export function requireToolApproval(
         expiresAt: now + PENDING_TTL_MS,
         actionClass,
         toolName,
+        continuation,
     });
 
     return `[TOOL_RESULT] Требуется явное подтверждение пользователя для "${actionClass}". Ответь "да"/"нет" или используй /approve ${actionClass} / /deny ${actionClass}. Причина: ${prompt}`;
 }
 
+export function requireToolApproval(
+    toolName: string,
+    context: ApprovalContext | undefined,
+    prompt: string,
+    requestedActionClass?: ApprovalActionClass
+): string | null {
+    return requireApproval(toolName, context, prompt, requestedActionClass, false);
+}
+
+/**
+ * Require an argument-bound approval that is consumed by exactly one call.
+ *
+ * Physical actions must not inherit the normal two-minute category grant: an
+ * approval for one lamp is not permission to operate a different device.
+ */
+export function requireSingleUseToolApproval(
+    toolName: string,
+    context: ApprovalContext | undefined,
+    prompt: string,
+    actionClass: ApprovalActionClass
+): string | null {
+    return requireApproval(toolName, context, prompt, actionClass, true);
+}
+
+/**
+ * Store the exact JSON-like call so a later affirmative message can resume it
+ * without asking a model to reconstruct physical-action arguments.
+ */
+export function requireResumableSingleUseToolApproval(
+    toolName: string,
+    context: ApprovalContext | undefined,
+    prompt: string,
+    actionClass: ApprovalActionClass,
+    toolArgs: Record<string, unknown>
+): string | null {
+    return requireApproval(toolName, context, prompt, actionClass, true, {
+        toolName,
+        toolArgs: structuredClone(toolArgs),
+    });
+}
+
 export function recordApprovalResponse(
     context: ApprovalContext,
     text: string
-): { granted: ApprovalActionClass[]; denied: ApprovalActionClass[] } {
+): {
+    granted: ApprovalActionClass[];
+    denied: ApprovalActionClass[];
+    continuations?: ApprovedToolContinuation[];
+} {
     const now = Date.now();
     cleanupExpiredApprovals(now);
 
@@ -180,10 +269,20 @@ export function recordApprovalResponse(
         return { granted: [], denied: [] };
     }
 
-    if (!isAffirmative(text) && !isNegative(text)) {
+    const affirmative = isAffirmative(text);
+    const negative = isNegative(text);
+    if (!affirmative && !negative) {
+        return { granted: [], denied: [] };
+    }
+    if (pending[0].continuation && affirmative && !negative && !isStrongAffirmative(text)) {
         return { granted: [], denied: [] };
     }
 
-    const result = resolveDecision(context, isAffirmative(text) ? 'approve' : 'deny', pending[0].actionClass);
-    return { granted: result.granted, denied: result.denied };
+    // Mixed phrases such as "да, отмена" or "yes, cancel" fail closed.
+    const result = resolveDecision(context, negative ? 'deny' : 'approve', pending[0].actionClass);
+    return {
+        granted: result.granted,
+        denied: result.denied,
+        ...(result.continuations ? { continuations: result.continuations } : {}),
+    };
 }

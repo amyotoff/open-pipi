@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 type LoadOptions = {
     isOwner?: boolean;
     isHouseholdChat?: boolean;
-    approval?: { granted: string[]; denied: string[] };
+    approval?: { granted: string[]; denied: string[]; continuations?: any[] };
     authorityGuard?: { allow: boolean; reason?: string };
     spacePolicyJson?: string | null;
     channelMode?: string;
@@ -32,6 +32,7 @@ async function loadGateway(options: LoadOptions = {}) {
         policy_json: options.spacePolicyJson ?? null,
     }));
     const getParticipantIdentity = vi.fn(() => undefined);
+    const logEvent = vi.fn();
     const handleButlerMessage = vi.fn();
     const handleButlerPhoto = vi.fn();
     const sendChannelMessage = vi.fn();
@@ -43,8 +44,18 @@ async function loadGateway(options: LoadOptions = {}) {
     const resolveAttachment = vi.fn(async () =>
         options.resolvedImage === undefined ? { base64: 'AAA', mimeType: 'image/jpeg' } : options.resolvedImage
     );
+    const recordApprovalResponse = vi.fn(() => options.approval || { granted: [], denied: [] });
+    const listPendingApprovalDetails = vi.fn(() =>
+        (options.approval?.continuations || []).map((item) => ({
+            actionClass: item.actionClass,
+            toolName: item.toolName,
+        }))
+    );
+    const executeApprovedToolContinuations = vi.fn(async () => [
+        { actionClass: 'home_assistant_control_test', toolName: 'home_assistant_control', result: 'executed' },
+    ]);
 
-    vi.doMock('../db', () => ({ storeMessage, getSpace, getParticipantIdentity }));
+    vi.doMock('../db', () => ({ storeMessage, getSpace, getParticipantIdentity, logEvent }));
     vi.doMock('../agents/butler', () => ({ handleButlerMessage, handleButlerPhoto }));
     vi.doMock('../channels/runtime', () => ({ buildChannelPersonId, sendChannelMessageNow: sendChannelMessage }));
     vi.doMock('../config', () => ({
@@ -52,8 +63,10 @@ async function loadGateway(options: LoadOptions = {}) {
         isHouseholdChat: vi.fn(() => options.isHouseholdChat ?? false),
         isOwner: vi.fn(() => options.isOwner ?? true),
     }));
-    vi.doMock('../utils/approvals', () => ({
-        recordApprovalResponse: vi.fn(() => options.approval || { granted: [], denied: [] }),
+    vi.doMock('../utils/approvals', () => ({ recordApprovalResponse, listPendingApprovalDetails }));
+    vi.doMock('../core/approval-continuation', () => ({
+        executeApprovedToolContinuations,
+        formatApprovedToolContinuationReply: vi.fn(() => 'Approved Home Assistant action executed.'),
     }));
     vi.doMock('../core/authority-guard', () => ({ evaluateAuthorityGuard }));
     vi.doMock('../core/local-triage', () => ({ shouldJoinGroupConversation }));
@@ -107,6 +120,9 @@ async function loadGateway(options: LoadOptions = {}) {
             shouldJoinGroupConversation,
             resolveAttachment,
             resolveTransportBinding,
+            recordApprovalResponse,
+            executeApprovedToolContinuations,
+            logEvent,
         },
     };
 }
@@ -206,6 +222,56 @@ describe('gateway: direct chats', () => {
             expect.objectContaining({ text: expect.stringContaining('[Replying to Sam: "the plan"]') })
         );
     });
+
+    it('resumes an exact approved call from raw reply text and does not invoke Butler again', async () => {
+        const continuation = {
+            actionClass: 'home_assistant_control_test',
+            toolName: 'home_assistant_control',
+            toolArgs: { entity_id: 'light.kitchen', action: 'turn_off' },
+        };
+        const { handleIncoming, normalizeTelegramMessage, mocks } = await loadGateway({
+            approval: { granted: [continuation.actionClass], denied: [], continuations: [continuation] },
+        });
+
+        await handleIncoming(
+            normalizeTelegramMessage(
+                telegramUpdate({
+                    message: {
+                        message_id: 2,
+                        date: 1_760_000_001,
+                        text: 'да',
+                        reply_to_message: {
+                            message_id: 1,
+                            text: 'Ответь "да"/"нет" для подтверждения',
+                            from: { id: 42, is_bot: true, first_name: 'Jeeves' },
+                        },
+                    },
+                })
+            )!
+        );
+
+        expect(mocks.recordApprovalResponse).toHaveBeenCalledWith(
+            expect.objectContaining({ spaceId: 'telegram:123', userId: '111' }),
+            'да'
+        );
+        expect(mocks.executeApprovedToolContinuations).toHaveBeenCalledTimes(1);
+        expect(mocks.logEvent).toHaveBeenCalledWith(
+            'approval_decision',
+            expect.objectContaining({
+                user_id: '111',
+                action_class: continuation.actionClass,
+                tool_name: 'home_assistant_control',
+                decision: 'approved',
+                source: 'message',
+            })
+        );
+        expect(mocks.handleButlerMessage).not.toHaveBeenCalled();
+        expect(mocks.sendChannelMessage).toHaveBeenCalledWith(
+            'telegram',
+            '123',
+            'Approved Home Assistant action executed.'
+        );
+    });
 });
 
 describe('gateway: space creation', () => {
@@ -276,6 +342,23 @@ describe('gateway: deduplication', () => {
         expect(mocks.storeMessage).toHaveBeenCalledTimes(1);
         expect(mocks.handleButlerMessage).not.toHaveBeenCalled();
     });
+
+    it('does not consume or execute an approval for a duplicate message', async () => {
+        const continuation = {
+            actionClass: 'home_assistant_control_test',
+            toolName: 'home_assistant_control',
+            toolArgs: { entity_id: 'light.kitchen', action: 'turn_off' },
+        };
+        const { handleIncoming, normalizeTelegramMessage, mocks } = await loadGateway({
+            duplicate: true,
+            approval: { granted: [continuation.actionClass], denied: [], continuations: [continuation] },
+        });
+
+        await handleIncoming(normalizeTelegramMessage(telegramUpdate({ message: { message_id: 9, text: 'да' } }))!);
+
+        expect(mocks.recordApprovalResponse).not.toHaveBeenCalled();
+        expect(mocks.executeApprovedToolContinuations).not.toHaveBeenCalled();
+    });
 });
 
 describe('gateway: household groups', () => {
@@ -315,6 +398,24 @@ describe('gateway: household groups', () => {
         await handleIncoming(normalizeTelegramMessage(householdUpdate('обычная болтовня'))!);
 
         expect(mocks.handleButlerMessage).toHaveBeenCalled();
+    });
+
+    it('does not treat an unaddressed group yes as approval for a physical action', async () => {
+        const continuation = {
+            actionClass: 'home_assistant_control_test',
+            toolName: 'home_assistant_control',
+            toolArgs: { entity_id: 'light.kitchen', action: 'turn_off' },
+        };
+        const { handleIncoming, normalizeTelegramMessage, mocks } = await loadGateway({
+            isHouseholdChat: true,
+            groupRelevant: true,
+            approval: { granted: [continuation.actionClass], denied: [], continuations: [continuation] },
+        });
+
+        await handleIncoming(normalizeTelegramMessage(householdUpdate('да'))!);
+
+        expect(mocks.recordApprovalResponse).not.toHaveBeenCalled();
+        expect(mocks.executeApprovedToolContinuations).not.toHaveBeenCalled();
     });
 
     it('applies a cooldown after a passive relevance-based reply', async () => {
@@ -575,6 +676,60 @@ describe('gateway: other channels through the compatibility bridge', () => {
         );
 
         expect(mocks.handleButlerMessage).toHaveBeenCalled();
+    });
+
+    it('does not approve a physical action when replying to a different bot', async () => {
+        const continuation = {
+            actionClass: 'home_assistant_control_test',
+            toolName: 'home_assistant_control',
+            toolArgs: { entity_id: 'light.kitchen', action: 'turn_off' },
+        };
+        const { handleIncomingChannelMessage, mocks } = await loadGateway({
+            groupRelevant: true,
+            approval: { granted: [continuation.actionClass], denied: [], continuations: [continuation] },
+        });
+
+        await handleIncomingChannelMessage(
+            whatsappMessage({
+                channelRef: '12036@g.us',
+                isDirect: false,
+                isPrimaryGroup: true,
+                text: 'yes',
+                botUsername: 'pipi_bot',
+                botUserId: 'bot-1',
+                replyTo: { senderId: 'other-bot', senderUsername: 'other_bot', isBot: true, text: 'confirm?' },
+            }) as any
+        );
+
+        expect(mocks.recordApprovalResponse).not.toHaveBeenCalled();
+        expect(mocks.executeApprovedToolContinuations).not.toHaveBeenCalled();
+    });
+
+    it('resumes once when a primary-group reply targets the exact assistant bot', async () => {
+        const continuation = {
+            actionClass: 'home_assistant_control_test',
+            toolName: 'home_assistant_control',
+            toolArgs: { entity_id: 'light.kitchen', action: 'turn_off' },
+        };
+        const { handleIncomingChannelMessage, mocks } = await loadGateway({
+            approval: { granted: [continuation.actionClass], denied: [], continuations: [continuation] },
+        });
+
+        await handleIncomingChannelMessage(
+            whatsappMessage({
+                channelRef: '12036@g.us',
+                isDirect: false,
+                isPrimaryGroup: true,
+                text: 'yes',
+                botUsername: 'pipi_bot',
+                botUserId: 'bot-1',
+                replyTo: { senderId: 'bot-1', senderUsername: 'pipi_bot', isBot: true, text: 'confirm?' },
+            }) as any
+        );
+
+        expect(mocks.recordApprovalResponse).toHaveBeenCalledWith(expect.anything(), 'yes');
+        expect(mocks.executeApprovedToolContinuations).toHaveBeenCalledTimes(1);
+        expect(mocks.handleButlerMessage).not.toHaveBeenCalled();
     });
 
     it('ignores a group the channel does not declare as primary', async () => {

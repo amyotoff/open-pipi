@@ -680,11 +680,34 @@ describe('CRUD skills', () => {
 
         const { default: skill } = await loadSkill<any>('./spaces.skill');
         const context = { chatId: 'chat-1', userId: '111' };
+        const behavior = await import('../core/space-behavior');
 
         expect(await skill.handlers.space_status({}, context)).toContain('Pack: jeeves');
         expect(await skill.handlers.space_status({}, context)).toContain('Grounding: jeeves_personal');
         expect(await skill.handlers.space_list_packs({}, context)).toContain('office');
         expect(await skill.handlers.space_list_sprints({}, context)).toContain('Weekly office summary');
+
+        behavior.ensureSpaceBehaviorSnapshot('telegram:chat-1');
+        const packSnapshotRoot = behavior.getSpacePackSnapshotRoot('telegram:chat-1');
+        const groundingSnapshotRoot = behavior.getSpaceGroundingSnapshotRoot('telegram:chat-1');
+        expect(packSnapshotRoot).toBeTruthy();
+        expect(groundingSnapshotRoot).toBeTruthy();
+        fs.writeFileSync(path.join(packSnapshotRoot!, 'agent.md'), 'pinned stale pack');
+        fs.writeFileSync(path.join(groundingSnapshotRoot!, 'grounding.md'), 'pinned stale grounding');
+
+        expect(await skill.handlers.space_set_pack({ pack_id: 'jeeves' }, context)).toContain(
+            'refreshed pack "jeeves"'
+        );
+        expect(fs.readFileSync(path.join(packSnapshotRoot!, 'agent.md'), 'utf-8')).toContain('"id": "jeeves"');
+        expect(fs.readFileSync(path.join(groundingSnapshotRoot!, 'grounding.md'), 'utf-8')).not.toContain(
+            'pinned stale grounding'
+        );
+        expect(
+            db
+                .prepare('SELECT type FROM timeline_events WHERE space_id = ? ORDER BY happened_at DESC LIMIT 1')
+                .get('telegram:chat-1')
+        ).toEqual({ type: 'space.pack_refreshed' });
+
         expect(await skill.handlers.space_set_pack({ pack_id: 'office' }, context)).toContain('reseeded');
         expect(await skill.handlers.space_set_policy({ browser: false, tasks: true }, context)).toContain(
             'browser: false'

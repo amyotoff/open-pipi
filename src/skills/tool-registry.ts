@@ -8,11 +8,15 @@ export interface RegisteredSkillTool {
     skill: SkillManifest;
     declaration: FunctionDeclaration;
     handler: SkillToolHandler;
+    preflight?: (args: any) => Record<string, unknown>;
     meta: CapabilityMeta;
     approvalAction?: string;
     approvalReason?: string;
     /** Arguments to show the owner when asking them to approve this tool. */
     approvalDetailFields?: string[];
+    approvalActionFields?: string[];
+    approvalSingleUse?: boolean;
+    approvalResume?: boolean;
 }
 
 function resolveMeta(skill: SkillManifest, defaults: CapabilityMeta): CapabilityMeta {
@@ -58,6 +62,7 @@ export function buildSkillToolRegistry(
                 skill,
                 declaration,
                 handler,
+                preflight: skill.preflight?.[name],
                 meta: {
                     ...meta,
                     run_mode: toolMeta?.run_mode || meta.run_mode,
@@ -66,6 +71,9 @@ export function buildSkillToolRegistry(
                 approvalAction: toolMeta?.approval_action,
                 approvalReason: toolMeta?.approval_reason,
                 approvalDetailFields: toolMeta?.approval_detail_fields,
+                approvalActionFields: toolMeta?.approval_action_fields,
+                approvalSingleUse: toolMeta?.approval_single_use,
+                approvalResume: toolMeta?.approval_resume,
             });
         }
 
@@ -78,6 +86,12 @@ export function buildSkillToolRegistry(
         for (const toolMetaName of Object.keys(skill.toolMeta || {})) {
             if (!declaredNames.has(toolMetaName)) {
                 throw new Error(`Skill "${skill.name}" defines metadata for unknown tool "${toolMetaName}".`);
+            }
+        }
+
+        for (const preflightName of Object.keys(skill.preflight || {})) {
+            if (!declaredNames.has(preflightName)) {
+                throw new Error(`Skill "${skill.name}" defines preflight for unknown tool "${preflightName}".`);
             }
         }
     }

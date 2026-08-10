@@ -73,8 +73,34 @@ describe('core/policy', () => {
 
         expect(resolved.audit_trail).toBe('all');
         expect(allowed).toEqual(
-            expect.arrayContaining(['shell_none', 'workspace_read', 'artifact_write', 'external_http', 'web_browse'])
+            expect.arrayContaining([
+                'shell_none',
+                'workspace_read',
+                'artifact_write',
+                'external_http',
+                'web_browse',
+                'home_automation',
+            ])
         );
+    });
+
+    it('keeps local home automation independent from browser access', async () => {
+        const { db, policy } = await loadPolicyModule();
+
+        db.upsertSpace({
+            id: 'telegram:home',
+            kind: 'group_chat',
+            title: 'Home',
+            channel: 'telegram',
+            external_ref: 'home',
+            assistant_pack_id: 'jeeves',
+            policy_json: JSON.stringify({ browser: false }),
+        });
+
+        const allowed = policy.resolveAllowedCapabilities(policy.resolveSpacePolicy('telegram:home'));
+        expect(allowed).toContain('home_automation');
+        expect(allowed).not.toContain('external_http');
+        expect(allowed).not.toContain('web_browse');
     });
 
     it('keeps explicit allowed capabilities as the resolved contract', async () => {

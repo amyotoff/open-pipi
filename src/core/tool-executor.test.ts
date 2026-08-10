@@ -22,10 +22,14 @@ async function loadExecutor(customSpec?: (toolName: string, args: any) => any) {
               }
     );
     const getToolDeclarationForContext = vi.fn<(...args: any[]) => any>(() => undefined);
+    const preflightToolArgsForContext = vi.fn((_toolName: string, args: Record<string, unknown>) => args);
+    const isRegisteredSkillToolAllowedForContext = vi.fn<(...args: any[]) => boolean | undefined>(() => undefined);
 
     vi.doMock('../skills/_registry', () => ({
         getToolExecutionSpecForContext,
         getToolDeclarationForContext,
+        preflightToolArgsForContext,
+        isRegisteredSkillToolAllowedForContext,
     }));
 
     const getPackToolForContext = vi.fn<(...args: any[]) => any>(() => undefined);
@@ -77,6 +81,8 @@ async function loadExecutor(customSpec?: (toolName: string, args: any) => any) {
         mod,
         getToolExecutionSpecForContext,
         getToolDeclarationForContext,
+        preflightToolArgsForContext,
+        isRegisteredSkillToolAllowedForContext,
         getPackToolForContext,
         buildPackToolRuntimeSnapshot,
         runPackToolViaSandboxd,
@@ -316,6 +322,263 @@ describe('core/tool-executor', () => {
         expect(rows).toEqual([
             { status: 'blocked', error: 'approval_required' },
             { status: 'success', error: null },
+        ]);
+    });
+
+    it('binds a resumable single-use approval to exact canonical arguments', async () => {
+        const { db, mod } = await loadExecutor(() => ({
+            tool_name: 'home_assistant_control',
+            run_mode: 'sidecar',
+            approval: 'explicit',
+            approval_action: 'home_assistant_control',
+            approval_reason: 'changing a physical device',
+            approval_detail_fields: ['entity_id', 'action', 'value'],
+            approval_action_fields: ['entity_id', 'action', 'value'],
+            approval_single_use: true,
+            approval_resume: true,
+            audit_default: 'all',
+            capabilities: ['shell_none'],
+        }));
+        const approvals = await import('../utils/approvals');
+        const context = { chatId: 'home', userId: 'owner', spaceId: 'telegram:home' };
+        const handler = vi.fn(async () => 'physical action executed');
+        const exactArgs = { entity_id: 'light.kitchen', action: 'turn_off' };
+
+        db.upsertSpace({
+            id: context.spaceId,
+            kind: 'private',
+            title: 'Home',
+            channel: 'telegram',
+            external_ref: context.chatId,
+            assistant_pack_id: 'jeeves',
+            policy_json: JSON.stringify({ audit_trail: 'all' }),
+        });
+
+        const blocked = await mod.executeToolCall({
+            toolName: 'home_assistant_control',
+            toolArgs: exactArgs,
+            context,
+            handlers: { home_assistant_control: handler },
+        });
+        const [actionClass] = approvals.listPendingApprovalActions(context);
+
+        expect(blocked).toContain('Требуется явное подтверждение');
+        expect(blocked).toContain('entity_id: light.kitchen');
+        expect(actionClass).toMatch(/^home_assistant_control_[a-f0-9]{16}$/);
+        expect(handler).not.toHaveBeenCalled();
+
+        approvals.approvePendingAction(context, actionClass);
+        await expect(
+            mod.executeToolCall({
+                toolName: 'home_assistant_control',
+                toolArgs: exactArgs,
+                context,
+                handlers: { home_assistant_control: handler },
+            })
+        ).resolves.toBe('physical action executed');
+        expect(handler).toHaveBeenCalledTimes(1);
+
+        const replay = await mod.executeToolCall({
+            toolName: 'home_assistant_control',
+            toolArgs: exactArgs,
+            context,
+            handlers: { home_assistant_control: handler },
+        });
+        expect(replay).toContain('Требуется явное подтверждение');
+        expect(handler).toHaveBeenCalledTimes(1);
+
+        const changed = await mod.executeToolCall({
+            toolName: 'home_assistant_control',
+            toolArgs: { ...exactArgs, action: 'turn_on' },
+            context,
+            handlers: { home_assistant_control: handler },
+        });
+        expect(changed).toContain('Требуется явное подтверждение');
+        expect(approvals.listPendingApprovalActions(context)).toHaveLength(2);
+        expect(handler).toHaveBeenCalledTimes(1);
+
+        const rows = db.getDb().prepare('SELECT status, error FROM tool_execution_log ORDER BY id').all() as any[];
+        expect(rows).toEqual([
+            { status: 'blocked', error: 'approval_required' },
+            { status: 'success', error: null },
+            { status: 'blocked', error: 'approval_required' },
+            { status: 'blocked', error: 'approval_required' },
+        ]);
+    });
+
+    it('runs preflight before creating a central approval', async () => {
+        const { db, mod, preflightToolArgsForContext } = await loadExecutor(() => ({
+            tool_name: 'home_assistant_control',
+            run_mode: 'sidecar',
+            approval: 'explicit',
+            approval_action: 'home_assistant_control',
+            approval_action_fields: ['entity_id', 'action'],
+            approval_single_use: true,
+            approval_resume: true,
+            audit_default: 'all',
+            capabilities: ['shell_none'],
+        }));
+        const approvals = await import('../utils/approvals');
+        const context = { chatId: 'home-invalid', userId: 'owner', spaceId: 'telegram:home-invalid' };
+        const handler = vi.fn(async () => 'must not run');
+        preflightToolArgsForContext.mockImplementation(() => {
+            throw new Error('Entity is not in the control allowlist.');
+        });
+
+        db.upsertSpace({
+            id: context.spaceId,
+            kind: 'private',
+            title: 'Home',
+            channel: 'telegram',
+            external_ref: context.chatId,
+            assistant_pack_id: 'jeeves',
+            policy_json: JSON.stringify({ audit_trail: 'all' }),
+        });
+
+        const result = await mod.executeToolCall({
+            toolName: 'home_assistant_control',
+            toolArgs: { entity_id: 'lock.front_door', action: 'turn_on' },
+            context,
+            handlers: { home_assistant_control: handler },
+        });
+
+        expect(result).toContain('rejected its arguments');
+        expect(approvals.listPendingApprovalActions(context)).toEqual([]);
+        expect(handler).not.toHaveBeenCalled();
+        expect(db.getDb().prepare('SELECT status, error FROM tool_execution_log').get()).toEqual({
+            status: 'blocked',
+            error: 'invalid_arguments',
+        });
+    });
+
+    it('blocks a known skill tool outside the exact nested allowlist before preflight or approval', async () => {
+        const { db, mod, preflightToolArgsForContext, isRegisteredSkillToolAllowedForContext } = await loadExecutor(
+            () => ({
+                tool_name: 'home_assistant_control',
+                run_mode: 'sidecar',
+                approval: 'explicit',
+                approval_action: 'home_assistant_control',
+                approval_action_fields: ['entity_id', 'action'],
+                approval_single_use: true,
+                approval_resume: true,
+                audit_default: 'all',
+                capabilities: ['shell_none'],
+            })
+        );
+        const approvals = await import('../utils/approvals');
+        const context = {
+            chatId: 'home-restricted',
+            userId: 'owner',
+            spaceId: 'telegram:home-restricted',
+            allowedTools: ['home_assistant_get_state'],
+        };
+        const handler = vi.fn(async () => 'must not run');
+        isRegisteredSkillToolAllowedForContext.mockReturnValue(false);
+        db.upsertSpace({
+            id: context.spaceId,
+            kind: 'private',
+            title: 'Home',
+            channel: 'telegram',
+            external_ref: context.chatId,
+            assistant_pack_id: 'jeeves',
+            policy_json: JSON.stringify({ audit_trail: 'all' }),
+        });
+
+        const result = await mod.executeToolCall({
+            toolName: 'home_assistant_control',
+            toolArgs: { entity_id: 'light.kitchen', action: 'turn_off' },
+            context,
+            handlers: { home_assistant_control: handler },
+        });
+
+        expect(result).toContain('not allowed in the current execution context');
+        expect(preflightToolArgsForContext).not.toHaveBeenCalled();
+        expect(approvals.listPendingApprovalActions(context)).toEqual([]);
+        expect(handler).not.toHaveBeenCalled();
+
+        isRegisteredSkillToolAllowedForContext.mockReturnValue(true);
+        const disabledContext = {
+            ...context,
+            allowedTools: ['home_assistant_control'],
+            disabledTools: ['home_assistant_control'],
+        };
+        const disabled = await mod.executeToolCall({
+            toolName: 'home_assistant_control',
+            toolArgs: { entity_id: 'light.kitchen', action: 'turn_off' },
+            context: disabledContext,
+            handlers: { home_assistant_control: handler },
+        });
+        expect(disabled).toContain('not allowed in the current execution context');
+        expect(preflightToolArgsForContext).not.toHaveBeenCalled();
+        expect(approvals.listPendingApprovalActions(disabledContext)).toEqual([]);
+        expect(handler).not.toHaveBeenCalled();
+        expect(db.getDb().prepare('SELECT status, error FROM tool_execution_log ORDER BY id').all()).toEqual([
+            { status: 'blocked', error: 'tool_not_allowed' },
+            { status: 'blocked', error: 'tool_not_allowed' },
+        ]);
+    });
+
+    it('consumes exact approval even when the admitted physical call has an unknown outcome', async () => {
+        const { db, mod } = await loadExecutor(() => ({
+            tool_name: 'home_assistant_control',
+            run_mode: 'sidecar',
+            approval: 'explicit',
+            approval_action: 'home_assistant_control',
+            approval_action_fields: ['entity_id', 'action'],
+            approval_single_use: true,
+            approval_resume: true,
+            audit_default: 'all',
+            capabilities: ['shell_none'],
+        }));
+        const approvals = await import('../utils/approvals');
+        const context = { chatId: 'home-error', userId: 'owner', spaceId: 'telegram:home-error' };
+        const args = { entity_id: 'light.kitchen', action: 'turn_off' };
+        const handler = vi.fn(async () => {
+            throw new Error('The Home Assistant control outcome is unknown.');
+        });
+        db.upsertSpace({
+            id: context.spaceId,
+            kind: 'private',
+            title: 'Home',
+            channel: 'telegram',
+            external_ref: context.chatId,
+            assistant_pack_id: 'jeeves',
+            policy_json: JSON.stringify({ audit_trail: 'all' }),
+        });
+
+        await mod.executeToolCall({
+            toolName: 'home_assistant_control',
+            toolArgs: args,
+            context,
+            handlers: { home_assistant_control: handler },
+        });
+        const [actionClass] = approvals.listPendingApprovalActions(context);
+        approvals.approvePendingAction(context, actionClass);
+
+        await expect(
+            mod.executeToolCall({
+                toolName: 'home_assistant_control',
+                toolArgs: args,
+                context,
+                handlers: { home_assistant_control: handler },
+            })
+        ).rejects.toThrow('outcome is unknown');
+        expect(handler).toHaveBeenCalledTimes(1);
+
+        const retry = await mod.executeToolCall({
+            toolName: 'home_assistant_control',
+            toolArgs: args,
+            context,
+            handlers: { home_assistant_control: handler },
+        });
+        expect(retry).toContain('Требуется явное подтверждение');
+        expect(handler).toHaveBeenCalledTimes(1);
+
+        const rows = db.getDb().prepare('SELECT status, error FROM tool_execution_log ORDER BY id').all() as any[];
+        expect(rows).toEqual([
+            { status: 'blocked', error: 'approval_required' },
+            { status: 'error', error: 'The Home Assistant control outcome is unknown.' },
+            { status: 'blocked', error: 'approval_required' },
         ]);
     });
 

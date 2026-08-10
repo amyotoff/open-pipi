@@ -120,4 +120,56 @@ describe('Open PiPi doctor', () => {
         expect(checks.find((item) => item.id === 'discord')?.message).toContain('discord.js');
         expect(checks.some((item) => item.id === 'gmail')).toBe(false);
     });
+
+    it('validates Home Assistant without exposing its token', () => {
+        const configured = inspectDoctor(
+            buildInput({
+                HOME_ASSISTANT_URL: 'http://127.0.0.1:8123',
+                HOME_ASSISTANT_TOKEN: 'private-ha-token',
+                HOME_ASSISTANT_READ_ENTITIES: 'sensor.hall_temperature',
+                HOME_ASSISTANT_CONTROL_ENTITIES: 'light.kitchen,switch.coffee',
+            }),
+            buildIO()
+        );
+        const check = configured.find((item) => item.id === 'home-assistant');
+
+        expect(check).toMatchObject({ status: 'pass' });
+        expect(check?.message).toContain('3 exact entities');
+        expect(JSON.stringify(check)).not.toContain('private-ha-token');
+
+        const unsafe = inspectDoctor(
+            buildInput({
+                HOME_ASSISTANT_TOKEN: 'private-ha-token',
+                HOME_ASSISTANT_CONTROL_ENTITIES: 'lock.front_door',
+            }),
+            buildIO()
+        );
+        expect(unsafe.find((item) => item.id === 'home-assistant')).toMatchObject({ status: 'fail' });
+    });
+
+    it('keeps the optional Home Assistant addon dormant until a token or allowlist is configured', () => {
+        const checks = inspectDoctor(
+            buildInput({
+                HOME_ASSISTANT_URL: 'http://127.0.0.1:8123',
+                HOME_ASSISTANT_TIMEOUT_MS: '5000',
+                HOME_ASSISTANT_TOKEN: '',
+                HOME_ASSISTANT_READ_ENTITIES: '',
+                HOME_ASSISTANT_CONTROL_ENTITIES: '',
+            }),
+            buildIO()
+        );
+
+        expect(checks.some((item) => item.id === 'home-assistant')).toBe(false);
+    });
+
+    it('warns for token-only setup and fails an allowlist without a token', () => {
+        const tokenOnly = inspectDoctor(buildInput({ HOME_ASSISTANT_TOKEN: 'private-ha-token' }), buildIO());
+        expect(tokenOnly.find((item) => item.id === 'home-assistant')).toMatchObject({ status: 'warn' });
+
+        const allowlistOnly = inspectDoctor(
+            buildInput({ HOME_ASSISTANT_CONTROL_ENTITIES: 'light.kitchen' }),
+            buildIO()
+        );
+        expect(allowlistOnly.find((item) => item.id === 'home-assistant')).toMatchObject({ status: 'fail' });
+    });
 });

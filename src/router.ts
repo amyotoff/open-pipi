@@ -20,21 +20,23 @@ function endpointTypeForChannelMessage(message: IncomingChannelMessage): Transpo
     return message.isDirect ? 'direct' : 'group';
 }
 
+function containsExactMention(text: string, username: string): boolean {
+    const escaped = username.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(^|[^A-Za-z0-9_])@${escaped}(?![A-Za-z0-9_])`, 'i').test(text);
+}
+
 /**
  * These channels resolve "was this aimed at the assistant" the way the router
  * always did for them: an @mention of the bot's username, or a reply to one of
  * its own messages.
  */
 function isAddressedToAssistant(message: IncomingChannelMessage): boolean {
-    const mentioned = message.botUsername
-        ? message.text.toLowerCase().includes(`@${message.botUsername.toLowerCase()}`)
-        : false;
+    const mentioned = message.botUsername ? containsExactMention(message.text, message.botUsername) : false;
 
     const repliedTo = Boolean(
         message.replyTo &&
-        (message.replyTo.senderUsername === message.botUsername ||
-            message.replyTo.senderId === message.botUserId ||
-            message.replyTo.isBot)
+        ((message.botUsername && message.replyTo.senderUsername?.toLowerCase() === message.botUsername.toLowerCase()) ||
+            (message.botUserId && message.replyTo.senderId === message.botUserId))
     );
 
     return mentioned || repliedTo;

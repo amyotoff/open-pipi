@@ -9,10 +9,11 @@
  */
 
 import { SpanKind } from '@opentelemetry/api';
-import { getParticipantIdentity, getSpace, storeMessage, type Space } from '../db';
+import { getParticipantIdentity, getSpace, logEvent, storeMessage, type Space } from '../db';
 import { isOwner } from '../config';
 import { buildChannelPersonId, sendChannelMessageNow } from '../channels/runtime';
-import { recordApprovalResponse } from '../utils/approvals';
+import { listPendingApprovalDetails, recordApprovalResponse } from '../utils/approvals';
+import { executeApprovedToolContinuations, formatApprovedToolContinuationReply } from '../core/approval-continuation';
 import { logInfo, logWarn, summarizeText } from '../utils/logging';
 import { evaluateAuthorityGuard } from '../core/authority-guard';
 import { addSpanAttributes, addSpanEvent, recordInboundMessage, withSpan } from '../observability';
@@ -68,19 +69,67 @@ function injectReplyContext(message: IncomingMessage, text: string): string {
     return `[Replying to ${replyAuthor}: "${snippet}"]\n${text}`;
 }
 
-/**
- * Persist approval decisions as transcript context, so later turns can see the
- * user intent without re-checking ephemeral approval state.
- */
-function injectApprovalContext(spaceId: string, endpointId: string, participantId: string, text: string): string {
-    const approval = recordApprovalResponse({ spaceId, chatId: endpointId, userId: participantId }, text);
+async function resolveRoutedApproval(input: {
+    message: IncomingMessage;
+    spaceId: string;
+    participantId: string;
+    content: string;
+    options?: HandleIncomingOptions;
+}): Promise<{ content: string; handled: boolean }> {
+    const { message, spaceId, participantId } = input;
+    const rawText = message.content.text || '';
+    const approvalScope = { spaceId, chatId: message.endpoint.id, userId: participantId };
+    const pendingTools = new Map(
+        listPendingApprovalDetails(approvalScope).map(({ actionClass, toolName }) => [actionClass, toolName])
+    );
+    const approval = recordApprovalResponse(approvalScope, rawText);
+    for (const actionClass of approval.granted) {
+        logEvent('approval_decision', {
+            space_id: spaceId,
+            user_id: participantId,
+            channel: message.transport,
+            channel_ref: message.endpoint.id,
+            action_class: actionClass,
+            tool_name:
+                approval.continuations?.find((item) => item.actionClass === actionClass)?.toolName ||
+                pendingTools.get(actionClass) ||
+                null,
+            decision: 'approved',
+            source: 'message',
+        });
+    }
+    for (const actionClass of approval.denied) {
+        logEvent('approval_decision', {
+            space_id: spaceId,
+            user_id: participantId,
+            channel: message.transport,
+            channel_ref: message.endpoint.id,
+            action_class: actionClass,
+            tool_name: pendingTools.get(actionClass) || null,
+            decision: 'denied',
+            source: 'message',
+        });
+    }
+    let content = input.content;
     if (approval.granted.length > 0) {
-        return `[SYSTEM] User approved sensitive actions: ${approval.granted.join(', ')}.\n${text}`;
+        content = `[SYSTEM] User approved sensitive actions: ${approval.granted.join(', ')}.\n${content}`;
     }
     if (approval.denied.length > 0) {
-        return `[SYSTEM] User denied sensitive actions: ${approval.denied.join(', ')}.\n${text}`;
+        content = `[SYSTEM] User denied sensitive actions: ${approval.denied.join(', ')}.\n${content}`;
     }
-    return text;
+
+    if (!approval.continuations?.length) return { content, handled: false };
+
+    const results = await executeApprovedToolContinuations(approval.continuations, {
+        userId: participantId,
+        spaceId,
+        chatId: message.transport === 'telegram' ? message.endpoint.id : undefined,
+        channel: message.transport,
+        channelRef: message.endpoint.id,
+    });
+    const response = formatApprovedToolContinuationReply(results) || 'The approved action could not be completed.';
+    await reply(message, response, input.options);
+    return { content, handled: true };
 }
 
 function persist(input: { message: IncomingMessage; space: Space; participantId: string; content: string }): {
@@ -237,14 +286,7 @@ export async function handleIncoming(message: IncomingMessage, options?: HandleI
             const participant = resolveParticipant(message, space.id);
             addSpanAttributes({ 'app.participant_id': participant.participantId });
 
-            const content = image
-                ? `[PHOTO] ${text}`
-                : injectApprovalContext(
-                      space.id,
-                      message.endpoint.id,
-                      participant.participantId,
-                      injectReplyContext(message, text)
-                  );
+            let content = image ? `[PHOTO] ${text}` : injectReplyContext(message, text);
 
             const stored = persist({ message, space, participantId: participant.participantId, content });
             if (!stored.inserted) {
@@ -312,6 +354,15 @@ export async function handleIncoming(message: IncomingMessage, options?: HandleI
             }
 
             if (participation.isDirect) {
+                const approval = await resolveRoutedApproval({
+                    message,
+                    spaceId: space.id,
+                    participantId: participant.participantId,
+                    content,
+                    options,
+                });
+                if (approval.handled) return;
+                content = approval.content;
                 addSpanAttributes({ 'app.route': 'direct_butler' });
                 await handleButlerMessage({
                     channel: message.transport,
@@ -340,6 +391,18 @@ export async function handleIncoming(message: IncomingMessage, options?: HandleI
             );
             addSpanAttributes({ 'app.primary_group_handled': shouldHandle });
             if (!shouldHandle) return;
+
+            if (message.addressedToAssistant) {
+                const approval = await resolveRoutedApproval({
+                    message,
+                    spaceId: space.id,
+                    participantId: participant.participantId,
+                    content,
+                    options,
+                });
+                if (approval.handled) return;
+                content = approval.content;
+            }
 
             await handleButlerMessage({
                 channel: message.transport,

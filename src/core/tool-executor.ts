@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'node:crypto';
 import { Schema, Type } from '@google/genai';
 import {
     appendToolExecutionLogData,
@@ -12,14 +13,23 @@ import {
 } from '../db';
 import { buildPackToolRuntimeSnapshot, getPackToolForContext } from './pack-tool-runtime';
 import { PackToolDescriptor } from './pack-types';
-import { getToolDeclarationForContext, getToolExecutionSpecForContext } from '../skills/_registry';
+import {
+    getToolDeclarationForContext,
+    getToolExecutionSpecForContext,
+    isRegisteredSkillToolAllowedForContext,
+    preflightToolArgsForContext,
+} from '../skills/_registry';
 import { resolveAllowedCapabilities, resolveSpacePolicyForContext } from './policy';
 import { RuntimeExecutionContext } from './runtime-context';
 import { AuditMode, normalizeAuditMode, ToolExecutionSpec } from './tool-execution';
 import { runPackToolViaSandboxd } from './sandbox-client';
 import { addSpanAttributes, addSpanEvent, recordToolCallTelemetry, withSpan } from '../observability';
 import { normalizeArrayInput } from '../utils/tool-input';
-import { requireToolApproval } from '../utils/approvals';
+import {
+    requireResumableSingleUseToolApproval,
+    requireSingleUseToolApproval,
+    requireToolApproval,
+} from '../utils/approvals';
 
 type ToolHandler = (args: any, context?: RuntimeExecutionContext) => Promise<string>;
 type HandlerMap = Record<string, ToolHandler>;
@@ -190,6 +200,16 @@ export function describeApprovalRequest(spec: ToolExecutionSpec, args: Record<st
     return details.length > 0 ? `${reason} — ${details.join(', ')}` : reason;
 }
 
+function resolveApprovalActionClass(spec: ToolExecutionSpec, args: Record<string, unknown>): string | undefined {
+    const base = spec.approval_action;
+    const fields = spec.approval_action_fields || [];
+    if (!base || fields.length === 0) return base;
+
+    const boundArgs = Object.fromEntries(fields.map((field) => [field, args[field] ?? null]));
+    const digest = crypto.createHash('sha256').update(JSON.stringify(boundArgs)).digest('hex').slice(0, 16);
+    return `${base}_${digest}`;
+}
+
 function capabilityBlockMessage(toolName: string, required: string[], allowed: string[]): string {
     return `[TOOL_RESULT] Tool "${toolName}" is blocked by current execution policy. Required: ${required.join(', ')}. Allowed: ${allowed.join(', ')}.`;
 }
@@ -344,8 +364,21 @@ export async function executeToolCall(args: {
         },
         async () => {
             const startedMs = Date.now();
+            const registeredSkillAccess = isRegisteredSkillToolAllowedForContext(toolName, context);
+            const runtimeToolAccess =
+                (!context.allowedTools || context.allowedTools.includes(toolName)) &&
+                !(context.disabledTools || []).includes(toolName);
+            const toolAccessDenied = registeredSkillAccess === false || !runtimeToolAccess;
             const declaration = getToolDeclarationForContext(toolName, context);
-            const normalizedToolArgs = normalizeToolArgsFromSchema(declaration?.parameters, toolArgs || {});
+            let normalizedToolArgs = normalizeToolArgsFromSchema(declaration?.parameters, toolArgs || {});
+            let preflightError: unknown;
+            if (!toolAccessDenied) {
+                try {
+                    normalizedToolArgs = preflightToolArgsForContext(toolName, normalizedToolArgs, context);
+                } catch (error) {
+                    preflightError = error;
+                }
+            }
             const spec = getToolExecutionSpecForContext(toolName, normalizedToolArgs, context);
             const auditMode = resolveEffectiveAuditMode(spec, context);
             const spacePolicy = resolveSpacePolicyForContext(context);
@@ -375,6 +408,27 @@ export async function executeToolCall(args: {
                 return outcome.result || '';
             };
 
+            if (toolAccessDenied) {
+                const result = `[TOOL_RESULT] Tool "${toolName}" is not allowed in the current execution context.`;
+                const logId = beginAuditLog(spec, context, auditMode, normalizedToolArgs);
+                return finish(logId, {
+                    status: 'blocked',
+                    result,
+                    error: 'tool_not_allowed',
+                });
+            }
+
+            if (preflightError) {
+                const message = preflightError instanceof Error ? preflightError.message : 'Invalid tool arguments.';
+                const result = `[TOOL_RESULT] Tool "${toolName}" rejected its arguments: ${message}`;
+                const logId = beginAuditLog(spec, context, auditMode, normalizedToolArgs);
+                return finish(logId, {
+                    status: 'blocked',
+                    result,
+                    error: 'invalid_arguments',
+                });
+            }
+
             if (missingCapabilities.length > 0) {
                 const result = capabilityBlockMessage(toolName, spec.capabilities, allowedCapabilities);
                 const logId = beginAuditLog(spec, context, auditMode, normalizedToolArgs);
@@ -396,12 +450,20 @@ export async function executeToolCall(args: {
             }
 
             if (spec.approval === 'explicit') {
-                const result = requireToolApproval(
-                    toolName,
-                    context,
-                    describeApprovalRequest(spec, normalizedToolArgs),
-                    spec.approval_action
-                );
+                const prompt = describeApprovalRequest(spec, normalizedToolArgs);
+                const actionClass = resolveApprovalActionClass(spec, normalizedToolArgs);
+                const result =
+                    spec.approval_resume && actionClass
+                        ? requireResumableSingleUseToolApproval(
+                              toolName,
+                              context,
+                              prompt,
+                              actionClass,
+                              normalizedToolArgs
+                          )
+                        : spec.approval_single_use && actionClass
+                          ? requireSingleUseToolApproval(toolName, context, prompt, actionClass)
+                          : requireToolApproval(toolName, context, prompt, actionClass);
                 if (result) {
                     const logId = beginAuditLog(spec, context, auditMode, normalizedToolArgs);
                     return finish(logId, {

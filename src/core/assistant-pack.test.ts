@@ -59,6 +59,12 @@ describe('core/assistant-pack', () => {
         expect(reporter.enabled_capabilities).toContain('projects');
         expect(jeeves.enabled_capabilities).toContain('shopping');
         expect(jeeves.enabled_capabilities).toContain('projects');
+        expect(jeeves.enabled_capabilities).toContain('family');
+        expect(jeeves.enabled_capabilities).toContain('home_assistant');
+        expect(jeeves.family_members).toEqual(
+            expect.arrayContaining([expect.objectContaining({ id: 'home_operator', role: 'Home Assistant operator' })])
+        );
+        expect(jeeves.skills_doc).toContain('member_id: home_operator');
         expect(mod.getSystemPromptForPack('reporter')).toContain('research and reporting assistant');
     });
 
