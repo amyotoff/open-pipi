@@ -175,7 +175,7 @@ describe('brain skill', () => {
         expect(archived).toContain('health/sleep-summary.md');
 
         const linted = await skill.handlers.wiki_lint({}, context);
-        expect(linted).toContain('Wiki lint:');
+        expect(linted).toContain('Shared wiki —');
     });
 
     it('declares the background jobs that make ingest and lint run without the owner', async () => {
@@ -189,7 +189,7 @@ describe('brain skill', () => {
         }
     });
 
-    it('serves the schema layer and lets a space replace it', async () => {
+    it('shows the schema that actually governs the shared wiki', async () => {
         const skill = await loadSkill();
         const context = {
             channel: 'telegram',
@@ -200,7 +200,11 @@ describe('brain skill', () => {
         };
 
         const shipped = await skill.handlers.wiki_schema({}, context);
+        expect(shipped).toContain('Schema in force for the shared wiki');
         expect(shipped).toContain('Compile, never append');
+
+        // Nothing writes a schema override yet, so no tool may claim to.
+        expect(skill.tools.map((tool) => tool.name)).not.toContain('wiki_schema_set');
 
         const withTemplate = await skill.handlers.wiki_schema({ template: 'article' }, context);
         expect(withTemplate).toContain('--- article template ---');
@@ -208,32 +212,6 @@ describe('brain skill', () => {
 
         const missing = await skill.handlers.wiki_schema({ template: 'nope' }, context);
         expect(missing).toContain('no template named');
-    });
-
-    it('gates the schema rewrite behind an explicit approval', async () => {
-        const skill = await loadSkill();
-
-        // Changing the maintenance rules is not something to do silently on a model's say-so.
-        expect(skill.toolMeta?.wiki_schema_set?.approval).toBe('explicit');
-        expect(skill.toolMeta?.wiki_schema_set?.approval_detail_fields).toContain('content');
-    });
-
-    it('refuses a schema rewrite from someone who is not the space owner', async () => {
-        const skill = await loadSkill();
-        const context = {
-            channel: 'telegram',
-            channelRef: 'chat-1',
-            chatId: 'chat-1',
-            userId: 'not-the-owner',
-            spaceId: 'telegram:chat-1',
-        };
-
-        const denied = await skill.handlers.wiki_schema_set({ content: '# Only compile recipes' }, context);
-        expect(denied).toContain('Only the owner of this space');
-
-        // The shipped schema is still in force.
-        const schema = await skill.handlers.wiki_schema({}, context);
-        expect(schema).toContain('Compile, never append');
     });
 
     it('saves to the shared wiki and files a document batch, both behind an approval', async () => {
@@ -307,5 +285,48 @@ describe('brain skill', () => {
             { ...context, channelRef: 'chat-b', chatId: 'chat-b', spaceId: 'telegram:chat-b' }
         );
         expect(elsewhere).toContain('found no page');
+    });
+
+    it('refuses a chat-local edit to a page the shared wiki owns', async () => {
+        const skill = await loadSkill();
+        const context = {
+            channel: 'telegram',
+            channelRef: 'chat-a',
+            chatId: 'chat-a',
+            userId: '111',
+            spaceId: 'telegram:chat-a',
+        };
+
+        await skill.handlers.wiki_save({ path: 'people/anna.md', body: '# Anna\n\nThe shared version.' }, context);
+
+        // Reads prefer the shared wiki, so a local write here would report a lie.
+        await expect(
+            skill.handlers.update_wiki_page({ path: 'people/anna.md', body: '# Anna\n\nLocal edit.' }, context)
+        ).rejects.toThrow(/lives in the shared wiki/);
+
+        const page = await skill.handlers.read_wiki_page({ path: 'people/anna.md' }, context);
+        expect(page).toContain('The shared version.');
+        expect(page).not.toContain('Local edit.');
+    });
+
+    it('puts the batch size and titles in front of the owner before filing', async () => {
+        const skill = await loadSkill();
+
+        expect(
+            skill.preflight?.wiki_capture_documents?.({ documents: [{ title: 'Lease' }, { title: 'Warranty' }] })
+        ).toMatchObject({ count: 2, titles: 'Lease, Warranty' });
+        expect(skill.preflight?.wiki_save?.({ path: 'a.md', body: '# A\n\nThe body text.' }).preview).toBe(
+            '# A The body text.'
+        );
+
+        // Every approval detail field must exist as an argument, or the prompt shows nothing.
+        for (const [tool, meta] of Object.entries(skill.toolMeta || {})) {
+            const prepared = skill.preflight?.[tool]?.({ documents: [], body: '', path: 'a.md', title: 't' }) ?? {
+                title: 't',
+            };
+            for (const field of meta.approval_detail_fields || []) {
+                expect(Object.keys(prepared)).toContain(field);
+            }
+        }
     });
 });

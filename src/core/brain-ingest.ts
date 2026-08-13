@@ -379,7 +379,7 @@ const MAX_SOURCE_PROMPT_CHARS = 24_000;
 const MAX_FULL_PAGE_PROMPT_CHARS = 24_000;
 /** Continuation passes for a plan that did not fit one job, before giving up. */
 const MAX_COMPILE_ATTEMPTS = 3;
-/** How many existing pages the compile prompt carries in full; the rest are named. */
+/** How many existing pages one compile job may read in full. Beyond this it refuses. */
 const MAX_TARGET_BODIES = 8;
 const DISPOSITIONS: Disposition[] = ['new', 'update', 'disputed', 'no_material'];
 
@@ -535,11 +535,17 @@ export async function compileRawSource(
         ? input.triage.targets
         : searchWikiRows({ ...scope, query: input.source.title, limit: 5 }).map((row) => row.path);
 
+    if (targets.length > MAX_TARGET_BODIES) {
+        // Naming a page without showing it would let the compiler replace a body it never
+        // read. Splitting the source is the owner's call, not something to guess around.
+        throw new BrainOverflowError(
+            `triage points at ${targets.length} pages, more than the ${MAX_TARGET_BODIES} this job can read in full; split the source into narrower ones`
+        );
+    }
+
     // A page the model cannot be shown in full may be patched, never replaced.
     const patchOnly = new Set<string>();
-    const shownTargets = targets.slice(0, MAX_TARGET_BODIES);
-    const namedOnly = targets.slice(MAX_TARGET_BODIES);
-    const targetBodies = shownTargets
+    const targetBodies = targets
         .map((target) => {
             const page = readWikiPage(target, scope);
             if (!page.exists) return '';
@@ -558,9 +564,6 @@ export async function compileRawSource(
 
     const prompt = [
         `Disposition from triage: ${input.triage.disposition}. ${input.triage.rationale}`,
-        namedOnly.length > 0
-            ? `Triage also flagged these pages, not shown in full here: ${namedOnly.join(', ')}. Patch them by section if they are affected.`
-            : '',
         `The raw file is linked as: ../../${input.source.path}`,
         '<existing_pages>',
         targetBodies || '(no existing pages matched)',

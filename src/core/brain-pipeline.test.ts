@@ -380,27 +380,22 @@ describe('brain ingest pipeline', () => {
         expect(brain.listWikiPages(scope).filter((page) => page.path.startsWith('health/p'))).toHaveLength(8);
     });
 
-    it('keeps every triage hint, naming the pages the prompt cannot carry in full', async () => {
+    it('refuses a job that points at more pages than it can read in full', async () => {
         const targets = Array.from({ length: 11 }, (_, index) => `health/t${index}.md`);
-        const { brain, ingest, generateBrainText } = await loadPipeline([
-            triage('update', targets),
-            JSON.stringify({
-                subject: 'Sleep',
-                pages: [{ path: 'health/sleep.md', title: 'Sleep', body: '# Sleep\n\nCompiled.' }],
-            }),
-        ]);
+        const { brain, ingest } = await loadPipeline([triage('update', targets)]);
 
         for (const target of targets) {
             brain.updateWikiPage({ ...scope, path: target, body: `# ${target}\n\n## Sleep\n\nOld.` });
         }
-        ingest.captureRawSource({ ...scope, title: 'S', content: 'Body.', topic: 'health' });
-        await ingest.runIngestQueue({ ...scope });
+        const captured = ingest.captureRawSource({ ...scope, title: 'S', content: 'Body.', topic: 'health' });
+        const run = await ingest.runIngestQueue({ ...scope });
 
-        const compilePrompt = generateBrainText.mock.calls[1][0].prompt as string;
-        // The first eight arrive with their bodies; the ninth onward are still named.
-        expect(compilePrompt).toContain('<page path="health/t0.md">');
-        expect(compilePrompt).toContain('not shown in full here');
-        expect(compilePrompt).toContain('health/t8.md');
-        expect(compilePrompt).toContain('health/t10.md');
+        expect(run.compiled).toBe(0);
+        const source = ingest.getRawSource(captured.source.path, scope);
+        expect(source?.state).toBe('failed');
+        expect(source?.last_error).toContain('split the source into narrower ones');
+
+        // Nothing was replaced on the strength of a name alone.
+        expect(brain.readWikiPage('health/t9.md', scope).content).toContain('Old.');
     });
 });

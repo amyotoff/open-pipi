@@ -18,6 +18,8 @@ All notable changes to Open PiPi will be documented in this file.
 - PiPi can propose a save itself. That is the same path: it decides what is worth keeping, the
   owner decides whether it is kept. Writes to the shared wiki always ask first, which is what makes
   a page everyone can read a decision somebody made rather than a side effect of a conversation.
+  The confirmation names what is being written — the page path and the opening of the body, or the
+  size of a document batch and the first few titles.
 
 ### Changed
 
@@ -25,7 +27,11 @@ All notable changes to Open PiPi will be documented in this file.
   written before the wiki became shared. Reads check the shared wiki first and fall back to the
   chat's own pages, so nothing is stranded and nothing needs migrating. Search marks a page that is
   visible in one chat only.
-- The shared wiki is ingested and linted once for the install rather than once per space.
+- The shared wiki is ingested and linted once for the install rather than once per space, and
+  `wiki_lint` from a chat lints the shared wiki, because that is the one everyone reads.
+- `update_wiki_page` and `brain_capture` are named chat-local in their own descriptions, and
+  `update_wiki_page` refuses a path the shared wiki already holds instead of reporting a change
+  nobody can see. `wiki_capture_documents` takes one document as readily as a batch.
 - Memory is untouched: it stays per person and per chat. "Remember this" still means this chat;
   "save this to the wiki" means the household.
 

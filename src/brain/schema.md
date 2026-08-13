@@ -82,8 +82,10 @@ it and let the owner decide. Automatic filing always stays in the chat it came f
 answer there. Both ask the owner first — including when you propose the save yourself,
 which you should whenever a conversation produces knowledge worth keeping.
 
-**Ingest.** `brain_capture` files a source into the current chat's `raw/`;
-`wiki_capture_documents` files a batch of already-converted documents into the shared wiki.
+**Ingest.** `brain_capture` files a source into the current chat's own `raw/` — use it when
+you are filing something on your own initiative;
+`wiki_capture_documents` files one or more already-converted documents into the shared wiki,
+which is where a document the owner hands you belongs.
 Either way a background job triages the source against the index, then compiles it. Triage
 dispositions:
 
