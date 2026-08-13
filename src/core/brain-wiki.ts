@@ -14,6 +14,8 @@ import {
     listMarkdownFiles,
     nowIso,
     scopedRelativePath,
+    sharedScope,
+    toScope,
 } from './brain-store';
 
 /**
@@ -137,6 +139,15 @@ function stringMeta(value: unknown, fallback: string): string {
     return typeof value === 'string' && value.trim() ? value.trim() : fallback;
 }
 
+/**
+ * `shared` is readable by everyone in the install, `space` only inside its chat, and
+ * `owner` only by the owner. The shared wiki is the household's; a chat's pages are not.
+ */
+export function defaultVisibility(scope?: BrainScopeInput): string {
+    if (scope?.shared) return 'shared';
+    return scope?.spaceId ? 'space' : 'owner';
+}
+
 export function wikiTopicOf(relativePath: string): string {
     const dir = path.posix.dirname(relativePath);
     return dir === '.' ? 'general' : dir.split('/')[0];
@@ -210,7 +221,7 @@ function indexWikiPage(
         title,
         kind: stringMeta(parsed.meta.kind, 'article'),
         status: stringMeta(parsed.meta.status, 'canonical'),
-        visibility: stringMeta(parsed.meta.visibility, scope?.spaceId ? 'space' : 'owner'),
+        visibility: stringMeta(parsed.meta.visibility, defaultVisibility(scope)),
         excerpt: excerptOf(body),
         sources_json: JSON.stringify(arrayMeta(parsed.meta.sources)),
         knowledge_updated_at: stringMeta(parsed.meta.knowledge_updated_at, dayStamp(updatedAt)),
@@ -260,7 +271,7 @@ function writeWikiPage(
         kind: 'article',
         status: 'canonical',
         // D3: pages inherit the visibility of the scope they are compiled in.
-        visibility: scope?.spaceId ? 'space' : 'owner',
+        visibility: defaultVisibility(scope),
         frontmatter_format: 'json',
         created_at: existing.meta.created_at || currentIso,
         ...existing.meta,
@@ -316,31 +327,54 @@ export interface WikiReader extends BrainScopeInput {
  * hidden from search — they are unreadable by path, or the field would be decoration.
  */
 export function visibilityForReader(reader: WikiReader): string[] {
-    // The host-level wiki has no space audience; it belongs to the owner.
-    if (!reader.spaceId) return ['owner', 'space'];
-    if (!reader.personId) return ['space'];
+    // Everyone in the install reads the shared wiki; that is what makes it shared.
+    if (!reader.spaceId) return ['shared', 'owner', 'space'];
+    if (!reader.personId) return ['shared', 'space'];
 
     const isOwner =
         getMembership(reader.spaceId, reader.personId)?.role === 'owner' ||
         getResident(reader.personId)?.role === 'owner';
-    return isOwner ? ['space', 'owner'] : ['space'];
+    return isOwner ? ['shared', 'space', 'owner'] : ['shared', 'space'];
 }
 
 export function pageVisibility(scope: BrainScopeInput | undefined, content: string): string {
-    return stringMeta(parseJsonFrontmatter(content).meta.visibility, scope?.spaceId ? 'space' : 'owner');
+    return stringMeta(parseJsonFrontmatter(content).meta.visibility, defaultVisibility(scope));
 }
 
 /**
  * Read a page as a particular person. Returns `allowed: false` with no content when the
  * page is above the reader's visibility, so knowing a path is not a way around D3.
  */
-export function readWikiPageForReader(input: { path: string } & WikiReader): BrainWikiPage & { allowed: boolean } {
-    const scope: BrainScopeInput = { spaceId: input.spaceId };
-    const page = readWikiPage(input.path, scope);
-    if (!page.exists) return { ...page, allowed: true };
+export function readWikiPageForReader(
+    input: { path: string } & WikiReader
+): BrainWikiPage & { allowed: boolean; origin: 'shared' | 'space' } {
+    const allowedLevels = visibilityForReader(input);
 
-    const allowed = visibilityForReader(input).includes(pageVisibility(scope, page.content));
-    return allowed ? { ...page, allowed } : { ...page, content: '', allowed: false };
+    // The shared wiki first; a chat's own older pages remain readable as a fallback.
+    const candidates: Array<{ scope: BrainScopeInput; origin: 'shared' | 'space' }> = [
+        { scope: sharedScope({ spaceId: input.spaceId }), origin: 'shared' },
+    ];
+    if (input.spaceId) candidates.push({ scope: { spaceId: input.spaceId }, origin: 'space' });
+
+    let denied: (BrainWikiPage & { origin: 'shared' | 'space' }) | null = null;
+    for (const candidate of candidates) {
+        const page = readWikiPage(input.path, candidate.scope);
+        if (!page.exists) continue;
+        if (allowedLevels.includes(pageVisibility(candidate.scope, page.content))) {
+            return { ...page, allowed: true, origin: candidate.origin };
+        }
+        denied = { ...page, origin: candidate.origin };
+    }
+
+    if (denied) return { ...denied, content: '', allowed: false };
+    return {
+        path: normalizeWikiPath(input.path),
+        file_path: '',
+        exists: false,
+        content: '',
+        allowed: true,
+        origin: 'shared',
+    };
 }
 
 export function updateWikiPage(input: { path: string; body: string } & BrainScopeInput): BrainWikiPage {
@@ -355,12 +389,7 @@ export function updateWikiPage(input: { path: string; body: string } & BrainScop
     }
 
     const parsed = parseJsonFrontmatter(body);
-    return writeWikiPage(
-        { spaceId: input.spaceId },
-        relativePath,
-        parsed.hasFrontmatter ? parsed.body : body,
-        parsed.meta
-    );
+    return writeWikiPage(toScope(input), relativePath, parsed.hasFrontmatter ? parsed.body : body, parsed.meta);
 }
 
 /** Used by note promotion, which supplies its own merged body and metadata. */
@@ -453,7 +482,7 @@ function logFilePath(scope?: BrainScopeInput): string {
 export function appendWikiLog(
     input: { action: string; subject: string; details?: Record<string, string>; now?: Date } & BrainScopeInput
 ): WikiLogEntry {
-    const filePath = logFilePath({ spaceId: input.spaceId });
+    const filePath = logFilePath(toScope(input));
     if (!fs.existsSync(filePath)) {
         fs.writeFileSync(filePath, LOG_HEADER, 'utf-8');
     }
@@ -573,7 +602,7 @@ export function patchWikiSection(
     const headingText = input.heading.replace(/^#+\s*/, '').trim();
     if (!headingText) throw new Error('A section patch needs a heading.');
 
-    const scope: BrainScopeInput = { spaceId: input.spaceId };
+    const scope: BrainScopeInput = toScope(input);
     const existing = readWikiPage(relativePath, scope);
     const parsed = parseJsonFrontmatter(existing.content);
     const lines = (parsed.body || `# ${wikiTitle(relativePath)}`).split('\n');

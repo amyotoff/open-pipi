@@ -16,6 +16,7 @@ import {
     nowIso,
     registerIndexRebuilder,
     scopedRelativePath,
+    toScope,
 } from './brain-store';
 import {
     normalizeWikiPath,
@@ -272,7 +273,7 @@ registerIndexRebuilder((scope) => {
 export function appendNote(
     input: { topic: string; text: string; tags?: string[]; now?: Date } & BrainScopeInput
 ): BrainNote {
-    const scope = { spaceId: input.spaceId };
+    const scope = toScope(input);
     const topic = normalizeTopic(input.topic);
     const text = input.text.trim();
     if (!text) {
@@ -433,7 +434,7 @@ const PROMOTE_SYSTEM = [
 export async function promoteNoteToWiki(
     input: { note_id: string; target_page: string } & BrainScopeInput
 ): Promise<{ path: string; file_path: string; exists: boolean; content: string; compiled: boolean }> {
-    const scope = { spaceId: input.spaceId };
+    const scope = toScope(input);
     const note = getNote(input.note_id, scope);
     if (!note) {
         throw new Error(`Notebook note not found: ${input.note_id}`);

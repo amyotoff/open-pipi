@@ -235,4 +235,77 @@ describe('brain skill', () => {
         const schema = await skill.handlers.wiki_schema({}, context);
         expect(schema).toContain('Compile, never append');
     });
+
+    it('saves to the shared wiki and files a document batch, both behind an approval', async () => {
+        const skill = await loadSkill();
+        const store = await import('../core/brain-store');
+        const brain = await import('../core/brain');
+        const contextA = {
+            channel: 'telegram',
+            channelRef: 'chat-a',
+            chatId: 'chat-a',
+            userId: '111',
+            spaceId: 'telegram:chat-a',
+        };
+        const contextB = { ...contextA, channelRef: 'chat-b', chatId: 'chat-b', spaceId: 'telegram:chat-b' };
+
+        const saved = await skill.handlers.wiki_save(
+            { path: 'people/anna.md', title: 'Anna', body: '# Anna\n\nPrefers early appointments.' },
+            contextA
+        );
+        expect(saved).toContain('Saved to the shared wiki');
+
+        // Saved in chat A, found in chat B — that is the whole point.
+        const found = await skill.handlers.wiki_search({ query: 'Anna appointments' }, contextB);
+        expect(found).toContain('people/anna.md');
+        expect(found).not.toContain('[this chat only]');
+
+        const filed = await skill.handlers.wiki_capture_documents(
+            {
+                documents: [
+                    { title: 'Lease', content: 'The lease text.', topic: 'home' },
+                    { title: 'Lease copy', content: 'The lease text.', topic: 'home' },
+                ],
+            },
+            contextA
+        );
+        expect(filed).toContain('Filed 1 document');
+        expect(filed).toContain('already there');
+
+        // Both landed in the shared wiki, not in the chat they were handed over in.
+        const shared = store.sharedScope({ spaceId: contextA.spaceId });
+        expect(brain.readWikiPage('people/anna.md', shared).exists).toBe(true);
+        expect(brain.readWikiPage('people/anna.md', { spaceId: contextA.spaceId }).exists).toBe(false);
+
+        // A write everyone can read is a decision the owner signs.
+        for (const tool of ['wiki_save', 'wiki_capture_documents', 'wiki_archive']) {
+            expect(skill.toolMeta?.[tool]?.approval).toBe('explicit');
+        }
+    });
+
+    it('marks a page that only one chat can see', async () => {
+        const skill = await loadSkill();
+        const context = {
+            channel: 'telegram',
+            channelRef: 'chat-a',
+            chatId: 'chat-a',
+            userId: '111',
+            spaceId: 'telegram:chat-a',
+        };
+
+        // update_wiki_page is the assistant's own filing, so it stays in this chat.
+        await skill.handlers.update_wiki_page(
+            { path: 'notes/local.md', body: '# Local\n\nA chat-only observation.' },
+            context
+        );
+
+        const found = await skill.handlers.wiki_search({ query: 'chat-only observation' }, context);
+        expect(found).toContain('[this chat only]');
+
+        const elsewhere = await skill.handlers.wiki_search(
+            { query: 'chat-only observation' },
+            { ...context, channelRef: 'chat-b', chatId: 'chat-b', spaceId: 'telegram:chat-b' }
+        );
+        expect(elsewhere).toContain('found no page');
+    });
 });

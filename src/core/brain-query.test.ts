@@ -23,6 +23,7 @@ async function loadQuery(responses: string[] = []) {
         brain: await import('./brain'),
         query: await import('./brain-query'),
         wiki: await import('./brain-wiki'),
+        store: await import('./brain-store'),
         generateBrainText,
     };
 }
@@ -114,8 +115,8 @@ describe('core/brain-query', () => {
         expect(call.prompt).toContain('<question>');
     });
 
-    it('archives an answer as a snapshot page and logs it', async () => {
-        const { brain, query } = await loadQuery();
+    it('archives an answer into the shared wiki and logs it', async () => {
+        const { brain, query, store } = await loadQuery();
 
         const page = await query.archiveAnswer({
             ...scope,
@@ -131,14 +132,18 @@ describe('core/brain-query', () => {
         expect(page.content).toContain('"archived_at": "2026-08-13"');
         expect(page.content).toContain('health/sleep.md');
 
-        expect(brain.readWikiLog(scope)[0]).toMatchObject({
+        const shared = store.sharedScope(scope);
+        expect(brain.readWikiLog(shared)[0]).toMatchObject({
             action: 'query',
             subject: 'Archived: Sleep vs focus',
         });
 
+        // An explicit save belongs to the household, not to the chat it was asked in.
+        expect(brain.readWikiPage(page.path, shared).exists).toBe(true);
+        expect(brain.readWikiPage(page.path, scope).exists).toBe(false);
+
         // Archives are marked in the generated catalogue.
-        const index = brain.projectWikiIndexFile(scope);
-        expect(index).toContain('[Archived]');
+        expect(brain.projectWikiIndexFile(shared)).toContain('[Archived]');
     });
 
     it('builds a capped [WIKI] block of index rows, never page bodies', async () => {
@@ -161,7 +166,7 @@ describe('core/brain-query', () => {
     });
 
     it('never overwrites an existing page when archiving', async () => {
-        const { brain, query } = await loadQuery();
+        const { brain, query, store } = await loadQuery();
 
         const first = await query.archiveAnswer({
             ...scope,
@@ -176,20 +181,22 @@ describe('core/brain-query', () => {
             topic: 'health',
         });
 
+        const shared = store.sharedScope(scope);
         expect(first.path).toBe('health/same-title.md');
         expect(second.path).toBe('health/same-title-2.md');
         // A snapshot that replaces the earlier snapshot is not a snapshot.
-        expect(brain.readWikiPage(first.path, scope).content).toContain('First answer.');
-        expect(brain.readWikiPage(second.path, scope).content).toContain('Second answer.');
+        expect(brain.readWikiPage(first.path, shared).content).toContain('First answer.');
+        expect(brain.readWikiPage(second.path, shared).content).toContain('Second answer.');
     });
 
     it('does not clobber a canonical article whose title slugifies the same way', async () => {
-        const { brain, query } = await loadQuery();
+        const { brain, query, store } = await loadQuery();
 
-        brain.updateWikiPage({ ...scope, path: 'health/sleep.md', body: '# Sleep\n\nCanonical article.' });
+        const shared = store.sharedScope(scope);
+        brain.updateWikiPage({ ...shared, path: 'health/sleep.md', body: '# Sleep\n\nCanonical article.' });
         const archived = await query.archiveAnswer({ ...scope, title: 'Sleep', body: 'An answer.', topic: 'health' });
 
         expect(archived.path).toBe('health/sleep-2.md');
-        expect(brain.readWikiPage('health/sleep.md', scope).content).toContain('Canonical article.');
+        expect(brain.readWikiPage('health/sleep.md', shared).content).toContain('Canonical article.');
     });
 });

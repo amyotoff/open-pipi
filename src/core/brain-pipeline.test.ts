@@ -379,4 +379,28 @@ describe('brain ingest pipeline', () => {
         expect(run.compiled).toBe(1);
         expect(brain.listWikiPages(scope).filter((page) => page.path.startsWith('health/p'))).toHaveLength(8);
     });
+
+    it('keeps every triage hint, naming the pages the prompt cannot carry in full', async () => {
+        const targets = Array.from({ length: 11 }, (_, index) => `health/t${index}.md`);
+        const { brain, ingest, generateBrainText } = await loadPipeline([
+            triage('update', targets),
+            JSON.stringify({
+                subject: 'Sleep',
+                pages: [{ path: 'health/sleep.md', title: 'Sleep', body: '# Sleep\n\nCompiled.' }],
+            }),
+        ]);
+
+        for (const target of targets) {
+            brain.updateWikiPage({ ...scope, path: target, body: `# ${target}\n\n## Sleep\n\nOld.` });
+        }
+        ingest.captureRawSource({ ...scope, title: 'S', content: 'Body.', topic: 'health' });
+        await ingest.runIngestQueue({ ...scope });
+
+        const compilePrompt = generateBrainText.mock.calls[1][0].prompt as string;
+        // The first eight arrive with their bodies; the ninth onward are still named.
+        expect(compilePrompt).toContain('<page path="health/t0.md">');
+        expect(compilePrompt).toContain('not shown in full here');
+        expect(compilePrompt).toContain('health/t8.md');
+        expect(compilePrompt).toContain('health/t10.md');
+    });
 });

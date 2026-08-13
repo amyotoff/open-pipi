@@ -7,6 +7,7 @@ import {
     listMarkdownFiles,
     nowIso,
     getBrainDb,
+    toScope,
     withScopeLock,
 } from './brain-store';
 import {
@@ -299,7 +300,7 @@ async function checkContradictions(scope: BrainScopeInput | undefined): Promise<
 }
 
 export async function lintWiki(input?: { useModel?: boolean; now?: Date } & BrainScopeInput): Promise<LintReport> {
-    const scope: BrainScopeInput = { spaceId: input?.spaceId };
+    const scope: BrainScopeInput = toScope(input);
 
     return withScopeLock(scope, async () => {
         const findings: LintFinding[] = [];
