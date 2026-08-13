@@ -103,7 +103,7 @@ describe('core/brain', () => {
         expect(statAfter).toBe(statBefore);
     });
 
-    it('rebuilds index explicitly from markdown files', async () => {
+    it('recovers the index from markdown whenever it is missing', async () => {
         const brain = await loadBrain();
         const scope = { spaceId: 'telegram:chat-1' };
         const note = brain.appendNote({
@@ -116,7 +116,9 @@ describe('core/brain', () => {
         brain.closeBrainDatabases();
         fs.rmSync(indexPath, { force: true });
 
-        expect(brain.searchNotes({ ...scope, query: note.id })).toHaveLength(0);
+        // Losing the index is not losing the notes: the next open rebuilds from markdown.
+        expect(brain.searchNotes({ ...scope, query: note.id })).toHaveLength(1);
+
         const rebuilt = brain.rebuildBrainIndex(scope);
         expect(rebuilt.notes).toBe(1);
         expect(brain.searchNotes({ ...scope, query: note.id })).toHaveLength(1);

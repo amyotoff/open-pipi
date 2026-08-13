@@ -79,4 +79,46 @@ describe('brain skill', () => {
         expect(compiled).toContain('Notebook Compilation');
         expect(compiled).toContain('promoted');
     });
+
+    it('captures sources into the queue and reports duplicates instead of refiling them', async () => {
+        const skill = await loadSkill();
+        const context = {
+            channel: 'telegram',
+            channelRef: 'chat-1',
+            chatId: 'chat-1',
+            userId: '111',
+            spaceId: 'telegram:chat-1',
+        };
+
+        const captured = await skill.handlers.brain_capture(
+            {
+                title: 'Sleep debt and afternoon focus',
+                content: 'Sleep debt accumulates across the week.',
+                topic: 'health',
+                url: 'https://example.com/sleep',
+            },
+            context
+        );
+        expect(captured).toContain('Source captured');
+        expect(captured).toContain('raw/health/');
+        expect(captured).toContain('State: queued');
+
+        const again = await skill.handlers.brain_capture(
+            {
+                title: 'Sleep debt and afternoon focus',
+                content: 'Sleep debt accumulates across the week.',
+                topic: 'health',
+            },
+            context
+        );
+        expect(again).toContain('already in raw/');
+        expect(again).toContain('Nothing was written');
+
+        const queue = await skill.handlers.list_raw_sources({ state: 'queued' }, context);
+        expect(queue).toContain('raw/health/');
+        expect(queue).toContain('(queued)');
+
+        const otherSpace = await skill.handlers.list_raw_sources({}, { ...context, spaceId: 'telegram:chat-2' });
+        expect(otherSpace).toContain('No captured sources');
+    });
 });
