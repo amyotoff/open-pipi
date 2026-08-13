@@ -6,6 +6,31 @@ All notable changes to Open PiPi will be documented in this file.
 
 ### Added
 
+- `brain_capture` and `list_raw_sources`: a link, document or pasted text is filed into an
+  immutable `raw/` collection and queued for compilation. Capture is synchronous and always
+  succeeds; the compilation that follows is a background job, because a single source can touch
+  a dozen wiki pages and a chat turn has neither the tool budget nor the latency for that.
+  Re-capturing the same content returns the existing file instead of writing a near-duplicate.
+  This is the first half of the LLM wiki described in `docs/brain-wiki-plan.md`.
+
+### Changed
+
+- `wiki/` is one level of topic directories. Entity pages nested under `wiki/entities/<kind>/`
+  move up on the next start, after which every page resolves a raw link the same way.
+- `wiki/index.md` is generated from the index and `wiki/log.md` is append-only, so the wiki is
+  browsable in Obsidian or on GitHub while the assistant queries SQLite. The log keeps the
+  grep-able `## [date] action | subject` heading, which is how the assistant learns cheaply what
+  it did recently.
+- The Brain Layer's SQLite index is now explicitly a disposable cache: deleting it and rebuilding
+  from markdown produces a byte-identical result, enforced by a test. That invariant is what lets
+  the wiki be an ordinary git repo with ordinary history, and what makes restore points restore.
+- A missing or outdated Brain index rebuilds itself from markdown on the next open, rather than
+  reading as an empty wiki until something happens to ask for a rebuild. A rebuild that fails
+  leaves the stored schema version untouched, so the next open tries again instead of serving an
+  empty index that reports itself as current.
+- Owner-only wiki pages are unreadable by path, not merely absent from search results. Knowing a
+  page's path was previously enough to read it.
+
 - Voice calls, as the first optional addon (`src/addons/voice-calls`): delegate an outbound phone
   call to a voice agent and get a structured result back. Three gates stand in front of it — the
   pack must enable the `phone` capability, a provider must be configured, and the owner must approve

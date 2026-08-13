@@ -1,13 +1,8 @@
 import { Type } from '@google/genai';
 import { SkillManifest } from './_types';
-import {
-    appendNote,
-    compileNotebook,
-    promoteNoteToWiki,
-    readWikiPage,
-    searchNotes,
-    updateWikiPage,
-} from '../core/brain';
+import { appendNote, compileNotebook, promoteNoteToWiki, searchNotes, updateWikiPage } from '../core/brain';
+import { readWikiPageForReader } from '../core/brain-wiki';
+import { captureRawSource, listRawSources, RawSourceState } from '../core/brain-ingest';
 import { resolveSpaceIdFromExecutionContext, RuntimeExecutionContext } from '../core/runtime-context';
 
 function brainScope(context?: RuntimeExecutionContext): { spaceId?: string } {
@@ -117,6 +112,48 @@ const skill: SkillManifest = {
             },
         },
         {
+            name: 'brain_capture',
+            description:
+                'Capture a source into the immutable raw/ collection and queue it for compilation. Use for links, documents, transcripts, and pasted text the owner wants the wiki to know about. This only files the source; compilation into wiki pages happens later as a background job.',
+            parameters: {
+                type: Type.OBJECT,
+                properties: {
+                    title: { type: Type.STRING, description: 'Source title, taken from the source itself.' },
+                    content: {
+                        type: Type.STRING,
+                        description:
+                            'The source text, preserved faithfully. Clean formatting noise but never rewrite opinions or alter meaning.',
+                    },
+                    topic: {
+                        type: Type.STRING,
+                        description:
+                            'Topic directory under raw/, e.g. "health" or "ai-tools". Reuse an existing topic unless the source is genuinely distinct.',
+                    },
+                    url: { type: Type.STRING, description: 'Origin URL when the source came from the web.' },
+                    published_at: {
+                        type: Type.STRING,
+                        description: 'Publication date as YYYY-MM-DD when the source states one.',
+                    },
+                },
+                required: ['title', 'content'],
+            },
+        },
+        {
+            name: 'list_raw_sources',
+            description:
+                'List captured sources and their queue state (queued, triaged, compiled, no_material, failed). Use to report the ingest backlog.',
+            parameters: {
+                type: Type.OBJECT,
+                properties: {
+                    state: {
+                        type: Type.STRING,
+                        description: 'Optional state filter: queued, triaged, compiled, no_material, or failed.',
+                    },
+                    limit: { type: Type.INTEGER, description: 'Maximum results, default 20, max 200.' },
+                },
+            },
+        },
+        {
             name: 'compile_notebook',
             description:
                 'Compile a working notebook digest for a topic, grouped by note status. Use before deciding what should be promoted to wiki.',
@@ -154,7 +191,14 @@ const skill: SkillManifest = {
         },
 
         async read_wiki_page(args: { path: string }, context?: RuntimeExecutionContext) {
-            const page = readWikiPage(args.path, brainScope(context));
+            const page = readWikiPageForReader({
+                path: args.path,
+                ...brainScope(context),
+                personId: context?.userId,
+            });
+            if (!page.allowed) {
+                return `[TOOL_RESULT] ${page.path} is an owner-only page and is not readable here.`;
+            }
             if (!page.exists) {
                 return `[TOOL_RESULT] Wiki page not found: ${page.path}\nPath: ${page.file_path}`;
             }
@@ -164,6 +208,33 @@ const skill: SkillManifest = {
         async update_wiki_page(args: { path: string; body: string }, context?: RuntimeExecutionContext) {
             const page = updateWikiPage({ path: args.path, body: args.body, ...brainScope(context) });
             return `[TOOL_RESULT] Wiki page updated: ${page.path}\nPath: ${page.file_path}`;
+        },
+
+        async brain_capture(
+            args: { title: string; content: string; topic?: string; url?: string; published_at?: string },
+            context?: RuntimeExecutionContext
+        ) {
+            const result = captureRawSource({ ...args, ...brainScope(context) });
+            if (result.duplicate) {
+                return `[TOOL_RESULT] This source is already in raw/ (identical content): ${result.source.path}\nState: ${result.source.state}. Nothing was written.`;
+            }
+            return `[TOOL_RESULT] Source captured: ${result.source.title}\nPath: ${result.file_path}\nTopic: ${result.source.topic}\nState: ${result.source.state} — compilation runs as a background job.`;
+        },
+
+        async list_raw_sources(args: { state?: string; limit?: number }, context?: RuntimeExecutionContext) {
+            const sources = listRawSources({
+                state: args.state as RawSourceState | undefined,
+                limit: args.limit,
+                ...brainScope(context),
+            });
+            if (sources.length === 0) {
+                return `[TOOL_RESULT] No captured sources${args.state ? ` in state "${args.state}"` : ''}.`;
+            }
+            const lines = sources.map(
+                (source) =>
+                    `- ${source.path} (${source.state}${source.disposition ? `: ${source.disposition}` : ''}) ${source.title}`
+            );
+            return `[TOOL_RESULT] Captured sources:\n${lines.join('\n')}`;
         },
 
         async compile_notebook(args: { topic: string; limit?: number }, context?: RuntimeExecutionContext) {

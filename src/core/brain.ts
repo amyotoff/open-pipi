@@ -2,13 +2,37 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
-import { DATA_DIR } from '../config';
+import {
+    BrainScopeInput,
+    MAX_NOTE_TEXT_CHARS,
+    MAX_TAGS,
+    assertTextLimit,
+    brainPath,
+    clampLimit,
+    dayStamp,
+    ensureBrainDirs,
+    getBrainDb,
+    listMarkdownFiles,
+    nowIso,
+    registerIndexRebuilder,
+    scopedRelativePath,
+} from './brain-store';
+import {
+    normalizeWikiPath,
+    parseJsonFrontmatter,
+    projectWikiIndexFile,
+    reindexWikiTree,
+    writeWikiPageInternal,
+} from './brain-wiki';
+import { reindexRawTree } from './brain-ingest';
+
+/**
+ * The notebook: append-only working memory the agent writes before anything is
+ * canonical. Notes live inside daily markdown files as delimited blocks, so the
+ * SQLite index stays fully reconstructible from the files (see brain-store.ts).
+ */
 
 export type BrainNoteStatus = 'open' | 'promoted' | 'rejected' | 'superseded' | 'needs_review';
-
-export interface BrainScopeInput {
-    spaceId?: string;
-}
 
 export interface BrainNote {
     id: string;
@@ -20,13 +44,6 @@ export interface BrainNote {
     promoted_to: string | null;
     created_at: string;
     updated_at: string;
-}
-
-export interface BrainWikiPage {
-    path: string;
-    file_path: string;
-    exists: boolean;
-    content: string;
 }
 
 type BrainNoteMeta = {
@@ -58,27 +75,20 @@ type BrainNoteRow = {
     updated_at: string;
 };
 
-type ParsedFrontmatter = {
-    meta: Record<string, unknown>;
-    body: string;
-    hasFrontmatter: boolean;
-};
-
 const NOTE_BLOCK_RE = /<!-- brain-note:([a-f0-9-]+)\n([\s\S]*?)\n-->\n([\s\S]*?)\n<!-- \/brain-note:\1 -->/g;
 const NOTE_EVENT_RE = /<!-- brain-note-event:([a-f0-9-]+)\n([\s\S]*?)\n-->/g;
-const MAX_TAGS = 12;
-const MAX_NOTE_TEXT_CHARS = 64 * 1024;
-const MAX_WIKI_BODY_CHARS = 512 * 1024;
 
-const dbCache = new Map<string, Database.Database>();
-
-function nowIso(now?: Date): string {
-    return (now || new Date()).toISOString();
-}
-
-function dayStamp(iso: string): string {
-    return iso.substring(0, 10);
-}
+export type { BrainScopeInput };
+export { closeBrainDatabases, ensureBrainDirs, getBrainRoot, getBrainScopeRoot } from './brain-store';
+export type { BrainWikiPage, BrainWikiSummary, WikiLogEntry } from './brain-wiki';
+export {
+    appendWikiLog,
+    listWikiPages,
+    projectWikiIndexFile,
+    readWikiLog,
+    readWikiPage,
+    updateWikiPage,
+} from './brain-wiki';
 
 function normalizeTopic(topic: string): string {
     const normalized = topic.trim();
@@ -91,123 +101,6 @@ function normalizeTags(tags?: string[], options?: { strict?: boolean }): string[
         throw new Error(`Notebook notes support at most ${MAX_TAGS} tags.`);
     }
     return normalized.slice(0, MAX_TAGS);
-}
-
-function clampLimit(limit: number | undefined, fallback: number, min: number, max: number): number {
-    const value = Number(limit);
-    if (!Number.isFinite(value)) return fallback;
-    return Math.min(Math.max(Math.round(value), min), max);
-}
-
-function assertTextLimit(label: string, text: string, maxChars: number): void {
-    if (text.length > maxChars) {
-        throw new Error(`${label} is too large (${text.length} chars, max ${maxChars}).`);
-    }
-}
-
-function scopeRootSegment(scope?: BrainScopeInput): string[] {
-    const spaceId = scope?.spaceId?.trim();
-    return spaceId ? ['spaces', encodeURIComponent(spaceId)] : ['global'];
-}
-
-export function getBrainRoot(): string {
-    return path.join(DATA_DIR, 'pipi-brain');
-}
-
-export function getBrainScopeRoot(scope?: BrainScopeInput): string {
-    return path.join(getBrainRoot(), ...scopeRootSegment(scope));
-}
-
-function brainPath(scope: BrainScopeInput | undefined, ...segments: string[]): string {
-    return path.join(getBrainScopeRoot(scope), ...segments);
-}
-
-export function ensureBrainDirs(scope?: BrainScopeInput): void {
-    const dirs = [
-        brainPath(scope, 'raw', 'chats'),
-        brainPath(scope, 'raw', 'links'),
-        brainPath(scope, 'raw', 'docs'),
-        brainPath(scope, 'raw', 'transcripts'),
-        brainPath(scope, 'notebook', 'daily'),
-        brainPath(scope, 'notebook', 'project'),
-        brainPath(scope, 'notebook', 'scratch'),
-        brainPath(scope, 'wiki', 'projects'),
-        brainPath(scope, 'wiki', 'entities', 'people'),
-        brainPath(scope, 'wiki', 'entities', 'companies'),
-        brainPath(scope, 'wiki', 'entities', 'tools'),
-        brainPath(scope, 'wiki', 'entities', 'cities'),
-        brainPath(scope, 'wiki', 'decisions'),
-        brainPath(scope, 'wiki', 'principles'),
-        brainPath(scope, 'wiki', 'playbooks'),
-        brainPath(scope, 'playbooks'),
-        brainPath(scope, 'indexes'),
-    ];
-
-    for (const dir of dirs) {
-        fs.mkdirSync(dir, { recursive: true });
-    }
-}
-
-function indexPath(scope?: BrainScopeInput): string {
-    ensureBrainDirs(scope);
-    return brainPath(scope, 'indexes', 'sqlite.db');
-}
-
-function getBrainDb(scope?: BrainScopeInput): Database.Database {
-    const dbPath = indexPath(scope);
-    const cached = dbCache.get(dbPath);
-    if (cached) return cached;
-
-    const db = new Database(dbPath);
-    db.pragma('journal_mode = WAL');
-    ensureBrainSchema(db);
-    dbCache.set(dbPath, db);
-    return db;
-}
-
-export function closeBrainDatabases(): void {
-    for (const db of dbCache.values()) {
-        db.close();
-    }
-    dbCache.clear();
-}
-
-function ensureBrainSchema(db: Database.Database): void {
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS notes (
-            id TEXT PRIMARY KEY,
-            topic TEXT NOT NULL,
-            text TEXT NOT NULL,
-            tags_json TEXT NOT NULL,
-            status TEXT NOT NULL,
-            file_path TEXT NOT NULL,
-            promoted_to TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_brain_notes_topic_updated
-            ON notes(topic, updated_at DESC);
-        CREATE INDEX IF NOT EXISTS idx_brain_notes_status_updated
-            ON notes(status, updated_at DESC);
-
-        CREATE TABLE IF NOT EXISTS note_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            note_id TEXT NOT NULL,
-            event_type TEXT NOT NULL,
-            target_page TEXT,
-            created_at TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS idx_brain_note_events_note
-            ON note_events(note_id, created_at DESC);
-
-        CREATE TABLE IF NOT EXISTS wiki_pages (
-            path TEXT PRIMARY KEY,
-            title TEXT NOT NULL,
-            excerpt TEXT NOT NULL,
-            sources_json TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        );
-    `);
 }
 
 function safeRelativePath(input: string, kind: 'notebook' | 'wiki'): string {
@@ -229,10 +122,6 @@ function safeRelativePath(input: string, kind: 'notebook' | 'wiki'): string {
         throw new Error('Wiki pages must be Markdown files ending in .md.');
     }
     return normalized;
-}
-
-function scopedRelativePath(scope: BrainScopeInput | undefined, filePath: string): string {
-    return path.relative(getBrainScopeRoot(scope), filePath).split(path.sep).join(path.posix.sep);
 }
 
 function ensureDailyNotebookFile(filePath: string, date: string): void {
@@ -286,21 +175,6 @@ function parseNoteEvents(raw: string): BrainNoteEvent[] {
     return events;
 }
 
-function listMarkdownFiles(root: string): string[] {
-    if (!fs.existsSync(root)) return [];
-
-    const result: string[] = [];
-    for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-        const filePath = path.join(root, entry.name);
-        if (entry.isDirectory()) {
-            result.push(...listMarkdownFiles(filePath));
-        } else if (entry.isFile() && entry.name.endsWith('.md')) {
-            result.push(filePath);
-        }
-    }
-    return result.sort();
-}
-
 function insertNote(db: Database.Database, note: BrainNote): void {
     db.prepare(
         `
@@ -347,10 +221,19 @@ function applyEvents(notes: BrainNote[], events: BrainNoteEvent[]): BrainNote[] 
     return [...byId.values()];
 }
 
-export function rebuildBrainIndex(scope?: BrainScopeInput): { notes: number; events: number; wiki_pages: number } {
+/**
+ * Rebuild every derived table from markdown alone. Deleting indexes/sqlite.db and
+ * calling this must produce an identical index — that invariant is what lets git be
+ * the wiki's history and lets restore points actually restore.
+ */
+export function rebuildBrainIndex(scope?: BrainScopeInput): {
+    notes: number;
+    events: number;
+    wiki_pages: number;
+    raw_sources: number;
+} {
     ensureBrainDirs(scope);
     const notebookFiles = listMarkdownFiles(brainPath(scope, 'notebook'));
-    const wikiFiles = listMarkdownFiles(brainPath(scope, 'wiki'));
     const notes: BrainNote[] = [];
     const events: BrainNoteEvent[] = [];
 
@@ -363,18 +246,25 @@ export function rebuildBrainIndex(scope?: BrainScopeInput): { notes: number; eve
     const db = getBrainDb(scope);
     const appliedNotes = applyEvents(notes, events);
     const rebuild = db.transaction(() => {
-        db.exec('DELETE FROM notes; DELETE FROM note_events; DELETE FROM wiki_pages;');
+        db.exec(
+            'DELETE FROM notes; DELETE FROM note_events; DELETE FROM wiki_pages; DELETE FROM wiki_links; DELETE FROM wiki_fts; DELETE FROM raw_sources;'
+        );
         for (const note of appliedNotes) insertNote(db, note);
         for (const event of events) insertNoteEvent(db, event);
-        for (const filePath of wikiFiles) {
-            const relative = path.relative(brainPath(scope, 'wiki'), filePath).split(path.sep).join(path.posix.sep);
-            indexWikiPage(db, relative, fs.readFileSync(filePath, 'utf-8'));
-        }
     });
 
     rebuild();
-    return { notes: appliedNotes.length, events: events.length, wiki_pages: wikiFiles.length };
+    const wikiPages = reindexWikiTree(scope);
+    const rawSources = reindexRawTree(scope);
+    projectWikiIndexFile(scope);
+
+    return { notes: appliedNotes.length, events: events.length, wiki_pages: wikiPages, raw_sources: rawSources };
 }
+
+// Recovers the index whenever a schema change empties it (see getBrainDb).
+registerIndexRebuilder((scope) => {
+    rebuildBrainIndex(scope);
+});
 
 export function appendNote(
     input: { topic: string; text: string; tags?: string[]; now?: Date } & BrainScopeInput
@@ -480,51 +370,6 @@ export function listNotesByTopic(input: { topic: string; limit?: number } & Brai
     return rows.map(hydrateNote);
 }
 
-function normalizeWikiPath(targetPath: string): string {
-    if (targetPath.trim().startsWith('/') || path.isAbsolute(targetPath)) {
-        throw new Error(`Unsafe wiki path: ${targetPath}`);
-    }
-    const raw = targetPath
-        .trim()
-        .replace(/\\/g, '/')
-        .replace(/^wiki\//, '');
-    const withExtension = raw ? (path.posix.extname(raw) ? raw : `${raw}.md`) : 'index.md';
-    const normalized = path.posix.normalize(withExtension);
-
-    if (
-        normalized === '.' ||
-        normalized === '..' ||
-        normalized.startsWith('../') ||
-        normalized.includes('/../') ||
-        normalized.includes('\0') ||
-        path.isAbsolute(normalized)
-    ) {
-        throw new Error(`Unsafe wiki path: ${targetPath}`);
-    }
-    if (!normalized.endsWith('.md')) {
-        throw new Error('Wiki pages must be Markdown files ending in .md.');
-    }
-
-    return normalized;
-}
-
-function parseJsonFrontmatter(raw: string): ParsedFrontmatter {
-    const match = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
-    if (!match) {
-        return { meta: {}, body: raw.trim(), hasFrontmatter: false };
-    }
-
-    try {
-        return {
-            meta: JSON.parse(match[1].trim()),
-            body: match[2].trim(),
-            hasFrontmatter: true,
-        };
-    } catch {
-        return { meta: {}, body: raw.trim(), hasFrontmatter: false };
-    }
-}
-
 function wikiTitle(relativePath: string): string {
     const base = path.posix.basename(relativePath, '.md');
     return base
@@ -532,127 +377,6 @@ function wikiTitle(relativePath: string): string {
         .filter(Boolean)
         .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
         .join(' ');
-}
-
-function firstHeading(body: string, relativePath: string): string {
-    const heading = body.match(/^#\s+(.+)$/m)?.[1]?.trim();
-    return heading || wikiTitle(relativePath);
-}
-
-function excerpt(body: string): string {
-    return body
-        .replace(/^---[\s\S]*?---/m, '')
-        .replace(/[#>*_`-]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .substring(0, 240);
-}
-
-function arrayMeta(value: unknown): string[] {
-    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-}
-
-function indexWikiPage(db: Database.Database, relativePath: string, content: string): void {
-    const parsed = parseJsonFrontmatter(content);
-    const body = parsed.body;
-    db.prepare(
-        `
-        INSERT INTO wiki_pages (path, title, excerpt, sources_json, updated_at)
-        VALUES (@path, @title, @excerpt, @sources_json, @updated_at)
-        ON CONFLICT(path) DO UPDATE SET
-            title = excluded.title,
-            excerpt = excluded.excerpt,
-            sources_json = excluded.sources_json,
-            updated_at = excluded.updated_at
-    `
-    ).run({
-        path: relativePath,
-        title: firstHeading(body, relativePath),
-        excerpt: excerpt(body),
-        sources_json: JSON.stringify(arrayMeta(parsed.meta.sources)),
-        updated_at: typeof parsed.meta.updated_at === 'string' ? parsed.meta.updated_at : nowIso(),
-    });
-}
-
-function writeWikiPage(
-    scope: BrainScopeInput | undefined,
-    relativePath: string,
-    body: string,
-    metaPatch?: Record<string, unknown>
-): BrainWikiPage {
-    assertTextLimit('Wiki page body', body, MAX_WIKI_BODY_CHARS);
-    const absolutePath = brainPath(scope, 'wiki', ...relativePath.split('/'));
-    const existingRaw = fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, 'utf-8') : '';
-    const existing = parseJsonFrontmatter(existingRaw);
-    const currentIso = nowIso();
-    const meta = {
-        id: `wiki_${relativePath.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '')}`,
-        status: 'canonical',
-        frontmatter_format: 'json',
-        created_at: existing.meta.created_at || currentIso,
-        ...existing.meta,
-        ...(metaPatch || {}),
-        updated_at: currentIso,
-    };
-    // JSON frontmatter is intentional: it keeps Brain pages dependency-free and machine-readable.
-    const content = `---\n${JSON.stringify(meta, null, 2)}\n---\n${body.trim()}\n`;
-
-    fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
-    fs.writeFileSync(absolutePath, content, 'utf-8');
-    indexWikiPage(getBrainDb(scope), relativePath, content);
-
-    return {
-        path: relativePath,
-        file_path: scopedRelativePath(scope, absolutePath),
-        exists: true,
-        content,
-    };
-}
-
-export interface BrainWikiSummary {
-    path: string;
-    title: string;
-    excerpt: string;
-    updated_at: string;
-}
-
-/** The curated pages, most recently touched first — for browsing rather than reading. */
-export function listWikiPages(input?: { limit?: number } & BrainScopeInput): BrainWikiSummary[] {
-    const limit = clampLimit(input?.limit, 50, 1, 200);
-    return getBrainDb(input)
-        .prepare('SELECT path, title, excerpt, updated_at FROM wiki_pages ORDER BY updated_at DESC LIMIT ?')
-        .all(limit) as BrainWikiSummary[];
-}
-
-export function readWikiPage(targetPath: string, scope?: BrainScopeInput): BrainWikiPage {
-    const relativePath = normalizeWikiPath(targetPath);
-    const absolutePath = brainPath(scope, 'wiki', ...relativePath.split('/'));
-    if (!fs.existsSync(absolutePath)) {
-        return {
-            path: relativePath,
-            file_path: scopedRelativePath(scope, absolutePath),
-            exists: false,
-            content: '',
-        };
-    }
-
-    return {
-        path: relativePath,
-        file_path: scopedRelativePath(scope, absolutePath),
-        exists: true,
-        content: fs.readFileSync(absolutePath, 'utf-8'),
-    };
-}
-
-export function updateWikiPage(input: { path: string; body: string } & BrainScopeInput): BrainWikiPage {
-    const relativePath = normalizeWikiPath(input.path);
-    const body = input.body.trim();
-    if (!body) {
-        throw new Error('Wiki update cannot be empty.');
-    }
-
-    const parsed = parseJsonFrontmatter(body);
-    return writeWikiPage(input, relativePath, parsed.hasFrontmatter ? parsed.body : body, parsed.meta);
 }
 
 function promotedNoteEntry(note: BrainNote): string {
@@ -685,7 +409,12 @@ function appendPromotionEvent(scope: BrainScopeInput | undefined, note: BrainNot
     return event;
 }
 
-export function promoteNoteToWiki(input: { note_id: string; target_page: string } & BrainScopeInput): BrainWikiPage {
+export function promoteNoteToWiki(input: { note_id: string; target_page: string } & BrainScopeInput): {
+    path: string;
+    file_path: string;
+    exists: boolean;
+    content: string;
+} {
     const scope = { spaceId: input.spaceId };
     const note = getNote(input.note_id, scope);
     if (!note) {
@@ -693,8 +422,9 @@ export function promoteNoteToWiki(input: { note_id: string; target_page: string 
     }
 
     const relativePath = normalizeWikiPath(input.target_page);
-    const existing = readWikiPage(relativePath, scope);
-    const parsed = parseJsonFrontmatter(existing.content);
+    const absolutePath = brainPath(scope, 'wiki', ...relativePath.split('/'));
+    const existingRaw = fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, 'utf-8') : '';
+    const parsed = parseJsonFrontmatter(existingRaw);
     let body = parsed.body || `# ${wikiTitle(relativePath)}\n`;
     const marker = `Source note: ${note.id}`;
 
@@ -706,8 +436,8 @@ export function promoteNoteToWiki(input: { note_id: string; target_page: string 
         body = `${body.trimEnd()}\n\n${promotedNoteEntry(note)}\n`;
     }
 
-    const sources = [...new Set([...arrayMeta(parsed.meta.sources), note.id])];
-    const page = writeWikiPage(scope, relativePath, body, { ...parsed.meta, sources });
+    const sources = [...new Set([...(Array.isArray(parsed.meta.sources) ? parsed.meta.sources : []), note.id])];
+    const page = writeWikiPageInternal(scope, relativePath, body, { ...parsed.meta, sources });
     if (!(note.status === 'promoted' && note.promoted_to === relativePath)) {
         appendPromotionEvent(scope, note, relativePath);
     }
