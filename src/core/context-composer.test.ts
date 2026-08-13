@@ -5,6 +5,7 @@ async function loadComposer(options?: {
     recentMessages?: any[];
     searchMessages?: any[];
     failureReceipt?: any;
+    wikiBlock?: string;
 }) {
     vi.resetModules();
 
@@ -244,6 +245,9 @@ async function loadComposer(options?: {
     vi.doMock('./workspace', () => ({ getWorkspaceSnapshot }));
     vi.doMock('./workflows', () => ({ listWorkflowTemplatesForPack }));
     vi.doMock('./memory-sprint', () => ({ ensureActiveMemorySprint }));
+    // Stubbed so the composer test never touches the Brain Layer on disk.
+    const buildWikiContextBlock = vi.fn((_input: { query: string; spaceId?: string }) => options?.wikiBlock ?? '');
+    vi.doMock('./brain-query', () => ({ buildWikiContextBlock }));
 
     const mod = await import('./context-composer');
     return {
@@ -256,6 +260,7 @@ async function loadComposer(options?: {
             getLatestLlmFailureReceipt,
             materializeAgentForSpace,
             getMemoryContext,
+            buildWikiContextBlock,
         },
     };
 }
@@ -524,5 +529,27 @@ describe('core/context-composer', () => {
         expect(result.systemPrompt).toContain('AI-Duck Advertising / Partner');
         expect(result.systemPrompt).toContain('стартовый бюджет 20 евро');
         expect(mod.mocks.searchMessages).toHaveBeenCalledWith('реклам', { limit: 8 });
+    });
+
+    it('adds compiled wiki index rows beside the memory blocks', async () => {
+        const mod = await loadComposer({
+            wikiBlock: '[WIKI]\n- health/sleep.md — Sleep: sleep debt across the week (2026-03-20)',
+        });
+        const context = mod.composeConversationContext({ spaceId: 'telegram:chat-1', senderId: '111' });
+
+        expect(context.systemPrompt).toContain('[WIKI]');
+        expect(context.systemPrompt).toContain('health/sleep.md');
+
+        // Selected with the same tokenizer the cross-space lookup uses, from the latest user text.
+        const query = mod.mocks.buildWikiContextBlock.mock.calls[0][0].query;
+        expect(query).toContain('shortlist');
+        expect(query).not.toContain('for');
+    });
+
+    it('leaves the prompt untouched when the wiki has nothing to offer', async () => {
+        const mod = await loadComposer({ wikiBlock: '' });
+        const context = mod.composeConversationContext({ spaceId: 'telegram:chat-1', senderId: '111' });
+
+        expect(context.systemPrompt).not.toContain('[WIKI]');
     });
 });

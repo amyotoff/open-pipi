@@ -1169,3 +1169,78 @@ export async function processWithVision(
         }
     );
 }
+
+/**
+ * One-shot text generation with no tool loop, for background work that needs a model
+ * but not an agent: wiki triage, compilation, lint judgement.
+ *
+ * Honours the same daily-cost guard as the chat path (D13 in docs/brain-wiki-plan.md).
+ * When the budget is gone this returns `blocked` instead of throwing, so the caller can
+ * leave the job queued and try again tomorrow rather than dropping it.
+ */
+export async function generateOneShotText(input: {
+    system: string;
+    prompt: string;
+    mode: 'executor' | 'advisor';
+    spaceId?: string;
+    temperature?: number;
+    timeoutMs?: number;
+}): Promise<{ text: string; model: string; blocked?: string }> {
+    const advisorEnabled = PIPI_ADVISOR_ENABLED && Boolean(GEMINI_ADVISOR_MODEL?.trim());
+    const model = input.mode === 'advisor' && advisorEnabled ? GEMINI_ADVISOR_MODEL : GEMINI_EXECUTOR_MODEL;
+    const blocked = guardLLMCall();
+    if (blocked) {
+        logWarn('LLM', 'one_shot_blocked', { reason: blocked, mode: input.mode });
+        return { text: '', model, blocked };
+    }
+
+    const startedMs = Date.now();
+    let status = 'ok';
+
+    try {
+        return await withSpan(
+            'llm.one_shot',
+            {
+                kind: SpanKind.CLIENT,
+                attributes: { provider: 'gemini', model, mode: input.mode, space_id: input.spaceId },
+            },
+            async () => {
+                const requestPromise = getGeminiClient().models.generateContent({
+                    model,
+                    contents: [{ role: 'user', parts: [{ text: input.prompt }] }],
+                    config: {
+                        systemInstruction: { parts: [{ text: input.system }] },
+                        temperature: input.temperature ?? 0.2,
+                    },
+                });
+
+                let timeoutId: ReturnType<typeof setTimeout>;
+                const timeoutPromise = new Promise((_, reject) => {
+                    timeoutId = setTimeout(
+                        () => reject(new Error(`[TIMEOUT] ${model} did not respond in time`)),
+                        input.timeoutMs ?? 60000
+                    );
+                });
+
+                const response: any = await Promise.race([requestPromise, timeoutPromise]);
+                clearTimeout(timeoutId!);
+                requestPromise.catch(() => {});
+
+                const inputTokens = response?.usageMetadata?.promptTokenCount || 0;
+                const outputTokens = response?.usageMetadata?.candidatesTokenCount || 0;
+                if (inputTokens > 0 || outputTokens > 0) {
+                    logTokenUsage(model, inputTokens, outputTokens, input.spaceId);
+                }
+
+                return { text: (response?.text || '').trim(), model };
+            }
+        );
+    } catch (error: any) {
+        status = 'error';
+        recordActiveSpanException(error);
+        logError('LLM', 'one_shot_failed', summarizeError(error));
+        return { text: '', model, blocked: error?.message || 'model call failed' };
+    } finally {
+        recordLlmRequest(Date.now() - startedMs, { provider: 'gemini', model, status, mode: input.mode });
+    }
+}

@@ -311,3 +311,21 @@ export function listMarkdownFiles(root: string): string[] {
     }
     return result.sort();
 }
+
+const scopeLocks = new Map<string, Promise<unknown>>();
+
+/**
+ * Serialize wiki writes per scope. index.md, log.md and every cascade target are shared
+ * state, so compilation runs one source at a time (D4/D7). The runtime is a single Node
+ * process, which is why this is a lock rather than an optimistic-concurrency token.
+ */
+export function withScopeLock<T>(scope: BrainScopeInput | undefined, fn: () => Promise<T>): Promise<T> {
+    const key = getBrainScopeRoot(scope);
+    const previous = scopeLocks.get(key) || Promise.resolve();
+    const next = previous.then(fn, fn);
+    scopeLocks.set(
+        key,
+        next.catch(() => undefined)
+    );
+    return next;
+}

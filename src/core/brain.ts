@@ -25,6 +25,8 @@ import {
     writeWikiPageInternal,
 } from './brain-wiki';
 import { reindexRawTree } from './brain-ingest';
+import { generateBrainText, parseModelJson } from './brain-model';
+import { getBrainSchema } from './brain-schema';
 
 /**
  * The notebook: append-only working memory the agent writes before anything is
@@ -77,6 +79,7 @@ type BrainNoteRow = {
 
 const NOTE_BLOCK_RE = /<!-- brain-note:([a-f0-9-]+)\n([\s\S]*?)\n-->\n([\s\S]*?)\n<!-- \/brain-note:\1 -->/g;
 const NOTE_EVENT_RE = /<!-- brain-note-event:([a-f0-9-]+)\n([\s\S]*?)\n-->/g;
+const MAX_MERGE_PROMPT_CHARS = 24_000;
 
 export type { BrainScopeInput };
 export { closeBrainDatabases, ensureBrainDirs, getBrainRoot, getBrainScopeRoot } from './brain-store';
@@ -409,12 +412,27 @@ function appendPromotionEvent(scope: BrainScopeInput | undefined, note: BrainNot
     return event;
 }
 
-export function promoteNoteToWiki(input: { note_id: string; target_page: string } & BrainScopeInput): {
-    path: string;
-    file_path: string;
-    exists: boolean;
-    content: string;
-} {
+const PROMOTE_SYSTEM = [
+    'You fold one notebook note into a page of a personal knowledge wiki that you maintain.',
+    'Merge the note into the section where the knowledge belongs. Rewrite that prose so the page',
+    'reads as one compiled article — never append the note verbatim, and never add a section that',
+    'only exists to hold notes.',
+    'Preserve everything on the page that the note does not change. Keep every number, date and',
+    'quote exactly as the note or the page states it; invent nothing.',
+    'If the note contradicts the page, keep the old claim and mark it:',
+    '"> **Status: Disputed**" followed by an explanation line.',
+    'Reply with JSON only: {"body": "the complete revised markdown body, starting with # Title"}.',
+].join('\n');
+
+/**
+ * Fold a note into a page (D6). The old behaviour appended the note's text under a
+ * "Promoted Notebook Notes" heading, which produced a scrapbook rather than a compiled
+ * page. That path survives only as a visible fallback: when no model is available the
+ * note is still filed, and the page is marked `needs_review` so lint can find it.
+ */
+export async function promoteNoteToWiki(
+    input: { note_id: string; target_page: string } & BrainScopeInput
+): Promise<{ path: string; file_path: string; exists: boolean; content: string; compiled: boolean }> {
     const scope = { spaceId: input.spaceId };
     const note = getNote(input.note_id, scope);
     if (!note) {
@@ -425,10 +443,41 @@ export function promoteNoteToWiki(input: { note_id: string; target_page: string 
     const absolutePath = brainPath(scope, 'wiki', ...relativePath.split('/'));
     const existingRaw = fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, 'utf-8') : '';
     const parsed = parseJsonFrontmatter(existingRaw);
-    let body = parsed.body || `# ${wikiTitle(relativePath)}\n`;
-    const marker = `Source note: ${note.id}`;
+    const currentBody = parsed.body || `# ${wikiTitle(relativePath)}\n`;
+    const sources = [...new Set([...(Array.isArray(parsed.meta.sources) ? parsed.meta.sources : []), note.id])];
 
-    if (!body.includes(marker)) {
+    let body = currentBody;
+    let compiled = false;
+    // Above this the model cannot be shown the whole page, and a returned "full" body
+    // would silently drop the tail — so the safe append path is used instead.
+    const tooLongToMerge = currentBody.length > MAX_MERGE_PROMPT_CHARS;
+
+    try {
+        if (tooLongToMerge) throw new Error('page exceeds the merge prompt budget');
+        const text = await generateBrainText({
+            system: `${PROMOTE_SYSTEM}\n\n<schema>\n${getBrainSchema(scope)}\n</schema>`,
+            mode: 'advisor',
+            spaceId: input.spaceId,
+            temperature: 0.3,
+            prompt: [
+                `<page path="${relativePath}">`,
+                currentBody,
+                '</page>',
+                `<note topic="${note.topic}" tags="${note.tags.join(', ')}">`,
+                note.text,
+                '</note>',
+            ].join('\n'),
+        });
+        const merged = parseModelJson<{ body?: string }>(text)?.body?.trim();
+        if (merged && merged.length > 0) {
+            body = merged;
+            compiled = true;
+        }
+    } catch {
+        // Fall through to the visible fallback below.
+    }
+
+    if (!compiled && !body.includes(`Source note: ${note.id}`)) {
         const heading = '## Promoted Notebook Notes';
         if (!body.includes(heading)) {
             body = `${body.trim()}\n\n${heading}\n`;
@@ -436,12 +485,15 @@ export function promoteNoteToWiki(input: { note_id: string; target_page: string 
         body = `${body.trimEnd()}\n\n${promotedNoteEntry(note)}\n`;
     }
 
-    const sources = [...new Set([...(Array.isArray(parsed.meta.sources) ? parsed.meta.sources : []), note.id])];
-    const page = writeWikiPageInternal(scope, relativePath, body, { ...parsed.meta, sources });
+    const page = writeWikiPageInternal(scope, relativePath, body, {
+        ...parsed.meta,
+        sources,
+        status: compiled ? parsed.meta.status || 'canonical' : 'needs_review',
+    });
     if (!(note.status === 'promoted' && note.promoted_to === relativePath)) {
         appendPromotionEvent(scope, note, relativePath);
     }
-    return page;
+    return { ...page, compiled };
 }
 
 export function compileNotebook(input: { topic: string; limit?: number } & BrainScopeInput): string {

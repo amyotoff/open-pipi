@@ -16,7 +16,7 @@
         "dev": "nodemon --exec ts-node src/index.ts",
         "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
         "prebuild": "pnpm clean",
-        "build": "tsc -p tsconfig.build.json && cp -r src/packs dist/packs && cp -r src/groundings dist/groundings && cp -r src/web/public dist/web/public",
+        "build": "tsc -p tsconfig.build.json && cp -r src/packs dist/packs && cp -r src/groundings dist/groundings && cp -r src/brain dist/brain && cp -r src/web/public dist/web/public",
         "typecheck": "tsc --noEmit",
         "lint": "eslint src/",
         "lint:fix": "eslint src/ --fix",

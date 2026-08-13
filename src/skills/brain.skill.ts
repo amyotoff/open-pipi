@@ -3,7 +3,19 @@ import { SkillManifest } from './_types';
 import { appendNote, compileNotebook, promoteNoteToWiki, searchNotes, updateWikiPage } from '../core/brain';
 import { readWikiPageForReader } from '../core/brain-wiki';
 import { captureRawSource, listRawSources, RawSourceState } from '../core/brain-ingest';
+import { answerFromWiki, archiveAnswer, searchWiki } from '../core/brain-query';
+import { formatLintDigest, isLintDue, lintWiki } from '../core/brain-lint';
+import { getBrainSchema, readBrainTemplate, setBrainSchemaOverride } from '../core/brain-schema';
 import { resolveSpaceIdFromExecutionContext, RuntimeExecutionContext } from '../core/runtime-context';
+import { getMembership, getResident } from '../db';
+
+const MAX_SCHEMA_CHARS = 32 * 1024;
+
+/** Approval is the caller consenting; this is whether the caller may decide at all. */
+function isSpaceOwner(spaceId: string, personId?: string): boolean {
+    if (!personId) return false;
+    return getMembership(spaceId, personId)?.role === 'owner' || getResident(personId)?.role === 'owner';
+}
 
 function brainScope(context?: RuntimeExecutionContext): { spaceId?: string } {
     return { spaceId: resolveSpaceIdFromExecutionContext(context) };
@@ -26,14 +38,22 @@ function formatNoteLine(note: {
 const skill: SkillManifest = {
     name: 'brain',
     description:
-        'Agent-maintained Brain Layer: notebook notes, curated wiki pages, playbook-ready knowledge, and search',
-    version: '0.1.0',
+        'Agent-maintained knowledge wiki: capture sources, compile them into pages, answer from them with citations, and keep the whole thing linted',
+    version: '0.2.0',
     meta: {
         run_mode: 'inline',
         approval: 'none',
         cost: 'low',
         visibility: 'all',
         pack_tags: ['jeeves', 'tutor', 'office', 'reporter'],
+    },
+    toolMeta: {
+        wiki_schema_set: {
+            approval: 'explicit',
+            approval_action: 'brain_schema_set',
+            approval_reason: 'Replaces the rules the assistant follows when compiling and maintaining this wiki.',
+            approval_detail_fields: ['content'],
+        },
     },
     tools: [
         {
@@ -154,6 +174,85 @@ const skill: SkillManifest = {
             },
         },
         {
+            name: 'wiki_search',
+            description:
+                'Search compiled wiki pages by topic or keyword. Returns page paths with one-line summaries. Use before answering anything the wiki might already know, and read a page with read_wiki_page before relying on it.',
+            parameters: {
+                type: Type.OBJECT,
+                properties: {
+                    query: { type: Type.STRING, description: 'Search terms, including likely synonyms.' },
+                    limit: { type: Type.INTEGER, description: 'Maximum results, default 8, max 50.' },
+                },
+                required: ['query'],
+            },
+        },
+        {
+            name: 'wiki_answer',
+            description:
+                'Answer a question from the wiki and cite the pages used. Use for "what do I know about X", "summarise everything on Y", or comparisons across compiled pages. This never writes files.',
+            parameters: {
+                type: Type.OBJECT,
+                properties: {
+                    question: { type: Type.STRING, description: "The question, in the owner's own words." },
+                },
+                required: ['question'],
+            },
+        },
+        {
+            name: 'wiki_archive',
+            description:
+                'File a good answer back into the wiki as an archive page, so an exploration compounds instead of disappearing into chat history. Only use when the owner explicitly asks to save or archive the answer.',
+            parameters: {
+                type: Type.OBJECT,
+                properties: {
+                    title: { type: Type.STRING, description: 'Title of the archived answer.' },
+                    body: { type: Type.STRING, description: 'The answer as markdown.' },
+                    topic: { type: Type.STRING, description: 'Topic directory, e.g. "health". Defaults to "archive".' },
+                    citations: {
+                        type: Type.ARRAY,
+                        description: 'Wiki page paths the answer was built from, e.g. ["people/anna.md"].',
+                        items: { type: Type.STRING },
+                    },
+                },
+                required: ['title', 'body'],
+            },
+        },
+        {
+            name: 'wiki_schema',
+            description:
+                'Read the schema layer: the rules this wiki is maintained by, and optionally a page template. Read it when the exact page format matters or the owner asks how the wiki works.',
+            parameters: {
+                type: Type.OBJECT,
+                properties: {
+                    template: {
+                        type: Type.STRING,
+                        description: 'Optional template to include: "article", "archive", or "raw".',
+                    },
+                },
+            },
+        },
+        {
+            name: 'wiki_schema_set',
+            description:
+                "Replace this space's wiki conventions with the owner's own version. Use only when the owner explicitly asks to change how the wiki is maintained.",
+            parameters: {
+                type: Type.OBJECT,
+                properties: {
+                    content: { type: Type.STRING, description: 'The complete replacement schema, as Markdown.' },
+                },
+                required: ['content'],
+            },
+        },
+        {
+            name: 'wiki_lint',
+            description:
+                'Health-check the wiki: repair index entries and broken links, verify that claims are grounded in the linked raw sources, and report contradictions, orphans, and stale archives. Safe repairs are applied; facts are only reported.',
+            parameters: {
+                type: Type.OBJECT,
+                properties: {},
+            },
+        },
+        {
             name: 'compile_notebook',
             description:
                 'Compile a working notebook digest for a topic, grouped by note status. Use before deciding what should be promoted to wiki.',
@@ -167,6 +266,47 @@ const skill: SkillManifest = {
             },
         },
     ],
+    crons: [
+        {
+            expression: '*/30 * * * *',
+            description: 'Drain the wiki ingest queue',
+            handler: async () => {
+                const { listSpaces } = await import('../db');
+                const { runIngestQueue } = await import('../core/brain-ingest');
+
+                // The host-level wiki plus every active space; each has its own queue and lock.
+                for (const scope of [{}, ...listSpaces('ACTIVE').map((space) => ({ spaceId: space.id }))]) {
+                    const result = await runIngestQueue({ ...scope, limit: 3 });
+                    // A budget block is not an error: the source stays queued for tomorrow.
+                    if (result.blocked) break;
+                }
+            },
+        },
+        {
+            expression: '20 4 * * *',
+            description: 'Wiki lint on the memory-sprint cadence',
+            handler: async () => {
+                const { listSpaces } = await import('../db');
+                const { resolveMemorySprintDays } = await import('../core/memory-sprint');
+                const { rememberWorkMemory } = await import('../core/memory-write');
+
+                for (const space of listSpaces('ACTIVE')) {
+                    const scope = { spaceId: space.id };
+                    const cadenceDays = resolveMemorySprintDays(space.id);
+                    if (!isLintDue(scope, cadenceDays)) continue;
+
+                    const report = await lintWiki(scope);
+                    if (report.issues === 0) continue;
+                    // The digest rides the sprint report the owner already reads (D10).
+                    rememberWorkMemory(space.id, 'wiki_lint', formatLintDigest(report), {
+                        salience: 0.5,
+                        source: 'wiki_lint_cron',
+                    });
+                }
+            },
+        },
+    ],
+
     handlers: {
         async append_note(args: { topic: string; text: string; tags?: string[] }, context?: RuntimeExecutionContext) {
             const note = appendNote({ topic: args.topic, text: args.text, tags: args.tags, ...brainScope(context) });
@@ -182,12 +322,15 @@ const skill: SkillManifest = {
         },
 
         async promote_note_to_wiki(args: { note_id: string; target_page: string }, context?: RuntimeExecutionContext) {
-            const page = promoteNoteToWiki({
+            const page = await promoteNoteToWiki({
                 note_id: args.note_id,
                 target_page: args.target_page,
                 ...brainScope(context),
             });
-            return `[TOOL_RESULT] Note ${args.note_id} promoted to wiki page ${page.path}.\nPath: ${page.file_path}`;
+            const note = page.compiled
+                ? 'The note was compiled into the page.'
+                : 'No model was available, so the note was filed verbatim and the page is marked needs_review.';
+            return `[TOOL_RESULT] Note ${args.note_id} promoted to wiki page ${page.path}.\nPath: ${page.file_path}\n${note}`;
         },
 
         async read_wiki_page(args: { path: string }, context?: RuntimeExecutionContext) {
@@ -235,6 +378,73 @@ const skill: SkillManifest = {
                     `- ${source.path} (${source.state}${source.disposition ? `: ${source.disposition}` : ''}) ${source.title}`
             );
             return `[TOOL_RESULT] Captured sources:\n${lines.join('\n')}`;
+        },
+
+        async wiki_search(args: { query: string; limit?: number }, context?: RuntimeExecutionContext) {
+            const hits = searchWiki({
+                query: args.query,
+                limit: args.limit,
+                personId: context?.userId,
+                ...brainScope(context),
+            });
+            if (hits.length === 0) {
+                return `[TOOL_RESULT] Searched the wiki index and full text for "${args.query}" and found no page.`;
+            }
+            const lines = hits.map(
+                (hit) => `- ${hit.path} — ${hit.title}: ${hit.excerpt.substring(0, 160)} (${hit.knowledge_updated_at})`
+            );
+            return `[TOOL_RESULT] Wiki pages for "${args.query}":\n${lines.join('\n')}`;
+        },
+
+        async wiki_answer(args: { question: string }, context?: RuntimeExecutionContext) {
+            const answer = await answerFromWiki({
+                question: args.question,
+                personId: context?.userId,
+                ...brainScope(context),
+            });
+            const citations = answer.citations.length > 0 ? `\nCited: ${answer.citations.join(', ')}` : '';
+            return `[TOOL_RESULT] ${answer.text}${citations}`;
+        },
+
+        async wiki_archive(
+            args: { title: string; body: string; topic?: string; citations?: string[] },
+            context?: RuntimeExecutionContext
+        ) {
+            const page = await archiveAnswer({ ...args, ...brainScope(context) });
+            return `[TOOL_RESULT] Answer archived as ${page.path}.\nPath: ${page.file_path}`;
+        },
+
+        async wiki_schema(args: { template?: string }, context?: RuntimeExecutionContext) {
+            const scope = brainScope(context);
+            const schema = getBrainSchema(scope);
+            const name = args.template as 'article' | 'archive' | 'raw' | undefined;
+            const template = name ? readBrainTemplate(name) : '';
+            const suffix = name
+                ? template
+                    ? `\n\n--- ${name} template ---\n${template}`
+                    : `\n\n(no template named "${name}")`
+                : '';
+            return `[TOOL_RESULT] Wiki schema in force${scope.spaceId ? ' for this space' : ''}:\n${schema}${suffix}`;
+        },
+
+        async wiki_schema_set(args: { content: string }, context?: RuntimeExecutionContext) {
+            const scope = brainScope(context);
+            if (!scope.spaceId) {
+                return '[TOOL_RESULT] The schema can only be overridden inside a space.';
+            }
+            if (!isSpaceOwner(scope.spaceId, context?.userId)) {
+                return '[TOOL_RESULT] Only the owner of this space can change how its wiki is maintained.';
+            }
+            if (args.content.trim().length > MAX_SCHEMA_CHARS) {
+                return `[TOOL_RESULT] That schema is ${args.content.trim().length} chars; the limit is ${MAX_SCHEMA_CHARS}.`;
+            }
+            setBrainSchemaOverride({ spaceId: scope.spaceId, content: args.content, createdBy: context?.userId });
+            return `[TOOL_RESULT] This space now maintains its wiki by its own schema (${args.content.trim().length} chars). The shipped default still applies everywhere else.`;
+        },
+
+        async wiki_lint(_args: Record<string, never>, context?: RuntimeExecutionContext) {
+            const report = await lintWiki({ ...brainScope(context) });
+            return `[TOOL_RESULT] ${formatLintDigest(report)}`;
         },
 
         async compile_notebook(args: { topic: string; limit?: number }, context?: RuntimeExecutionContext) {

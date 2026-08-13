@@ -1,0 +1,195 @@
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const ORIGINAL_ENV = { ...process.env };
+let dataDir = '';
+
+async function loadQuery(responses: string[] = []) {
+    vi.resetModules();
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'open-pipi-brain-query-'));
+    process.env = { ...ORIGINAL_ENV, DATA_DIR: dataDir, GEMINI_API_KEY: 'test-key' };
+
+    const generateBrainText = vi.fn();
+    for (const response of responses) generateBrainText.mockResolvedValueOnce(response);
+
+    vi.doMock('./brain-model', async () => {
+        const actual = await vi.importActual<typeof import('./brain-model')>('./brain-model');
+        return { ...actual, generateBrainText };
+    });
+
+    return {
+        brain: await import('./brain'),
+        query: await import('./brain-query'),
+        wiki: await import('./brain-wiki'),
+        generateBrainText,
+    };
+}
+
+beforeEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+});
+
+afterEach(async () => {
+    try {
+        const store = await import('./brain-store');
+        store.closeBrainDatabases();
+    } catch {}
+    process.env = { ...ORIGINAL_ENV };
+    vi.restoreAllMocks();
+    vi.doUnmock('./brain-model');
+    vi.resetModules();
+    if (dataDir) fs.rmSync(dataDir, { recursive: true, force: true });
+    dataDir = '';
+});
+
+const scope = { spaceId: 'telegram:chat-1' };
+
+describe('core/brain-query', () => {
+    it('finds pages by full text and by title', async () => {
+        const { brain, query } = await loadQuery();
+
+        brain.updateWikiPage({
+            ...scope,
+            path: 'health/sleep.md',
+            body: '# Sleep\n\nSleep debt accumulates across the week and shows up as an afternoon dip.',
+        });
+        brain.updateWikiPage({ ...scope, path: 'people/anna.md', body: '# Anna\n\nRuns in the morning.' });
+
+        expect(query.searchWiki({ ...scope, query: 'afternoon dip' }).map((hit) => hit.path)).toEqual([
+            'health/sleep.md',
+        ]);
+        expect(query.searchWiki({ ...scope, query: 'Anna' }).map((hit) => hit.path)).toEqual(['people/anna.md']);
+        expect(query.searchWiki({ ...scope, query: 'nothing here at all' })).toHaveLength(0);
+    });
+
+    it('keeps owner-only pages out of space search, matching what a direct read allows', async () => {
+        const { brain, query } = await loadQuery();
+
+        brain.updateWikiPage({ ...scope, path: 'health/sleep.md', body: '# Sleep\n\nShared sleep notes.' });
+        brain.updateWikiPage({
+            ...scope,
+            path: 'health/private.md',
+            body: '---\n{"visibility":"owner"}\n---\n# Private\n\nSleep secrets.',
+        });
+
+        const visible = query.searchWiki({ ...scope, query: 'sleep' }).map((hit) => hit.path);
+        expect(visible).toContain('health/sleep.md');
+        expect(visible).not.toContain('health/private.md');
+
+        // The host-level wiki has no space audience, so owner pages are in scope there.
+        expect(query.searchWiki({ query: 'sleep' })).toBeInstanceOf(Array);
+    });
+
+    it('says it searched rather than claiming the wiki is empty', async () => {
+        const { query, generateBrainText } = await loadQuery();
+
+        const answer = await query.answerFromWiki({ ...scope, question: 'What do I know about sleep?' });
+
+        expect(answer.searched).toBe(true);
+        expect(answer.citations).toHaveLength(0);
+        expect(answer.text).toContain('searched the wiki index and its full text');
+        expect(generateBrainText).not.toHaveBeenCalled();
+    });
+
+    it('answers from pages and returns their paths as citations', async () => {
+        const { brain, query, generateBrainText } = await loadQuery([
+            'Sleep debt builds over the week — see [Sleep](health/sleep.md).',
+        ]);
+
+        brain.updateWikiPage({
+            ...scope,
+            path: 'health/sleep.md',
+            body: '# Sleep\n\nSleep debt accumulates across the week.',
+        });
+
+        const answer = await query.answerFromWiki({ ...scope, question: 'sleep debt' });
+
+        expect(answer.citations).toEqual(['health/sleep.md']);
+        expect(answer.text).toContain('Sleep debt builds over the week');
+        // The page body reaches the model; the question is fenced separately.
+        const call = generateBrainText.mock.calls[0][0];
+        expect(call.prompt).toContain('<page path="health/sleep.md"');
+        expect(call.prompt).toContain('<question>');
+    });
+
+    it('archives an answer as a snapshot page and logs it', async () => {
+        const { brain, query } = await loadQuery();
+
+        const page = await query.archiveAnswer({
+            ...scope,
+            title: 'Sleep vs focus',
+            body: 'The comparison, as of today.',
+            topic: 'health',
+            citations: ['health/sleep.md'],
+            now: new Date('2026-08-13T10:00:00.000Z'),
+        });
+
+        expect(page.path).toBe('health/sleep-vs-focus.md');
+        expect(page.content).toContain('"kind": "archive"');
+        expect(page.content).toContain('"archived_at": "2026-08-13"');
+        expect(page.content).toContain('health/sleep.md');
+
+        expect(brain.readWikiLog(scope)[0]).toMatchObject({
+            action: 'query',
+            subject: 'Archived: Sleep vs focus',
+        });
+
+        // Archives are marked in the generated catalogue.
+        const index = brain.projectWikiIndexFile(scope);
+        expect(index).toContain('[Archived]');
+    });
+
+    it('builds a capped [WIKI] block of index rows, never page bodies', async () => {
+        const { brain, query } = await loadQuery();
+
+        brain.updateWikiPage({
+            ...scope,
+            path: 'health/sleep.md',
+            body: '# Sleep\n\nSleep debt accumulates across the week and shows up as an afternoon dip.',
+        });
+
+        const block = query.buildWikiContextBlock({ ...scope, query: 'sleep debt' });
+        expect(block).toContain('[WIKI]');
+        expect(block).toContain('health/sleep.md');
+        expect(block).toContain('read_wiki_page');
+        expect(block.length).toBeLessThanOrEqual(1200);
+
+        expect(query.buildWikiContextBlock({ ...scope, query: '' })).toBe('');
+        expect(query.buildWikiContextBlock({ ...scope, query: 'unrelated gibberish' })).toBe('');
+    });
+
+    it('never overwrites an existing page when archiving', async () => {
+        const { brain, query } = await loadQuery();
+
+        const first = await query.archiveAnswer({
+            ...scope,
+            title: 'Same title',
+            body: 'First answer.',
+            topic: 'health',
+        });
+        const second = await query.archiveAnswer({
+            ...scope,
+            title: 'Same title',
+            body: 'Second answer.',
+            topic: 'health',
+        });
+
+        expect(first.path).toBe('health/same-title.md');
+        expect(second.path).toBe('health/same-title-2.md');
+        // A snapshot that replaces the earlier snapshot is not a snapshot.
+        expect(brain.readWikiPage(first.path, scope).content).toContain('First answer.');
+        expect(brain.readWikiPage(second.path, scope).content).toContain('Second answer.');
+    });
+
+    it('does not clobber a canonical article whose title slugifies the same way', async () => {
+        const { brain, query } = await loadQuery();
+
+        brain.updateWikiPage({ ...scope, path: 'health/sleep.md', body: '# Sleep\n\nCanonical article.' });
+        const archived = await query.archiveAnswer({ ...scope, title: 'Sleep', body: 'An answer.', topic: 'health' });
+
+        expect(archived.path).toBe('health/sleep-2.md');
+        expect(brain.readWikiPage('health/sleep.md', scope).content).toContain('Canonical article.');
+    });
+});

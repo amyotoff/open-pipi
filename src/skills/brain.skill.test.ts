@@ -9,8 +9,25 @@ let dataDir = '';
 async function loadSkill() {
     vi.resetModules();
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'open-pipi-brain-skill-'));
-    process.env = { ...ORIGINAL_ENV, DATA_DIR: dataDir };
+    process.env = { ...ORIGINAL_ENV, DATA_DIR: dataDir, GEMINI_API_KEY: '' };
     return (await import('./brain.skill')).default;
+}
+
+/** Same skill, with the model stubbed, for the tools that synthesise text. */
+async function loadSkillWithModel(responses: string[]) {
+    vi.resetModules();
+    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'open-pipi-brain-skill-'));
+    process.env = { ...ORIGINAL_ENV, DATA_DIR: dataDir, GEMINI_API_KEY: 'test-key' };
+
+    const generateBrainText = vi.fn();
+    for (const response of responses) generateBrainText.mockResolvedValueOnce(response);
+
+    vi.doMock('../core/brain-model', async () => {
+        const actual = await vi.importActual<typeof import('../core/brain-model')>('../core/brain-model');
+        return { ...actual, generateBrainText };
+    });
+
+    return { skill: (await import('./brain.skill')).default, generateBrainText };
 }
 
 beforeEach(() => {
@@ -24,6 +41,7 @@ afterEach(async () => {
     } catch {}
     process.env = { ...ORIGINAL_ENV };
     vi.restoreAllMocks();
+    vi.doUnmock('../core/brain-model');
     vi.resetModules();
     if (dataDir) fs.rmSync(dataDir, { recursive: true, force: true });
     dataDir = '';
@@ -120,5 +138,101 @@ describe('brain skill', () => {
 
         const otherSpace = await skill.handlers.list_raw_sources({}, { ...context, spaceId: 'telegram:chat-2' });
         expect(otherSpace).toContain('No captured sources');
+    });
+
+    it('searches, answers, archives, and lints through the tool surface', async () => {
+        const { skill } = await loadSkillWithModel([
+            'Sleep debt builds across the week.',
+            JSON.stringify({ contradictions: [] }),
+        ]);
+        const context = {
+            channel: 'telegram',
+            channelRef: 'chat-1',
+            chatId: 'chat-1',
+            userId: '111',
+            spaceId: 'telegram:chat-1',
+        };
+
+        await skill.handlers.update_wiki_page(
+            { path: 'health/sleep.md', body: '# Sleep\n\nSleep debt accumulates across the week.' },
+            context
+        );
+
+        const empty = await skill.handlers.wiki_search({ query: 'quantum tunnelling' }, context);
+        expect(empty).toContain('Searched the wiki index and full text');
+
+        const found = await skill.handlers.wiki_search({ query: 'sleep debt' }, context);
+        expect(found).toContain('health/sleep.md');
+
+        const answered = await skill.handlers.wiki_answer({ question: 'what about sleep debt?' }, context);
+        expect(answered).toContain('Sleep debt builds across the week.');
+        expect(answered).toContain('Cited: health/sleep.md');
+
+        const archived = await skill.handlers.wiki_archive(
+            { title: 'Sleep summary', body: 'The summary.', topic: 'health', citations: ['health/sleep.md'] },
+            context
+        );
+        expect(archived).toContain('health/sleep-summary.md');
+
+        const linted = await skill.handlers.wiki_lint({}, context);
+        expect(linted).toContain('Wiki lint:');
+    });
+
+    it('declares the background jobs that make ingest and lint run without the owner', async () => {
+        const skill = await loadSkill();
+        const descriptions = (skill.crons || []).map((job) => job.description);
+
+        expect(descriptions).toContain('Drain the wiki ingest queue');
+        expect(descriptions).toContain('Wiki lint on the memory-sprint cadence');
+        for (const job of skill.crons || []) {
+            expect(job.expression).toMatch(/^[\d*/ ,-]+$/);
+        }
+    });
+
+    it('serves the schema layer and lets a space replace it', async () => {
+        const skill = await loadSkill();
+        const context = {
+            channel: 'telegram',
+            channelRef: 'chat-1',
+            chatId: 'chat-1',
+            userId: '111',
+            spaceId: 'telegram:chat-1',
+        };
+
+        const shipped = await skill.handlers.wiki_schema({}, context);
+        expect(shipped).toContain('Compile, never append');
+
+        const withTemplate = await skill.handlers.wiki_schema({ template: 'article' }, context);
+        expect(withTemplate).toContain('--- article template ---');
+        expect(withTemplate).toContain('"kind": "article"');
+
+        const missing = await skill.handlers.wiki_schema({ template: 'nope' }, context);
+        expect(missing).toContain('no template named');
+    });
+
+    it('gates the schema rewrite behind an explicit approval', async () => {
+        const skill = await loadSkill();
+
+        // Changing the maintenance rules is not something to do silently on a model's say-so.
+        expect(skill.toolMeta?.wiki_schema_set?.approval).toBe('explicit');
+        expect(skill.toolMeta?.wiki_schema_set?.approval_detail_fields).toContain('content');
+    });
+
+    it('refuses a schema rewrite from someone who is not the space owner', async () => {
+        const skill = await loadSkill();
+        const context = {
+            channel: 'telegram',
+            channelRef: 'chat-1',
+            chatId: 'chat-1',
+            userId: 'not-the-owner',
+            spaceId: 'telegram:chat-1',
+        };
+
+        const denied = await skill.handlers.wiki_schema_set({ content: '# Only compile recipes' }, context);
+        expect(denied).toContain('Only the owner of this space');
+
+        // The shipped schema is still in force.
+        const schema = await skill.handlers.wiki_schema({}, context);
+        expect(schema).toContain('Compile, never append');
     });
 });

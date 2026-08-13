@@ -9,7 +9,8 @@ let dataDir = '';
 async function loadBrain() {
     vi.resetModules();
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'open-pipi-brain-'));
-    process.env = { ...ORIGINAL_ENV, DATA_DIR: dataDir };
+    // No model configured: promotion must take its visible fallback, not call the network.
+    process.env = { ...ORIGINAL_ENV, DATA_DIR: dataDir, GEMINI_API_KEY: '' };
     return await import('./brain');
 }
 
@@ -56,7 +57,7 @@ describe('core/brain', () => {
         expect(compiled).toContain(note.id);
     });
 
-    it('promotes a note into a wiki page with provenance idempotently', async () => {
+    it('files a note verbatim and flags the page when no model can compile it', async () => {
         const brain = await loadBrain();
         const scope = { spaceId: 'telegram:chat-1' };
         const note = brain.appendNote({
@@ -66,12 +67,19 @@ describe('core/brain', () => {
             tags: ['decision'],
         });
 
-        const page = brain.promoteNoteToWiki({ ...scope, note_id: note.id, target_page: 'projects/pipi-os.md' });
-        brain.promoteNoteToWiki({ ...scope, note_id: note.id, target_page: 'projects/pipi-os.md' });
+        const page = await brain.promoteNoteToWiki({
+            ...scope,
+            note_id: note.id,
+            target_page: 'projects/pipi-os.md',
+        });
+        await brain.promoteNoteToWiki({ ...scope, note_id: note.id, target_page: 'projects/pipi-os.md' });
 
         expect(page.path).toBe('projects/pipi-os.md');
+        expect(page.compiled).toBe(false);
         expect(page.content).toContain('## Promoted Notebook Notes');
         expect(page.content).toContain(`Source note: ${note.id}`);
+        // A silent fallback is how a wiki rots; this one is visible to lint.
+        expect(page.content).toContain('"status": "needs_review"');
 
         const promoted = brain.searchNotes({ ...scope, query: note.id })[0];
         expect(promoted.status).toBe('promoted');
