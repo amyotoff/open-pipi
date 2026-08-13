@@ -27,6 +27,7 @@ import { listWorkflowTemplatesForPack } from './workflows';
 import { ensureActiveMemorySprint } from './memory-sprint';
 import { resolveChannelRefFromExecutionContext } from './runtime-context';
 import { getGroundingContext } from './grounding-context';
+import { buildWikiContextBlock } from './brain-query';
 import { logInfo } from '../utils/logging';
 
 /**
@@ -647,6 +648,17 @@ Linked artifacts: ${formatLinkList(activeProject.linked_artifacts)}`);
 
     if (memoryContext) {
         systemParts.push(`\n${memoryContext}`);
+    }
+
+    // The wiki earns its keep by entering ordinary turns, not only explicit questions (D11).
+    // Index rows only, hard-capped, selected with the same tokenizer the cross-space lookup uses.
+    const wikiContext = buildWikiContextBlock({
+        spaceId,
+        personId: senderId,
+        query: tokenizeCrossSpaceTopic(latestUserText).join(' '),
+    });
+    if (wikiContext) {
+        systemParts.push(`\n${wikiContext}`);
     }
 
     const activePlan = getLatestArtifactByKind(spaceId, 'plan');

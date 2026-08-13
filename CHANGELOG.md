@@ -11,7 +11,31 @@ All notable changes to Open PiPi will be documented in this file.
   succeeds; the compilation that follows is a background job, because a single source can touch
   a dozen wiki pages and a chat turn has neither the tool budget nor the latency for that.
   Re-capturing the same content returns the existing file instead of writing a near-duplicate.
-  This is the first half of the LLM wiki described in `docs/brain-wiki-plan.md`.
+- Queued sources are now compiled. A background job triages each one against the index on the
+  cheap model — deciding whether it is new, an update, a contradiction, or adds nothing at all —
+  and passes the ones that carry material to the stronger model, which merges them into pages
+  and patches the affected sections of everything else. That is the point of the pattern: a
+  source is compiled once, when it arrives, instead of raw documents being re-read and
+  re-derived on every question. `docs/brain-wiki-plan.md` records the design and the decisions.
+- `wiki_search`, `wiki_answer` and `wiki_archive`: the wiki answers questions with citations,
+  and a good answer can be filed back as a snapshot page so explorations compound instead of
+  disappearing into chat history. A capped `[WIKI]` block of index rows — never page bodies —
+  also rides along in ordinary turns beside the memory blocks, which is what makes a knowledge
+  base worth keeping rather than a filing cabinet nobody opens.
+- `wiki_lint`, on the memory-sprint cadence: repairs index entries and broken links, checks that
+  every number, date and quote on a page still appears in the raw source it links, and reports
+  contradictions, orphans, malformed status blocks and stale archives. Bookkeeping is fixed
+  automatically; facts are only ever reported, because a machine that counts should not be
+  rewriting claims.
+- `src/brain/schema.md`, the wiki's schema layer, with `wiki_schema` to read it and
+  `wiki_schema_set` (owner approval required) to replace it per space. The conventions used to
+  live in tool descriptions, where the owner could not change them and they cost tokens on every
+  turn whether or not the wiki was touched.
+- Contradictions are annotated, never overwritten. A superseded claim keeps its place under a
+  `Status: Outdated` or `Status: Disputed` block, so the wiki cannot quietly change its mind.
+- Wiki pages do not cross spaces. A page compiled inside a chat is visible to that chat, a fact
+  disclosed privately stays in scoped memory, and promotion to the host-level wiki is an explicit
+  owner decision — the one property that would have been painful to retrofit.
 
 ### Changed
 
@@ -30,6 +54,28 @@ All notable changes to Open PiPi will be documented in this file.
   empty index that reports itself as current.
 - Owner-only wiki pages are unreadable by path, not merely absent from search results. Knowing a
   page's path was previously enough to read it.
+- `promote_note_to_wiki` compiles a note into the page it belongs on. It used to append the note
+  verbatim under a "Promoted Notebook Notes" heading, which produced a scrapbook rather than a
+  compiled page. When no model is available the old behaviour still runs, but the page is marked
+  `needs_review` so lint can find it — a visible fallback rather than a silent one.
+- A page is only ever replaced wholesale when the model was shown all of it. Long pages are
+  patched section by section instead, and a source larger than one compile pass is refused
+  outright — compiling half a source and recording it as done is how a wiki acquires confident
+  gaps.
+- A compile plan that overflows the per-job cap re-queues for a continuation pass instead of being
+  trimmed to it, and gives up after three passes rather than looping. Each list is checked against
+  its own cap, so a plan that fits in total cannot still lose its ninth page.
+- Triage refuses an oversized source rather than judging it from the first 24K, so a long source
+  can no longer be closed as "no material" on the strength of its opening.
+- Lint verifies the provenance the compiler actually writes. Sources are recorded in frontmatter,
+  which the link index previously ignored, so every compiled page was reported both as unverifiable
+  and as an unreferenced source.
+- Repairing a dead cross-reference removes the link, not the line it sits on. It used to take the
+  surrounding sentence and any healthy links with it.
+- Archived answers never overwrite an existing page — not an earlier snapshot of the same question,
+  and not a canonical article whose title happens to slugify the same way.
+- Replacing a space's wiki schema requires being that space's owner. Approval is the caller
+  consenting to their own action; it is not authorisation.
 
 - Voice calls, as the first optional addon (`src/addons/voice-calls`): delegate an outbound phone
   call to a voice agent and get a structured result back. Three gates stand in front of it — the

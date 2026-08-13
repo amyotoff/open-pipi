@@ -408,6 +408,56 @@ Legacy memory tables (`resident_notes`, `daily_insights`, and `house_diary`) car
 
 The point is simple: keep memory inspectable and practical.
 
+### Knowledge Wiki
+
+Memory holds recent operational state. The Brain Layer holds compiled, citable knowledge — an
+LLM wiki in the sense of [Karpathy's pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f):
+knowledge is compiled once when a source arrives and then kept current, instead of being
+re-derived from raw documents on every question.
+
+Three layers on disk, per space, under `data/pipi-brain/`:
+
+```text
+raw/<topic>/YYYY-MM-DD-<slug>-<hash8>.md   immutable sources, never edited
+wiki/<topic>/<article>.md                  compiled pages the assistant owns
+wiki/index.md                              generated catalogue
+wiki/log.md                                append-only history of every ingest, query, lint
+notebook/daily/YYYY-MM-DD.md               working notes, before anything is canonical
+indexes/sqlite.db                          derived index — deletable, rebuilt from the files
+```
+
+Markdown is the source of truth. The SQLite index is a cache: delete it and
+`rebuildBrainIndex()` reconstructs it byte-for-byte from the files, which is what lets the
+wiki be an ordinary git repo with ordinary history.
+
+Three operations:
+
+- **Ingest.** `brain_capture` files a source into `raw/` and queues it — synchronous, one line
+  of output. A background job then triages it against the index on the cheap model and, if it
+  carries material, compiles it on the stronger model: pages are written or merged, affected
+  pages are patched section by section, and the outcome is appended to `log.md`. Sources that
+  add nothing get the `No material` disposition and stop there.
+- **Query.** `wiki_search` and `wiki_answer` search the index and full text and answer with
+  citations. `wiki_archive` files a good answer back as a snapshot page, so explorations
+  compound instead of disappearing into chat history. A capped `[WIKI]` block of index rows —
+  never page bodies — also rides along in ordinary turns beside the memory blocks.
+- **Lint.** `wiki_lint` runs on the memory-sprint cadence. It repairs index entries and broken
+  links, verifies that every number, date, and quote on a page still appears in the raw source
+  it links, and reports contradictions, orphans, missing status blocks, and stale archives.
+  Bookkeeping is fixed automatically; facts are only ever reported.
+
+Two properties worth knowing about:
+
+- **Contradictions are annotated, never overwritten.** A superseded claim keeps its place under
+  a `> **Status: Outdated** (date)` or `> **Status: Disputed**` block. The wiki never quietly
+  changes its mind.
+- **Pages do not cross spaces.** A page compiled inside a chat is visible to that chat; a fact
+  disclosed privately stays in scoped memory and never reaches another space's wiki. Promotion
+  to the host-level wiki is an explicit owner decision.
+
+Conventions live in `src/brain/schema.md` — the schema layer — with page templates beside it.
+A space can replace it with its own version through a grounding override, without a code change.
+
 ### Artifacts
 
 Artifacts are durable, structured documents attached to a space. They are useful when the assistant should keep working on something across many turns instead of improvising from scratch every time.
@@ -537,6 +587,12 @@ Key files:
 - `src/core/agent-kernel.ts`: materializes the active pack and execution context
 - `src/core/space-behavior.ts`: pins pack and grounding snapshots per space
 - `src/core/context-composer.ts`: assembles prompt context with budgets and guards
+- `src/core/brain-store.ts`: Brain Layer paths, scopes, and the derived index schema
+- `src/core/brain-wiki.ts`: wiki pages, links, `index.md` projection, `log.md` append
+- `src/core/brain-ingest.ts`: source capture, triage, compilation, cascade
+- `src/core/brain-query.ts`: wiki search, answers, archiving, the `[WIKI]` context block
+- `src/core/brain-lint.ts`: index and link repair, evidence checks, judgement reports
+- `src/brain/schema.md`: the wiki's schema layer, overridable per space
 - `src/core/llm.ts`: Gemini/Ollama orchestration and tool loop
 - `src/core/pack-loader.ts`: loads installable packs from disk
 - `src/core/runtime-backup.ts`: full runtime restore points and manifests

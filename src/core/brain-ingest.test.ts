@@ -10,7 +10,7 @@ let dataDir = '';
 async function loadBrain() {
     vi.resetModules();
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'open-pipi-brain-ingest-'));
-    process.env = { ...ORIGINAL_ENV, DATA_DIR: dataDir };
+    process.env = { ...ORIGINAL_ENV, DATA_DIR: dataDir, GEMINI_API_KEY: '' };
     return {
         brain: await import('./brain'),
         ingest: await import('./brain-ingest'),
@@ -142,7 +142,7 @@ describe('core/brain-ingest', () => {
         const { brain, ingest, store } = await loadBrain();
 
         const note = brain.appendNote({ ...scope, topic: 'dispatch', text: 'Notebook note that gets promoted.' });
-        brain.promoteNoteToWiki({ ...scope, note_id: note.id, target_page: 'projects/pipi-os.md' });
+        await brain.promoteNoteToWiki({ ...scope, note_id: note.id, target_page: 'projects/pipi-os.md' });
         brain.updateWikiPage({
             ...scope,
             path: 'people/anna.md',

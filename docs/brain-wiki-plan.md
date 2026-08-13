@@ -1,7 +1,7 @@
 # Brain Layer as an LLM Wiki — Architecture & Delivery Plan
 
-Status: phases 0-1 delivered; 2-6 still proposed. Section 1 records the v0.1.0 baseline
-this replaces, and is kept as the before-picture.
+Status: delivered. All seven phases in section 7 are implemented and covered by tests.
+Section 1 records the v0.1.0 baseline this replaced, and is kept as the before-picture.
 
 ## 0. Source material and what we are actually adapting
 
@@ -180,26 +180,41 @@ Revisit on an observable, not a hunch: when lint reports index-miss rate (querie
 
 ```
 src/core/
-  brain-store.ts       # scopes, paths, dir layout + migration, db handle, index schema
+  brain-store.ts       # scopes, paths, dir layout + migration, db handle, index schema, scope lock
+  brain-model.ts       # how the Brain Layer calls a model, and what happens when the budget ends
+  brain-schema.ts      # loads the schema layer, per-space override
   brain.ts             # notebook notes, note events, promotion, rebuild orchestration
-  brain-wiki.ts        # pages: read/create/patch, frontmatter, link extraction,
+  brain-wiki.ts        # pages: read/create/patch, frontmatter, links, search,
                        #   index.md projection, log.md append/read
   brain-ingest.ts      # capture, hashing, dedupe, topic routing, triage, compile, cascade
   brain-lint.ts        # the three check classes, incl. the evidence checker (D8)
-  brain-query.ts       # search, answer assembly, citation formatting
+  brain-query.ts       # search, answer assembly, archiving, the [WIKI] context block
 src/skills/
   brain.skill.ts       # tool surface + crons
 src/brain/
   schema.md            # the schema layer (D12)
   templates/
-    article.md  archive.md  raw.md  index.md
+    article.md  archive.md  raw.md
 ```
 
-`brain-store.ts` was not in the original list. It exists because `brain.ts` needs
-`reindexWikiTree` for its rebuild while `brain-wiki.ts` needs paths and the database
-handle — a direct import cycle. The store owns exactly one truth: where the brain
-lives on disk and how its index is opened, which is why the schema for every derived
-table lives there too.
+Three modules were not in the original list, each for a stated reason.
+
+`brain-store.ts` exists because `brain.ts` needs `reindexWikiTree` for its rebuild while
+`brain-wiki.ts` needs paths and the database handle — a direct import cycle. The store owns
+exactly one truth: where the brain lives on disk and how its index is opened, which is why
+the schema for every derived table lives there too.
+
+`brain-model.ts` exists because `llm.ts` reaches the skill registry through the tool
+executor, and the registry loads `brain.skill.ts`. A static import of `llm.ts` from the Brain
+Layer would close the cycle llm → tool-executor → skills → brain-ingest → llm, so this module
+resolves `llm.ts` lazily at call time. It also owns `BrainBudgetError`, the single place that
+decides what "no budget" means for every Brain job.
+
+`brain-schema.ts` is the loader for D12, kept apart from `brain-store.ts` because the schema
+is content the owner edits, not infrastructure.
+
+There is no `index.md` template: the index is projected from the database (D2), so a template
+for it would be a second definition of the same format.
 
 `brain.ts` keeps only what it is already good at — scope resolution, path safety, note blocks, index rebuild. Everything wiki-shaped moves out. One file owns each truth: `brain-wiki.ts` both writes pages and projects the index, so the writer and the projector cannot drift; the evidence checker lives inside lint because it is lint's mechanical class, not a subsystem. The path-safety helpers (`normalizeWikiPath`, `safeRelativePath`) are load-bearing security code and move as-is, with their tests.
 
@@ -305,11 +320,11 @@ Each phase is one PR, ends with `pnpm verify` green, and is independently useful
 |---|---|---|
 | 0 | ✅ Flatten wiki topics; extract `brain-wiki.ts` from `brain.ts`; generate `index.md` and `log.md`; rebuild-equality test (D1) | Existing tools behave identically; the two files exist and regenerate |
 | 1 | ✅ Capture half of `brain-ingest.ts` + `brain_capture` tool + `raw_sources` | A forwarded link lands in `raw/` with `state: queued`; re-capture is idempotent |
-| 2 | Triage worker on the cron; dispositions; `No material` path; log entries | Queue drains to a disposition without touching wiki pages |
-| 3 | Section patches (D7); compile + cascade; `promote_note_to_wiki` rewritten (D6) | One source produces a merged page plus its cascade, with sources recorded |
-| 4 | `brain-query.ts`; `wiki_search` / `wiki_answer`; archive; `[WIKI]` context block (D11) | The wiki answers a question with citations, and shows up in a normal turn |
-| 5 | `brain-lint.ts`: evidence checker (D8) + the three classes; lint cron + owner digest (D10) | Lint finds a planted contradiction and a planted broken link, fixes only what it may |
-| 6 | `src/brain/schema.md` + templates; per-space override; docs and README section (D12) | The owner can edit conventions without a code change |
+| 2 | ✅ Triage worker on the cron; dispositions; `No material` path; log entries | Queue drains to a disposition without touching wiki pages |
+| 3 | ✅ Section patches (D7); compile + cascade; `promote_note_to_wiki` rewritten (D6) | One source produces a merged page plus its cascade, with sources recorded |
+| 4 | ✅ `brain-query.ts`; `wiki_search` / `wiki_answer`; archive; `[WIKI]` context block (D11) | The wiki answers a question with citations, and shows up in a normal turn |
+| 5 | ✅ `brain-lint.ts`: evidence checker (D8) + the three classes; lint cron + owner digest (D10) | Lint finds a planted contradiction and a planted broken link, fixes only what it may |
+| 6 | ✅ `src/brain/schema.md` + templates; per-space override; docs and README section (D12) | The owner can edit conventions without a code change |
 
 Visibility (D3) is not a phase. It is enforced from Phase 1 onward, because retrofitting it means auditing every page ever written.
 
