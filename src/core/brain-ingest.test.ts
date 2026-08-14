@@ -98,6 +98,68 @@ describe('core/brain-ingest', () => {
         expect(files).toHaveLength(1);
     });
 
+    it('preserves identical text chunks as distinct document parts and deduplicates the whole resubmission', async () => {
+        const { ingest, store } = await loadBrain();
+        const content = Array.from({ length: 10 }, () => 'same paragraph '.repeat(850)).join('\n\n');
+
+        const first = ingest.captureSharedDocuments({
+            ...scope,
+            documents: [{ title: 'Repeated sections', content, topic: 'reports' }],
+        });
+        const second = ingest.captureSharedDocuments({
+            ...scope,
+            documents: [{ title: 'Repeated sections', content, topic: 'reports' }],
+        });
+
+        expect(first).toMatchObject({ captured_documents: 1, duplicates: 0, split_documents: 1 });
+        expect(first.captured).toHaveLength(10);
+        expect(new Set(first.captured.map((part) => part.source.content_hash)).size).toBe(10);
+        expect(second).toMatchObject({ captured_documents: 0, duplicates: 1, reused_parts: 10 });
+        expect(second.captured).toHaveLength(0);
+        const shared = store.sharedScope(scope);
+        const hashes = ingest
+            .listRawSources({ ...shared, state: 'queued', limit: 20 })
+            .map((source) => source.content_hash)
+            .sort();
+        expect(hashes).toHaveLength(10);
+        ingest.reindexRawTree(shared);
+        expect(
+            ingest
+                .listRawSources({ ...shared, state: 'queued', limit: 20 })
+                .map((source) => source.content_hash)
+                .sort()
+        ).toEqual(hashes);
+    });
+
+    it('rolls back every part when an atomic document capture fails midway', async () => {
+        const { ingest, store } = await loadBrain();
+        const originalRename = fs.renameSync.bind(fs);
+        let renames = 0;
+        const rename = vi.spyOn(fs, 'renameSync').mockImplementation(((oldPath, newPath) => {
+            renames += 1;
+            if (renames === 3) throw new Error('simulated disk failure');
+            originalRename(oldPath, newPath);
+        }) as typeof fs.renameSync);
+
+        try {
+            expect(() =>
+                ingest.captureRawSource({
+                    ...scope,
+                    title: 'Atomic transcript',
+                    content: Array.from({ length: 4 }, (_, index) => `${index}`.repeat(11_000)).join('\n\n'),
+                    topic: 'reports',
+                })
+            ).toThrow('simulated disk failure');
+        } finally {
+            rename.mockRestore();
+        }
+
+        expect(ingest.listRawSources({ ...scope, limit: 20 })).toHaveLength(0);
+        const rawRoot = path.join(store.getBrainScopeRoot(scope), 'raw');
+        const files = fs.existsSync(rawRoot) ? fs.readdirSync(rawRoot, { recursive: true }) : [];
+        expect(files.filter((file) => String(file).endsWith('.md'))).toHaveLength(0);
+    });
+
     it('reuses an existing topic directory regardless of case', async () => {
         const { ingest } = await loadBrain();
 

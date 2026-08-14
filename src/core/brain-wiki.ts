@@ -442,6 +442,29 @@ export function reindexWikiTree(scope?: BrainScopeInput): number {
     return count;
 }
 
+/** Rebuild only pages touched by an atomic write/rollback instead of walking the whole wiki tree. */
+export function reindexWikiPaths(scope: BrainScopeInput | undefined, relativePaths: string[]): number {
+    const db = getBrainDb(scope);
+    const uniquePaths = [...new Set(relativePaths.map((relativePath) => normalizeWikiPath(relativePath)))];
+    let count = 0;
+
+    db.transaction(() => {
+        for (const relativePath of uniquePaths) {
+            const absolutePath = brainPath(scope, 'wiki', ...relativePath.split('/'));
+            if (fs.existsSync(absolutePath)) {
+                indexWikiPage(db, scope, relativePath, fs.readFileSync(absolutePath, 'utf-8'));
+                count += 1;
+                continue;
+            }
+            db.prepare('DELETE FROM wiki_pages WHERE path = ?').run(relativePath);
+            db.prepare('DELETE FROM wiki_fts WHERE path = ?').run(relativePath);
+            db.prepare('DELETE FROM wiki_links WHERE from_path = ?').run(relativePath);
+        }
+    })();
+
+    return count;
+}
+
 /**
  * Regenerate wiki/index.md from the index. The agent reads SQLite; the owner reads
  * this file in Obsidian or on GitHub. One writer keeps them from drifting.

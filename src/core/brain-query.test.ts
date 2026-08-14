@@ -152,6 +152,25 @@ describe('core/brain-query', () => {
         expect(block).toContain('untrusted index data');
     });
 
+    it('ranks shared knowledge before local drafts without comparing scores from different indexes', async () => {
+        const { brain, query, store } = await loadQuery();
+        brain.updateWikiPage({
+            ...store.sharedScope(scope),
+            path: 'people/anna.md',
+            body: '# Anna\n\nAnna leads strategy for the agency.',
+        });
+        brain.updateWikiPage({
+            ...scope,
+            path: 'people/anna-draft.md',
+            body: `# Anna draft\n\n${'Anna strategy '.repeat(20)}`,
+        });
+
+        const hits = query.searchWiki({ ...scope, query: 'Anna strategy' });
+
+        expect(hits[0]).toMatchObject({ path: 'people/anna.md', origin: 'shared' });
+        expect(hits.find((hit) => hit.path === 'people/anna-draft.md')).toMatchObject({ origin: 'space' });
+    });
+
     it('archives an answer into the shared wiki and logs it', async () => {
         const { brain, query, store } = await loadQuery();
 

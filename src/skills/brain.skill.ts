@@ -464,7 +464,12 @@ const skill: SkillManifest = {
         ) {
             const result = captureRawSource({ ...args, ...brainScope(context) });
             if (result.duplicate) {
-                return `[TOOL_RESULT] This source is already in raw/ (identical content): ${result.source.path}\nState: ${result.source.state}. Nothing was written.`;
+                return `[TOOL_RESULT] This source is already in raw/ (identical content${result.split ? `, ${result.parts.length} parts` : ''}): ${result.source.path}\nState: ${result.source.state}. Nothing was written.`;
+            }
+            if (result.split) {
+                const written = result.parts.filter((part) => !part.duplicate);
+                const reused = result.parts.length - written.length;
+                return `[TOOL_RESULT] Source captured atomically as ${result.parts.length} model-safe parts (${written.length} new${reused ? `, ${reused} already present` : ''}).\nPaths:\n${result.parts.map((part) => `- ${part.source.path}`).join('\n')}\nState: queued — compilation runs as a background job.`;
             }
             return `[TOOL_RESULT] Source captured: ${result.source.title}\nPath: ${result.file_path}\nTopic: ${result.source.topic}\nState: ${result.source.state} — compilation runs as a background job.`;
         },
@@ -497,11 +502,16 @@ const skill: SkillManifest = {
         ) {
             const result = captureSharedDocuments({ documents: args.documents || [], ...brainScope(context) });
             const lines = [
-                `Filed ${result.captured.length} document source(s) into the shared wiki.`,
+                `Filed ${result.captured_documents} document(s) into the shared wiki as ${result.captured.length} new source part(s).`,
                 result.split_documents > 0
                     ? `${result.split_documents} large document(s) were split into model-safe parts.`
                     : '',
-                result.duplicates > 0 ? `${result.duplicates} were already there and were skipped.` : '',
+                result.duplicates > 0
+                    ? `${result.duplicates} unchanged document(s) were already there and were skipped.`
+                    : '',
+                result.reused_parts > 0 && result.duplicates === 0
+                    ? `${result.reused_parts} existing part(s) were reused while completing partially captured documents.`
+                    : '',
                 result.failed.length > 0
                     ? `${result.failed.length} could not be filed: ${result.failed.map((entry) => `${entry.title} (${entry.reason})`).join('; ')}`
                     : '',

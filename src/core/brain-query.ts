@@ -78,8 +78,10 @@ export function searchWiki(input: { query: string; limit?: number; personId?: st
     return hits
         .sort(
             (left, right) =>
-                left.rank - right.rank ||
                 Number(right.origin === 'shared') - Number(left.origin === 'shared') ||
+                // FTS bm25 values and LIKE fallback values are only meaningful inside
+                // the SQLite corpus that produced them. Never compare them across scopes.
+                left.rank - right.rank ||
                 right.knowledge_updated_at.localeCompare(left.knowledge_updated_at)
         )
         .slice(0, limit);

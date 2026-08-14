@@ -141,6 +141,58 @@ describe('brain ingest pipeline', () => {
         expect(brain.readWikiLog(scope)[0].details.Updated).toBe('people/anna.md');
     });
 
+    it('accepts a cascade-only update when no new page is needed', async () => {
+        const { brain, ingest } = await loadPipeline([
+            triage('disputed', ['campaigns/orbit.md']),
+            JSON.stringify({
+                subject: 'Orbit budget dispute',
+                pages: [],
+                cascade: [
+                    {
+                        path: 'campaigns/orbit.md',
+                        heading: 'Budget status',
+                        body: '> **Status: Disputed**\n> €100,000 replaces €120,000; finance sign-off is pending.',
+                    },
+                ],
+            }),
+        ]);
+        brain.updateWikiPage({
+            ...scope,
+            path: 'campaigns/orbit.md',
+            body: '# Orbit\n\nApproved budget: €120,000.',
+        });
+        const captured = ingest.captureRawSource({
+            ...scope,
+            title: 'Orbit revised budget',
+            content: '€100,000 replaces €120,000; finance sign-off is pending.',
+        });
+
+        const run = await ingest.runIngestQueue({ ...scope });
+
+        expect(run).toMatchObject({ compiled: 1, failed: 0, retried: 0 });
+        expect(brain.readWikiPage('campaigns/orbit.md', scope).content).toContain('Status: Disputed');
+        expect(brain.readWikiPage('campaigns/orbit.md', scope).content).toContain(captured.source.path);
+    });
+
+    it('keeps valid pages when a hallucinated cascade target is unusable and logs the skip', async () => {
+        const { brain, ingest } = await loadPipeline([
+            triage('new', ['agency/missing.md']),
+            JSON.stringify({
+                subject: 'Agency update',
+                pages: [{ path: 'agency/update.md', title: 'Agency update', body: '# Agency update\n\nUseful.' }],
+                cascade: [{ path: 'agency/missing.md', heading: 'Update', body: 'Should be skipped.' }],
+            }),
+        ]);
+        const captured = ingest.captureRawSource({ ...scope, title: 'Agency update', content: 'Useful.' });
+
+        const run = await ingest.runIngestQueue({ ...scope });
+
+        expect(run).toMatchObject({ compiled: 1, failed: 0, retried: 0 });
+        expect(ingest.getRawSource(captured.source.path, scope)?.state).toBe('compiled');
+        expect(brain.readWikiPage('agency/update.md', scope).exists).toBe(true);
+        expect(brain.readWikiLog(scope)[0].details['Cascade skipped']).toContain('target does not exist');
+    });
+
     it('leaves the source queued when the model budget is gone', async () => {
         const { model, ingest, brain } = await loadPipeline([]);
         const { generateBrainText } = await import('./brain-model');
@@ -210,6 +262,61 @@ describe('brain ingest pipeline', () => {
         expect(brain.readWikiPage('health/first.md', scope).exists).toBe(false);
     });
 
+    it('repairs a missing page H1 mechanically without spending a retry', async () => {
+        const { brain, ingest } = await loadPipeline([
+            triage('new'),
+            JSON.stringify({
+                subject: 'Orbit budget',
+                pages: [{ path: 'campaigns/orbit.md', title: 'Orbit budget', body: 'Approved budget: €120,000.' }],
+            }),
+        ]);
+        ingest.captureRawSource({ ...scope, title: 'Orbit budget', content: 'Approved budget: €120,000.' });
+
+        const run = await ingest.runIngestQueue({ ...scope });
+
+        expect(run).toMatchObject({ compiled: 1, failed: 0, retried: 0 });
+        expect(brain.readWikiPage('campaigns/orbit.md', scope).content).toContain(
+            '# Orbit budget\n\nApproved budget: €120,000.'
+        );
+    });
+
+    it('feeds the previous validation error back into a model-output retry', async () => {
+        const { ingest, generateBrainText } = await loadPipeline([
+            triage('new'),
+            JSON.stringify({ subject: 'Broken', pages: [{}] }),
+            triage('new'),
+            JSON.stringify({
+                subject: 'Fixed',
+                pages: [{ path: 'health/fixed.md', title: 'Fixed', body: '# Fixed\n\nRepaired.' }],
+            }),
+        ]);
+        const captured = ingest.captureRawSource({ ...scope, title: 'Fix me', content: 'Useful.' });
+
+        expect(await ingest.runIngestQueue({ ...scope })).toMatchObject({ retried: 1, failed: 0 });
+        expect(await ingest.runIngestQueue({ ...scope })).toMatchObject({ compiled: 1, failed: 0 });
+
+        const secondCompilePrompt = generateBrainText.mock.calls[3][0].prompt;
+        expect(secondCompilePrompt).toContain('<previous_attempt_error>');
+        expect(secondCompilePrompt).toContain('requires non-empty path, title, and body');
+        expect(ingest.getRawSource(captured.source.path, scope)?.attempts).toBe(1);
+    });
+
+    it('marks deterministic visibility errors terminal on the first attempt', async () => {
+        const { brain, ingest, generateBrainText } = await loadPipeline([triage('update', ['health/private.md'])]);
+        brain.updateWikiPage({
+            ...scope,
+            path: 'health/private.md',
+            body: '---\n{"visibility":"owner"}\n---\n# Private\n\nSecret.',
+        });
+        const captured = ingest.captureRawSource({ ...scope, title: 'Private update', content: 'Useful.' });
+
+        const run = await ingest.runIngestQueue({ ...scope });
+
+        expect(run).toMatchObject({ failed: 1, retried: 0 });
+        expect(ingest.getRawSource(captured.source.path, scope)).toMatchObject({ state: 'failed', attempts: 1 });
+        expect(generateBrainText).toHaveBeenCalledTimes(1);
+    });
+
     it('rolls back earlier page writes when a later write fails', async () => {
         const oversizedBody = `# Too large\n\n${'x'.repeat(513 * 1024)}`;
         const { brain, ingest } = await loadPipeline([
@@ -226,7 +333,7 @@ describe('brain ingest pipeline', () => {
 
         const run = await ingest.runIngestQueue({ ...scope });
 
-        expect(run).toMatchObject({ compiled: 0, retried: 1 });
+        expect(run).toMatchObject({ compiled: 0, failed: 1, retried: 0 });
         expect(brain.readWikiPage('health/first.md', scope).exists).toBe(false);
         expect(brain.readWikiPage('health/second.md', scope).exists).toBe(false);
         expect(brain.listWikiPages(scope).map((page) => page.path)).not.toContain('health/first.md');
@@ -308,7 +415,7 @@ describe('brain ingest pipeline', () => {
         const run = await ingest.runIngestQueue({ ...scope });
 
         expect(run.compiled).toBe(0);
-        expect(run.failed).toBe(1);
+        expect(run).toMatchObject({ failed: 0, retried: 1 });
 
         // The page is untouched and the source is not called compiled.
         const page = brain.readWikiPage('people/anna.md', scope);
@@ -316,22 +423,23 @@ describe('brain ingest pipeline', () => {
         expect(page.content).not.toContain('Rewritten.');
 
         const source = ingest.getRawSource(captured.source.path, scope);
-        expect(source?.state).toBe('failed');
+        expect(source?.state).toBe('queued');
         expect(source?.last_error).toContain('section by section');
     });
 
-    it('refuses an oversized single source immediately instead of failing it later in the queue', async () => {
+    it('splits an oversized chat capture into model-safe queued sources', async () => {
         const { ingest, generateBrainText } = await loadPipeline([triage('new')]);
 
-        expect(() =>
-            ingest.captureRawSource({
-                ...scope,
-                title: 'Huge',
-                content: 'y'.repeat(30_000),
-                topic: 'health',
-            })
-        ).toThrow(/automatic compilation is too large/);
-        expect(ingest.listRawSources({ ...scope })).toHaveLength(0);
+        const captured = ingest.captureRawSource({
+            ...scope,
+            title: 'Huge',
+            content: 'y'.repeat(30_000),
+            topic: 'health',
+        });
+
+        expect(captured).toMatchObject({ split: true, duplicate: false });
+        expect(captured.parts).toHaveLength(2);
+        expect(ingest.listRawSources({ ...scope, state: 'queued' })).toHaveLength(2);
         expect(generateBrainText).not.toHaveBeenCalled();
     });
 
@@ -474,7 +582,8 @@ describe('brain ingest pipeline', () => {
         const run = await ingest.runIngestQueue({ ...scope });
 
         expect(run.compiled).toBe(0);
-        expect(ingest.getRawSource(captured.source.path, scope)?.state).toBe('failed');
+        expect(run).toMatchObject({ failed: 0, retried: 1 });
+        expect(ingest.getRawSource(captured.source.path, scope)?.state).toBe('queued');
         expect(brain.readWikiPage('health/unseen.md', scope).content).toContain('Original body.');
         expect(brain.readWikiPage('health/new.md', scope).exists).toBe(false);
     });
