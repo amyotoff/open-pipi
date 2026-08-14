@@ -2,15 +2,19 @@ import fs from 'fs';
 import path from 'path';
 import { BrainScopeInput } from './brain-store';
 import { logWarn } from '../utils/logging';
-import { listGroundingOverrides, upsertGroundingOverride } from '../db';
+import { listGroundingOverrides } from '../db';
 
 /**
  * The schema layer: the third layer of the pattern, and the one the owner edits.
  *
  * The conventions used to live in tool descriptions, where the owner could not change
  * them and they cost tokens on every turn. Here they are a document that ships with the
- * runtime, is overridable per space, and is injected only into the prompts that actually
- * maintain the wiki (D12 in docs/brain-wiki-plan.md).
+ * runtime and is injected only into the prompts that actually maintain the wiki
+ * (D12 in docs/brain-wiki-plan.md).
+ *
+ * The shared wiki compiles without a chat attached, so the shipped document is what governs
+ * it. A per-space override is still read for a chat's own legacy pages; there is deliberately
+ * no tool to write one until the shared wiki's schema has an owner of its own.
  */
 
 /** Grounding overrides are keyed by (kind, subject); this reuses `rule` rather than widening the shared union. */
@@ -69,14 +73,4 @@ export function getBrainSchema(scope?: BrainScopeInput): string {
     } catch {
         return getDefaultBrainSchema();
     }
-}
-
-export function setBrainSchemaOverride(input: { spaceId: string; content: string; createdBy?: string }): void {
-    upsertGroundingOverride({
-        space_id: input.spaceId,
-        kind: 'rule',
-        subject: BRAIN_SCHEMA_SUBJECT,
-        content: input.content,
-        created_by: input.createdBy ?? null,
-    });
 }

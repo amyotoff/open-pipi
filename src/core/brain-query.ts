@@ -1,4 +1,4 @@
-import { BrainScopeInput, clampLimit, dayStamp, nowIso, slugify, withScopeLock } from './brain-store';
+import { BrainScopeInput, clampLimit, dayStamp, nowIso, sharedScope, slugify, withScopeLock } from './brain-store';
 import {
     BrainWikiPage,
     WikiSearchHit,
@@ -25,6 +25,20 @@ export interface WikiAnswer {
     searched: boolean;
 }
 
+export interface WikiHit extends WikiSearchHit {
+    /** Which wiki the page came from — the shared one, or this chat's own older pages. */
+    origin: 'shared' | 'space';
+}
+
+/** The shared wiki, plus the chat's own pages as a fallback for anything filed before. */
+function readableScopes(spaceId?: string): Array<{ scope: BrainScopeInput; origin: 'shared' | 'space' }> {
+    const scopes: Array<{ scope: BrainScopeInput; origin: 'shared' | 'space' }> = [
+        { scope: sharedScope({ spaceId }), origin: 'shared' },
+    ];
+    if (spaceId) scopes.push({ scope: { spaceId }, origin: 'space' });
+    return scopes;
+}
+
 const MAX_ANSWER_PAGES = 5;
 const MAX_PAGE_CHARS = 8000;
 const DEFAULT_WIKI_BLOCK_CHARS = 900;
@@ -41,16 +55,27 @@ const ANSWER_SYSTEM = [
  * Search and direct read answer to the same rule (D3): whoever cannot open a page by path
  * does not find it by searching either.
  */
-export function searchWiki(
-    input: { query: string; limit?: number; personId?: string } & BrainScopeInput
-): WikiSearchHit[] {
+export function searchWiki(input: { query: string; limit?: number; personId?: string } & BrainScopeInput): WikiHit[] {
     if (!input.query.trim()) return [];
-    return searchWikiRows({
-        spaceId: input.spaceId,
-        query: input.query,
-        limit: input.limit,
-        visibility: visibilityForReader({ spaceId: input.spaceId, personId: input.personId }),
-    });
+
+    const limit = clampLimit(input.limit, 8, 1, 50);
+    const visibility = visibilityForReader({ spaceId: input.spaceId, personId: input.personId });
+    const hits: WikiHit[] = [];
+    const seen = new Set<string>();
+
+    for (const { scope, origin } of readableScopes(input.spaceId)) {
+        for (const row of searchWikiRows({ ...scope, query: input.query, limit, visibility })) {
+            // The shared wiki is searched first, so it wins a path collision.
+            const key = `${origin}:${row.path}`;
+            if (seen.has(key) || seen.has(`shared:${row.path}`)) continue;
+            seen.add(key);
+            hits.push({ ...row, origin });
+        }
+    }
+
+    return hits
+        .sort((left, right) => right.knowledge_updated_at.localeCompare(left.knowledge_updated_at))
+        .slice(0, limit);
 }
 
 /**
@@ -70,7 +95,8 @@ export async function answerFromWiki(
     }
 
     const pages = hits.slice(0, MAX_ANSWER_PAGES).map((hit) => {
-        const page = readWikiPage(hit.path, { spaceId: input.spaceId });
+        const scope = hit.origin === 'shared' ? sharedScope({ spaceId: input.spaceId }) : { spaceId: input.spaceId };
+        const page = readWikiPage(hit.path, scope);
         return `<page path="${hit.path}" title="${hit.title.replace(/"/g, "'")}">\n${page.content.substring(0, MAX_PAGE_CHARS)}\n</page>`;
     });
 
@@ -103,7 +129,7 @@ export async function archiveAnswer(
     if (!title) throw new Error('An archived answer needs a title.');
     if (!body) throw new Error('An archived answer cannot be empty.');
 
-    const scope: BrainScopeInput = { spaceId: input.spaceId };
+    const scope = sharedScope({ spaceId: input.spaceId });
     const topic = slugify(input.topic || 'archive', 40);
 
     return withScopeLock(scope, async () => {
@@ -138,7 +164,7 @@ export function buildWikiContextBlock(
     const query = input.query.trim();
     if (!query) return '';
 
-    let hits: WikiSearchHit[];
+    let hits: WikiHit[];
     try {
         hits = searchWiki({
             spaceId: input.spaceId,

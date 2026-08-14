@@ -156,8 +156,8 @@ describe('core/brain-wiki', () => {
         expect(shared.allowed).toBe(true);
         expect(shared.content).toContain('Space content.');
 
-        expect(wiki.visibilityForReader({ ...scope })).toEqual(['space']);
-        // The host-level wiki belongs to the owner.
+        // Everyone in the install reads the shared wiki; a chat's own pages stay in the chat.
+        expect(wiki.visibilityForReader({ ...scope })).toEqual(['shared', 'space']);
         expect(wiki.visibilityForReader({})).toContain('owner');
     });
 

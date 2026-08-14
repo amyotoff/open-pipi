@@ -14,7 +14,16 @@ import { logError, logWarn } from '../utils/logging';
  */
 
 export interface BrainScopeInput {
+    /**
+     * The conversation this work belongs to. Used for model-budget attribution and logs
+     * even when the pages themselves live in the shared wiki.
+     */
     spaceId?: string;
+    /**
+     * Route the files to the shared wiki — one install, one household or office, one wiki.
+     * `spaceId` is still carried, so a shared write is attributable to the chat it came from.
+     */
+    shared?: boolean;
 }
 
 /** Bump when a derived table changes shape. The index is dropped and rebuilt from markdown. */
@@ -59,7 +68,26 @@ export function slugify(value: string, maxLength: number = 60): string {
 
 function scopeRootSegment(scope?: BrainScopeInput): string[] {
     const spaceId = scope?.spaceId?.trim();
-    return spaceId ? ['spaces', encodeURIComponent(spaceId)] : ['global'];
+    if (scope?.shared || !spaceId) return ['global'];
+    return ['spaces', encodeURIComponent(spaceId)];
+}
+
+/**
+ * Rebuild a scope from an input object. Always use this rather than `{ spaceId: x }`:
+ * a scope has two fields now, and picking one silently reroutes the write.
+ */
+export function toScope(input?: BrainScopeInput): BrainScopeInput {
+    return { spaceId: input?.spaceId, shared: input?.shared };
+}
+
+/** The shared wiki, carrying the calling chat for attribution. */
+export function sharedScope(scope?: BrainScopeInput): BrainScopeInput {
+    return { spaceId: scope?.spaceId, shared: true };
+}
+
+/** What the owner sees this scope called. `global` is an implementation detail. */
+export function scopeLabel(scope?: BrainScopeInput): string {
+    return scope?.shared || !scope?.spaceId ? 'the shared wiki' : 'this chat';
 }
 
 export function getBrainRoot(): string {

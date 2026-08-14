@@ -379,4 +379,46 @@ describe('brain ingest pipeline', () => {
         expect(run.compiled).toBe(1);
         expect(brain.listWikiPages(scope).filter((page) => page.path.startsWith('health/p'))).toHaveLength(8);
     });
+
+    it('refuses a job that points at more pages than it can read in full', async () => {
+        const targets = Array.from({ length: 11 }, (_, index) => `health/t${index}.md`);
+        const { brain, ingest } = await loadPipeline([triage('update', targets)]);
+
+        for (const target of targets) {
+            brain.updateWikiPage({ ...scope, path: target, body: `# ${target}\n\n## Sleep\n\nOld.` });
+        }
+        const captured = ingest.captureRawSource({ ...scope, title: 'S', content: 'Body.', topic: 'health' });
+        const run = await ingest.runIngestQueue({ ...scope });
+
+        expect(run.compiled).toBe(0);
+        const source = ingest.getRawSource(captured.source.path, scope);
+        expect(source?.state).toBe('failed');
+        expect(source?.last_error).toContain('split the source into narrower ones');
+
+        // Nothing was replaced on the strength of a name alone.
+        expect(brain.readWikiPage('health/t9.md', scope).content).toContain('Old.');
+    });
+
+    it('refuses to change an existing page that was only present in the catalogue', async () => {
+        const { brain, ingest } = await loadPipeline([
+            triage('update', ['health/shown.md']),
+            JSON.stringify({
+                subject: 'Unsafe plan',
+                pages: [
+                    { path: 'health/new.md', title: 'New', body: '# New\n\nShould not be written.' },
+                    { path: 'health/unseen.md', title: 'Unseen', body: '# Unseen\n\nReplacement.' },
+                ],
+            }),
+        ]);
+
+        brain.updateWikiPage({ ...scope, path: 'health/shown.md', body: '# Shown\n\nShown to the compiler.' });
+        brain.updateWikiPage({ ...scope, path: 'health/unseen.md', body: '# Unseen\n\nOriginal body.' });
+        const captured = ingest.captureRawSource({ ...scope, title: 'Source', content: 'Body.', topic: 'health' });
+        const run = await ingest.runIngestQueue({ ...scope });
+
+        expect(run.compiled).toBe(0);
+        expect(ingest.getRawSource(captured.source.path, scope)?.state).toBe('failed');
+        expect(brain.readWikiPage('health/unseen.md', scope).content).toContain('Original body.');
+        expect(brain.readWikiPage('health/new.md', scope).exists).toBe(false);
+    });
 });

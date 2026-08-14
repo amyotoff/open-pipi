@@ -13,7 +13,9 @@ import {
     listMarkdownFiles,
     nowIso,
     scopedRelativePath,
+    sharedScope,
     slugify,
+    toScope,
     withScopeLock,
 } from './brain-store';
 import {
@@ -215,7 +217,7 @@ export function listRawSources(input?: { state?: RawSourceState; limit?: number 
  * same content returns the existing row instead of writing a near-duplicate file.
  */
 export function captureRawSource(input: CaptureRawInput): CaptureRawResult {
-    const scope: BrainScopeInput = { spaceId: input.spaceId };
+    const scope: BrainScopeInput = toScope(input);
     const title = headerValue(input.title);
     const url = input.url ? headerValue(input.url) : undefined;
     const content = normalizeContent(input.content);
@@ -310,6 +312,47 @@ export function reindexRawTree(scope?: BrainScopeInput): number {
     return count;
 }
 
+export interface SharedDocumentInput {
+    title: string;
+    content: string;
+    topic?: string;
+    url?: string;
+    published_at?: string;
+}
+
+export interface SharedDocumentsResult {
+    captured: CaptureRawResult[];
+    duplicates: number;
+    failed: Array<{ title: string; reason: string }>;
+}
+
+/**
+ * The bulk intake for already-converted documents — the socket a PDF-to-text step plugs
+ * into. Conversion is deliberately not done here: a runtime that has to fit on a Raspberry
+ * Pi should not carry a document parser to file a page of notes.
+ *
+ * Everything lands in the shared wiki, because filing a batch of documents is an explicit
+ * decision the owner made once for the whole batch.
+ */
+export function captureSharedDocuments(
+    input: { documents: SharedDocumentInput[]; now?: Date } & BrainScopeInput
+): SharedDocumentsResult {
+    const scope = sharedScope(toScope(input));
+    const result: SharedDocumentsResult = { captured: [], duplicates: 0, failed: [] };
+
+    for (const document of input.documents) {
+        try {
+            const captured = captureRawSource({ ...document, ...scope, now: input.now });
+            if (captured.duplicate) result.duplicates += 1;
+            else result.captured.push(captured);
+        } catch (error: any) {
+            result.failed.push({ title: document.title, reason: String(error?.message || error) });
+        }
+    }
+
+    return result;
+}
+
 /* ---------------------------------------------------------------------------
  * Triage and compile: the background half of ingest.
  * ------------------------------------------------------------------------- */
@@ -336,6 +379,8 @@ const MAX_SOURCE_PROMPT_CHARS = 24_000;
 const MAX_FULL_PAGE_PROMPT_CHARS = 24_000;
 /** Continuation passes for a plan that did not fit one job, before giving up. */
 const MAX_COMPILE_ATTEMPTS = 3;
+/** How many existing pages one compile job may read in full. Beyond this it refuses. */
+const MAX_TARGET_BODIES = 8;
 const DISPOSITIONS: Disposition[] = ['new', 'update', 'disputed', 'no_material'];
 
 /**
@@ -415,7 +460,7 @@ export class BrainOverflowError extends Error {
 }
 
 export async function triageRawSource(input: { source: RawSource } & BrainScopeInput): Promise<TriageResult | null> {
-    const scope: BrainScopeInput = { spaceId: input.spaceId };
+    const scope: BrainScopeInput = toScope(input);
     const source = readRawBody(scope, input.source.path);
     if (!source.body) return null;
     if (source.truncated) {
@@ -461,7 +506,9 @@ export async function triageRawSource(input: { source: RawSource } & BrainScopeI
 
     return {
         disposition,
-        targets: (parsed.targets || []).filter((target) => typeof target === 'string').slice(0, MAX_CASCADE_PAGES),
+        // Targets are hints for the compile prompt, not writes, so none is dropped here.
+        // What the prompt can afford to carry is bounded in compileRawSource instead.
+        targets: [...new Set((parsed.targets || []).filter((target) => typeof target === 'string'))],
         rationale: String(parsed.rationale || '').substring(0, 400),
     };
 }
@@ -475,7 +522,7 @@ interface CompilePlan {
 export async function compileRawSource(
     input: { source: RawSource; triage: TriageResult } & BrainScopeInput
 ): Promise<{ subject: string; pages: string[]; cascaded: string[] }> {
-    const scope: BrainScopeInput = { spaceId: input.spaceId };
+    const scope: BrainScopeInput = toScope(input);
     const source = readRawBody(scope, input.source.path);
     if (source.truncated) {
         // Compiling half a source and calling it done is how a wiki acquires confident gaps.
@@ -487,6 +534,14 @@ export async function compileRawSource(
     const targets = input.triage.targets.length
         ? input.triage.targets
         : searchWikiRows({ ...scope, query: input.source.title, limit: 5 }).map((row) => row.path);
+
+    if (targets.length > MAX_TARGET_BODIES) {
+        // Naming a page without showing it would let the compiler replace a body it never
+        // read. Splitting the source is the owner's call, not something to guess around.
+        throw new BrainOverflowError(
+            `triage points at ${targets.length} pages, more than the ${MAX_TARGET_BODIES} this job can read in full; split the source into narrower ones`
+        );
+    }
 
     // A page the model cannot be shown in full may be patched, never replaced.
     const patchOnly = new Set<string>();
@@ -545,16 +600,31 @@ export async function compileRawSource(
         );
     }
 
-    const written: string[] = [];
+    // A catalogue entry is not a page body. Existing pages may only be changed when
+    // triage selected them and the compiler was shown their contents above. Validate the
+    // whole plan before writing anything so one bad path cannot leave a partial result.
+    const readableTargets = new Set(targets.map((target) => normalizeWikiPath(target)));
+    for (const item of [...plan.pages, ...(plan.cascade || [])]) {
+        if (!item.path) continue;
+        const relative = normalizeWikiPath(item.path);
+        if (readWikiPage(relative, scope).exists && !readableTargets.has(relative)) {
+            throw new BrainOverflowError(`${relative} exists but was not selected by triage or shown to the compiler`);
+        }
+    }
     for (const page of plan.pages) {
-        if (!page.path || !page.body) continue;
+        if (!page.path) continue;
         const relative = normalizeWikiPath(page.path);
         if (patchOnly.has(relative)) {
-            // The model never saw the tail of this page, so a full body would silently drop it.
             throw new BrainOverflowError(
                 `${relative} is too long to replace wholesale; it must be updated section by section`
             );
         }
+    }
+
+    const written: string[] = [];
+    for (const page of plan.pages) {
+        if (!page.path || !page.body) continue;
+        const relative = normalizeWikiPath(page.path);
         const existing = readWikiPage(page.path, scope);
         const sources = [
             ...new Set([
@@ -588,7 +658,7 @@ export async function compileRawSource(
  * outcome. Serialized per scope because index.md, log.md and cascade targets are shared.
  */
 export async function runIngestQueue(input?: { limit?: number } & BrainScopeInput): Promise<IngestRunResult> {
-    const scope: BrainScopeInput = { spaceId: input?.spaceId };
+    const scope: BrainScopeInput = toScope(input);
     const limit = clampLimit(input?.limit, 3, 1, 20);
     const result: IngestRunResult = { processed: 0, compiled: 0, no_material: 0, failed: 0 };
 

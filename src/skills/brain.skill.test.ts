@@ -175,7 +175,7 @@ describe('brain skill', () => {
         expect(archived).toContain('health/sleep-summary.md');
 
         const linted = await skill.handlers.wiki_lint({}, context);
-        expect(linted).toContain('Wiki lint:');
+        expect(linted).toContain('Shared wiki —');
     });
 
     it('declares the background jobs that make ingest and lint run without the owner', async () => {
@@ -189,7 +189,7 @@ describe('brain skill', () => {
         }
     });
 
-    it('serves the schema layer and lets a space replace it', async () => {
+    it('shows the schema that actually governs the shared wiki', async () => {
         const skill = await loadSkill();
         const context = {
             channel: 'telegram',
@@ -200,7 +200,11 @@ describe('brain skill', () => {
         };
 
         const shipped = await skill.handlers.wiki_schema({}, context);
+        expect(shipped).toContain('Schema in force for the shared wiki');
         expect(shipped).toContain('Compile, never append');
+
+        // Nothing writes a schema override yet, so no tool may claim to.
+        expect(skill.tools.map((tool) => tool.name)).not.toContain('wiki_schema_set');
 
         const withTemplate = await skill.handlers.wiki_schema({ template: 'article' }, context);
         expect(withTemplate).toContain('--- article template ---');
@@ -210,29 +214,119 @@ describe('brain skill', () => {
         expect(missing).toContain('no template named');
     });
 
-    it('gates the schema rewrite behind an explicit approval', async () => {
+    it('saves to the shared wiki and files a document batch, both behind an approval', async () => {
         const skill = await loadSkill();
+        const store = await import('../core/brain-store');
+        const brain = await import('../core/brain');
+        const contextA = {
+            channel: 'telegram',
+            channelRef: 'chat-a',
+            chatId: 'chat-a',
+            userId: '111',
+            spaceId: 'telegram:chat-a',
+        };
+        const contextB = { ...contextA, channelRef: 'chat-b', chatId: 'chat-b', spaceId: 'telegram:chat-b' };
 
-        // Changing the maintenance rules is not something to do silently on a model's say-so.
-        expect(skill.toolMeta?.wiki_schema_set?.approval).toBe('explicit');
-        expect(skill.toolMeta?.wiki_schema_set?.approval_detail_fields).toContain('content');
+        const saved = await skill.handlers.wiki_save(
+            { path: 'people/anna.md', title: 'Anna', body: '# Anna\n\nPrefers early appointments.' },
+            contextA
+        );
+        expect(saved).toContain('Saved to the shared wiki');
+
+        // Saved in chat A, found in chat B — that is the whole point.
+        const found = await skill.handlers.wiki_search({ query: 'Anna appointments' }, contextB);
+        expect(found).toContain('people/anna.md');
+        expect(found).not.toContain('[this chat only]');
+
+        const filed = await skill.handlers.wiki_capture_documents(
+            {
+                documents: [
+                    { title: 'Lease', content: 'The lease text.', topic: 'home' },
+                    { title: 'Lease copy', content: 'The lease text.', topic: 'home' },
+                ],
+            },
+            contextA
+        );
+        expect(filed).toContain('Filed 1 document');
+        expect(filed).toContain('already there');
+
+        // Both landed in the shared wiki, not in the chat they were handed over in.
+        const shared = store.sharedScope({ spaceId: contextA.spaceId });
+        expect(brain.readWikiPage('people/anna.md', shared).exists).toBe(true);
+        expect(brain.readWikiPage('people/anna.md', { spaceId: contextA.spaceId }).exists).toBe(false);
+
+        // A write everyone can read is a decision the owner signs.
+        for (const tool of ['wiki_save', 'wiki_capture_documents', 'wiki_archive']) {
+            expect(skill.toolMeta?.[tool]?.approval).toBe('explicit');
+        }
     });
 
-    it('refuses a schema rewrite from someone who is not the space owner', async () => {
+    it('marks a page that only one chat can see', async () => {
         const skill = await loadSkill();
         const context = {
             channel: 'telegram',
-            channelRef: 'chat-1',
-            chatId: 'chat-1',
-            userId: 'not-the-owner',
-            spaceId: 'telegram:chat-1',
+            channelRef: 'chat-a',
+            chatId: 'chat-a',
+            userId: '111',
+            spaceId: 'telegram:chat-a',
         };
 
-        const denied = await skill.handlers.wiki_schema_set({ content: '# Only compile recipes' }, context);
-        expect(denied).toContain('Only the owner of this space');
+        // update_wiki_page is the assistant's own filing, so it stays in this chat.
+        await skill.handlers.update_wiki_page(
+            { path: 'notes/local.md', body: '# Local\n\nA chat-only observation.' },
+            context
+        );
 
-        // The shipped schema is still in force.
-        const schema = await skill.handlers.wiki_schema({}, context);
-        expect(schema).toContain('Compile, never append');
+        const found = await skill.handlers.wiki_search({ query: 'chat-only observation' }, context);
+        expect(found).toContain('[this chat only]');
+
+        const elsewhere = await skill.handlers.wiki_search(
+            { query: 'chat-only observation' },
+            { ...context, channelRef: 'chat-b', chatId: 'chat-b', spaceId: 'telegram:chat-b' }
+        );
+        expect(elsewhere).toContain('found no page');
+    });
+
+    it('refuses a chat-local edit to a page the shared wiki owns', async () => {
+        const skill = await loadSkill();
+        const context = {
+            channel: 'telegram',
+            channelRef: 'chat-a',
+            chatId: 'chat-a',
+            userId: '111',
+            spaceId: 'telegram:chat-a',
+        };
+
+        await skill.handlers.wiki_save({ path: 'people/anna.md', body: '# Anna\n\nThe shared version.' }, context);
+
+        // Reads prefer the shared wiki, so a local write here would report a lie.
+        await expect(
+            skill.handlers.update_wiki_page({ path: 'people/anna.md', body: '# Anna\n\nLocal edit.' }, context)
+        ).rejects.toThrow(/lives in the shared wiki/);
+
+        const page = await skill.handlers.read_wiki_page({ path: 'people/anna.md' }, context);
+        expect(page).toContain('The shared version.');
+        expect(page).not.toContain('Local edit.');
+    });
+
+    it('puts the batch size and titles in front of the owner before filing', async () => {
+        const skill = await loadSkill();
+
+        expect(
+            skill.preflight?.wiki_capture_documents?.({ documents: [{ title: 'Lease' }, { title: 'Warranty' }] })
+        ).toMatchObject({ count: 2, titles: 'Lease, Warranty' });
+        expect(skill.preflight?.wiki_save?.({ path: 'a.md', body: '# A\n\nThe body text.' }).preview).toBe(
+            '# A The body text.'
+        );
+
+        // Every approval detail field must exist as an argument, or the prompt shows nothing.
+        for (const [tool, meta] of Object.entries(skill.toolMeta || {})) {
+            const prepared = skill.preflight?.[tool]?.({ documents: [], body: '', path: 'a.md', title: 't' }) ?? {
+                title: 't',
+            };
+            for (const field of meta.approval_detail_fields || []) {
+                expect(Object.keys(prepared)).toContain(field);
+            }
+        }
     });
 });

@@ -90,6 +90,31 @@ describe('core/brain', () => {
         expect(read.content.match(new RegExp(`Source note: ${note.id}`, 'g'))).toHaveLength(1);
     });
 
+    it('refuses to promote a local note behind an existing shared page', async () => {
+        const brain = await loadBrain();
+        const scope = { spaceId: 'telegram:chat-1' };
+        brain.updateWikiPage({
+            ...scope,
+            shared: true,
+            path: 'people/anna.md',
+            body: '# Anna\n\nThe shared version.',
+        });
+        const note = brain.appendNote({ ...scope, topic: 'anna', text: 'A new fact from this chat.' });
+
+        await expect(
+            brain.promoteNoteToWiki({ ...scope, note_id: note.id, target_page: 'people/anna.md' })
+        ).rejects.toThrow(/lives in the shared wiki/);
+
+        expect(brain.readWikiPage('people/anna.md', scope).exists).toBe(false);
+        expect(brain.readWikiPage('people/anna.md', { ...scope, shared: true }).content).toContain(
+            'The shared version.'
+        );
+        expect(brain.searchNotes({ ...scope, query: note.id })[0]).toMatchObject({
+            status: 'open',
+            promoted_to: null,
+        });
+    });
+
     it('updates wiki pages without mutating on read', async () => {
         const brain = await loadBrain();
         const scope = { spaceId: 'telegram:chat-1' };

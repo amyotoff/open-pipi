@@ -415,7 +415,22 @@ LLM wiki in the sense of [Karpathy's pattern](https://gist.github.com/karpathy/4
 knowledge is compiled once when a source arrives and then kept current, instead of being
 re-derived from raw documents on every question.
 
-Three layers on disk, per space, under `data/pipi-brain/`:
+One install is one household, department or office — and one **shared wiki**. Every chat
+reads it, and anything the owner saves goes into it. Each chat also keeps its own pages:
+whatever the assistant filed on its own initiative, plus anything written before the wiki
+became shared. Reads check the shared wiki first and fall back to the chat's own pages, so
+nothing filed earlier is stranded and nothing needs migrating.
+
+Which of the two a page lands in is decided by who decided:
+
+- the owner asked to save it, or approved a suggestion → the shared wiki
+- the assistant filed it on its own → that chat's pages
+
+That is why `wiki_save`, `wiki_archive` and `wiki_capture_documents` ask before writing,
+including when PiPi is the one proposing. A page everyone can read should be a decision
+somebody made rather than a side effect of a conversation.
+
+Three layers on disk, under `data/pipi-brain/`:
 
 ```text
 raw/<topic>/YYYY-MM-DD-<slug>-<hash8>.md   immutable sources, never edited
@@ -432,8 +447,12 @@ wiki be an ordinary git repo with ordinary history.
 
 Three operations:
 
-- **Ingest.** `brain_capture` files a source into `raw/` and queues it — synchronous, one line
-  of output. A background job then triages it against the index on the cheap model and, if it
+- **Save.** `wiki_save` writes a page into the shared wiki and `wiki_archive` files an answer
+  there. `wiki_capture_documents` is the bulk intake: hand it a batch of already-converted
+  documents — text extracted from PDFs, an exported folder of notes — and one confirmation
+  covers the lot. Conversion itself stays outside the runtime, which has to fit on a Pi.
+- **Ingest.** `brain_capture` files a source into the current chat's `raw/` and queues it —
+  synchronous, one line of output. A background job then triages it against the index on the cheap model and, if it
   carries material, compiles it on the stronger model: pages are written or merged, affected
   pages are patched section by section, and the outcome is appended to `log.md`. Sources that
   add nothing get the `No material` disposition and stop there.
@@ -451,9 +470,9 @@ Two properties worth knowing about:
 - **Contradictions are annotated, never overwritten.** A superseded claim keeps its place under
   a `> **Status: Outdated** (date)` or `> **Status: Disputed**` block. The wiki never quietly
   changes its mind.
-- **Pages do not cross spaces.** A page compiled inside a chat is visible to that chat; a fact
-  disclosed privately stays in scoped memory and never reaches another space's wiki. Promotion
-  to the host-level wiki is an explicit owner decision.
+- **Nothing reaches the shared wiki on its own.** A fact disclosed privately stays in scoped
+  memory and in its own chat's pages; it becomes shared only when the owner says so. Memory is
+  untouched by any of this: it stays per person and per chat.
 
 Conventions live in `src/brain/schema.md` — the schema layer — with page templates beside it.
 A space can replace it with its own version through a grounding override, without a code change.

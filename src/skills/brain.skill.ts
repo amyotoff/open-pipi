@@ -1,22 +1,13 @@
 import { Type } from '@google/genai';
 import { SkillManifest } from './_types';
 import { appendNote, compileNotebook, promoteNoteToWiki, searchNotes, updateWikiPage } from '../core/brain';
-import { readWikiPageForReader } from '../core/brain-wiki';
-import { captureRawSource, listRawSources, RawSourceState } from '../core/brain-ingest';
+import { readWikiPageForReader, updateWikiPage as writeWikiPage } from '../core/brain-wiki';
+import { sharedScope } from '../core/brain-store';
+import { captureRawSource, captureSharedDocuments, listRawSources, RawSourceState } from '../core/brain-ingest';
 import { answerFromWiki, archiveAnswer, searchWiki } from '../core/brain-query';
 import { formatLintDigest, isLintDue, lintWiki } from '../core/brain-lint';
-import { getBrainSchema, readBrainTemplate, setBrainSchemaOverride } from '../core/brain-schema';
+import { getBrainSchema, readBrainTemplate } from '../core/brain-schema';
 import { resolveSpaceIdFromExecutionContext, RuntimeExecutionContext } from '../core/runtime-context';
-import { getMembership, getResident } from '../db';
-
-const MAX_SCHEMA_CHARS = 32 * 1024;
-
-/** Approval is the caller consenting; this is whether the caller may decide at all. */
-function isSpaceOwner(spaceId: string, personId?: string): boolean {
-    if (!personId) return false;
-    return getMembership(spaceId, personId)?.role === 'owner' || getResident(personId)?.role === 'owner';
-}
-
 function brainScope(context?: RuntimeExecutionContext): { spaceId?: string } {
     return { spaceId: resolveSpaceIdFromExecutionContext(context) };
 }
@@ -48,11 +39,23 @@ const skill: SkillManifest = {
         pack_tags: ['jeeves', 'tutor', 'office', 'reporter'],
     },
     toolMeta: {
-        wiki_schema_set: {
+        wiki_save: {
             approval: 'explicit',
-            approval_action: 'brain_schema_set',
-            approval_reason: 'Replaces the rules the assistant follows when compiling and maintaining this wiki.',
-            approval_detail_fields: ['content'],
+            approval_action: 'wiki_save',
+            approval_reason: 'Writes a page into the wiki everyone in this install can read.',
+            approval_detail_fields: ['path', 'preview'],
+        },
+        wiki_capture_documents: {
+            approval: 'explicit',
+            approval_action: 'wiki_capture_documents',
+            approval_reason: 'Files these documents into the shared wiki for compilation.',
+            approval_detail_fields: ['count', 'titles'],
+        },
+        wiki_archive: {
+            approval: 'explicit',
+            approval_action: 'wiki_archive',
+            approval_reason: 'Files this answer into the wiki everyone in this install can read.',
+            approval_detail_fields: ['title'],
         },
     },
     tools: [
@@ -88,7 +91,7 @@ const skill: SkillManifest = {
         {
             name: 'promote_note_to_wiki',
             description:
-                'Promote a notebook note into a curated wiki page. This records provenance, appends a promoted note section, and marks the note as promoted. Use only when the note is ready to become canonical or reviewable wiki knowledge.',
+                "Promote a notebook note into one of THIS CHAT's own wiki pages. Chat-local: it refuses if the target lives in the shared wiki — use wiki_save for those. This records provenance and marks the note as promoted.",
             parameters: {
                 type: Type.OBJECT,
                 properties: {
@@ -118,7 +121,7 @@ const skill: SkillManifest = {
         {
             name: 'update_wiki_page',
             description:
-                'Replace a wiki page with the complete revised Markdown body. JSON frontmatter is accepted and merged.',
+                "Replace one of THIS CHAT's own wiki pages with the complete revised Markdown body. Chat-local: the result is not visible in other chats, and it refuses if the page lives in the shared wiki — use wiki_save for those. JSON frontmatter is accepted and merged.",
             parameters: {
                 type: Type.OBJECT,
                 properties: {
@@ -134,7 +137,7 @@ const skill: SkillManifest = {
         {
             name: 'brain_capture',
             description:
-                'Capture a source into the immutable raw/ collection and queue it for compilation. Use for links, documents, transcripts, and pasted text the owner wants the wiki to know about. This only files the source; compilation into wiki pages happens later as a background job.',
+                "Capture a source into THIS CHAT's own raw/ collection and queue it for compilation. Chat-local: use it when you are filing something on your own initiative. When the owner asks to keep a document, use wiki_capture_documents so it reaches the shared wiki instead.",
             parameters: {
                 type: Type.OBJECT,
                 properties: {
@@ -171,6 +174,51 @@ const skill: SkillManifest = {
                     },
                     limit: { type: Type.INTEGER, description: 'Maximum results, default 20, max 200.' },
                 },
+            },
+        },
+        {
+            name: 'wiki_save',
+            description:
+                'Save a page into the shared wiki — the one wiki this whole install reads. Use when the owner asks to remember something in the wiki, and propose it yourself when a conversation produces knowledge worth keeping; the owner confirms before anything is written. For notes that are not ready to be canonical, use append_note instead.',
+            parameters: {
+                type: Type.OBJECT,
+                properties: {
+                    path: {
+                        type: Type.STRING,
+                        description: 'Relative page path with one topic level, e.g. "people/anna.md".',
+                    },
+                    title: { type: Type.STRING, description: 'Page title.' },
+                    body: {
+                        type: Type.STRING,
+                        description: 'The complete page as Markdown, starting with a # heading.',
+                    },
+                },
+                required: ['path', 'body'],
+            },
+        },
+        {
+            name: 'wiki_capture_documents',
+            description:
+                'File one or more already-converted documents into the shared wiki for compilation. Use for a single document the owner hands over as well as for bulk intake — a folder of notes, an exported archive, or text extracted from PDFs elsewhere. One confirmation covers the whole batch.',
+            parameters: {
+                type: Type.OBJECT,
+                properties: {
+                    documents: {
+                        type: Type.ARRAY,
+                        description: 'The documents, each already converted to plain text or Markdown.',
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                title: { type: Type.STRING, description: 'Document title.' },
+                                content: { type: Type.STRING, description: 'The document text.' },
+                                topic: { type: Type.STRING, description: 'Topic directory under raw/.' },
+                                url: { type: Type.STRING, description: 'Origin URL, when there is one.' },
+                            },
+                            required: ['title', 'content'],
+                        },
+                    },
+                },
+                required: ['documents'],
             },
         },
         {
@@ -232,18 +280,6 @@ const skill: SkillManifest = {
             },
         },
         {
-            name: 'wiki_schema_set',
-            description:
-                "Replace this space's wiki conventions with the owner's own version. Use only when the owner explicitly asks to change how the wiki is maintained.",
-            parameters: {
-                type: Type.OBJECT,
-                properties: {
-                    content: { type: Type.STRING, description: 'The complete replacement schema, as Markdown.' },
-                },
-                required: ['content'],
-            },
-        },
-        {
             name: 'wiki_lint',
             description:
                 'Health-check the wiki: repair index entries and broken links, verify that claims are grounded in the linked raw sources, and report contradictions, orphans, and stale archives. Safe repairs are applied; facts are only reported.',
@@ -274,8 +310,12 @@ const skill: SkillManifest = {
                 const { listSpaces } = await import('../db');
                 const { runIngestQueue } = await import('../core/brain-ingest');
 
-                // The host-level wiki plus every active space; each has its own queue and lock.
-                for (const scope of [{}, ...listSpaces('ACTIVE').map((space) => ({ spaceId: space.id }))]) {
+                // The shared wiki is drained once for the whole install; spaces are visited only
+                // for sources filed before the wiki became shared.
+                for (const scope of [
+                    { shared: true },
+                    ...listSpaces('ACTIVE').map((space) => ({ spaceId: space.id })),
+                ]) {
                     const result = await runIngestQueue({ ...scope, limit: 3 });
                     // A budget block is not an error: the source stays queued for tomorrow.
                     if (result.blocked) break;
@@ -290,14 +330,28 @@ const skill: SkillManifest = {
                 const { resolveMemorySprintDays } = await import('../core/memory-sprint');
                 const { rememberWorkMemory } = await import('../core/memory-write');
 
-                for (const space of listSpaces('ACTIVE')) {
+                const spaces = listSpaces('ACTIVE');
+                // The shared wiki is linted once, on the shortest cadence any space asks for.
+                const sharedCadence = Math.min(...spaces.map((space) => resolveMemorySprintDays(space.id)), 7);
+                if (isLintDue({ shared: true }, sharedCadence)) {
+                    const report = await lintWiki({ shared: true });
+                    // The digest rides the sprint report the owner already reads (D10). The
+                    // shared wiki belongs to every space, so its health is reported in each.
+                    for (const space of report.issues > 0 ? spaces : []) {
+                        rememberWorkMemory(space.id, 'wiki_lint', formatLintDigest(report), {
+                            salience: 0.5,
+                            source: 'wiki_lint_cron',
+                        });
+                    }
+                }
+
+                for (const space of spaces) {
                     const scope = { spaceId: space.id };
                     const cadenceDays = resolveMemorySprintDays(space.id);
                     if (!isLintDue(scope, cadenceDays)) continue;
 
                     const report = await lintWiki(scope);
                     if (report.issues === 0) continue;
-                    // The digest rides the sprint report the owner already reads (D10).
                     rememberWorkMemory(space.id, 'wiki_lint', formatLintDigest(report), {
                         salience: 0.5,
                         source: 'wiki_lint_cron',
@@ -306,6 +360,28 @@ const skill: SkillManifest = {
             },
         },
     ],
+
+    preflight: {
+        // Approval shows arguments, so what the owner needs to judge has to be an argument.
+        wiki_save: (args: { path?: string; body?: string }) => ({
+            ...args,
+            preview: String(args.body || '')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .substring(0, 160),
+        }),
+        wiki_capture_documents: (args: { documents?: Array<{ title?: string }> }) => {
+            const documents = Array.isArray(args.documents) ? args.documents : [];
+            return {
+                ...args,
+                count: documents.length,
+                titles: documents
+                    .slice(0, 5)
+                    .map((document) => document.title || 'untitled')
+                    .join(', '),
+            };
+        },
+    },
 
     handlers: {
         async append_note(args: { topic: string; text: string; tags?: string[] }, context?: RuntimeExecutionContext) {
@@ -380,6 +456,28 @@ const skill: SkillManifest = {
             return `[TOOL_RESULT] Captured sources:\n${lines.join('\n')}`;
         },
 
+        async wiki_save(args: { path: string; title?: string; body: string }, context?: RuntimeExecutionContext) {
+            const scope = sharedScope(brainScope(context));
+            const page = writeWikiPage({ ...scope, path: args.path, body: args.body });
+            return `[TOOL_RESULT] Saved to the shared wiki: ${page.path}\nPath: ${page.file_path}\nEveryone in this install can read it.`;
+        },
+
+        async wiki_capture_documents(
+            args: { documents: Array<{ title: string; content: string; topic?: string; url?: string }> },
+            context?: RuntimeExecutionContext
+        ) {
+            const result = captureSharedDocuments({ documents: args.documents || [], ...brainScope(context) });
+            const lines = [
+                `Filed ${result.captured.length} document(s) into the shared wiki.`,
+                result.duplicates > 0 ? `${result.duplicates} were already there and were skipped.` : '',
+                result.failed.length > 0
+                    ? `${result.failed.length} could not be filed: ${result.failed.map((entry) => `${entry.title} (${entry.reason})`).join('; ')}`
+                    : '',
+                'Compilation into pages runs as a background job.',
+            ].filter(Boolean);
+            return `[TOOL_RESULT] ${lines.join('\n')}`;
+        },
+
         async wiki_search(args: { query: string; limit?: number }, context?: RuntimeExecutionContext) {
             const hits = searchWiki({
                 query: args.query,
@@ -391,7 +489,8 @@ const skill: SkillManifest = {
                 return `[TOOL_RESULT] Searched the wiki index and full text for "${args.query}" and found no page.`;
             }
             const lines = hits.map(
-                (hit) => `- ${hit.path} — ${hit.title}: ${hit.excerpt.substring(0, 160)} (${hit.knowledge_updated_at})`
+                (hit) =>
+                    `- ${hit.path}${hit.origin === 'space' ? ' [this chat only]' : ''} — ${hit.title}: ${hit.excerpt.substring(0, 160)} (${hit.knowledge_updated_at})`
             );
             return `[TOOL_RESULT] Wiki pages for "${args.query}":\n${lines.join('\n')}`;
         },
@@ -414,9 +513,10 @@ const skill: SkillManifest = {
             return `[TOOL_RESULT] Answer archived as ${page.path}.\nPath: ${page.file_path}`;
         },
 
-        async wiki_schema(args: { template?: string }, context?: RuntimeExecutionContext) {
-            const scope = brainScope(context);
-            const schema = getBrainSchema(scope);
+        async wiki_schema(args: { template?: string }) {
+            // The shared wiki compiles without a chat attached, so the shipped schema is the
+            // one actually in force. Showing a per-chat override here would be a fiction.
+            const schema = getBrainSchema();
             const name = args.template as 'article' | 'archive' | 'raw' | undefined;
             const template = name ? readBrainTemplate(name) : '';
             const suffix = name
@@ -424,27 +524,13 @@ const skill: SkillManifest = {
                     ? `\n\n--- ${name} template ---\n${template}`
                     : `\n\n(no template named "${name}")`
                 : '';
-            return `[TOOL_RESULT] Wiki schema in force${scope.spaceId ? ' for this space' : ''}:\n${schema}${suffix}`;
-        },
-
-        async wiki_schema_set(args: { content: string }, context?: RuntimeExecutionContext) {
-            const scope = brainScope(context);
-            if (!scope.spaceId) {
-                return '[TOOL_RESULT] The schema can only be overridden inside a space.';
-            }
-            if (!isSpaceOwner(scope.spaceId, context?.userId)) {
-                return '[TOOL_RESULT] Only the owner of this space can change how its wiki is maintained.';
-            }
-            if (args.content.trim().length > MAX_SCHEMA_CHARS) {
-                return `[TOOL_RESULT] That schema is ${args.content.trim().length} chars; the limit is ${MAX_SCHEMA_CHARS}.`;
-            }
-            setBrainSchemaOverride({ spaceId: scope.spaceId, content: args.content, createdBy: context?.userId });
-            return `[TOOL_RESULT] This space now maintains its wiki by its own schema (${args.content.trim().length} chars). The shipped default still applies everywhere else.`;
+            return `[TOOL_RESULT] Schema in force for the shared wiki:\n${schema}${suffix}`;
         },
 
         async wiki_lint(_args: Record<string, never>, context?: RuntimeExecutionContext) {
-            const report = await lintWiki({ ...brainScope(context) });
-            return `[TOOL_RESULT] ${formatLintDigest(report)}`;
+            // The shared wiki is the one everyone reads, so it is the one a manual lint means.
+            const report = await lintWiki(sharedScope(brainScope(context)));
+            return `[TOOL_RESULT] Shared wiki — ${formatLintDigest(report)}`;
         },
 
         async compile_notebook(args: { topic: string; limit?: number }, context?: RuntimeExecutionContext) {

@@ -16,11 +16,14 @@ import {
     nowIso,
     registerIndexRebuilder,
     scopedRelativePath,
+    sharedScope,
+    toScope,
 } from './brain-store';
 import {
     normalizeWikiPath,
     parseJsonFrontmatter,
     projectWikiIndexFile,
+    readWikiPage,
     reindexWikiTree,
     writeWikiPageInternal,
 } from './brain-wiki';
@@ -272,7 +275,7 @@ registerIndexRebuilder((scope) => {
 export function appendNote(
     input: { topic: string; text: string; tags?: string[]; now?: Date } & BrainScopeInput
 ): BrainNote {
-    const scope = { spaceId: input.spaceId };
+    const scope = toScope(input);
     const topic = normalizeTopic(input.topic);
     const text = input.text.trim();
     if (!text) {
@@ -433,13 +436,19 @@ const PROMOTE_SYSTEM = [
 export async function promoteNoteToWiki(
     input: { note_id: string; target_page: string } & BrainScopeInput
 ): Promise<{ path: string; file_path: string; exists: boolean; content: string; compiled: boolean }> {
-    const scope = { spaceId: input.spaceId };
+    const scope = toScope(input);
     const note = getNote(input.note_id, scope);
     if (!note) {
         throw new Error(`Notebook note not found: ${input.note_id}`);
     }
 
     const relativePath = normalizeWikiPath(input.target_page);
+    if (!scope.shared && scope.spaceId && readWikiPage(relativePath, sharedScope(scope)).exists) {
+        throw new Error(
+            `${relativePath} lives in the shared wiki, which is what everyone reads. Use wiki_save to change it.`
+        );
+    }
+
     const absolutePath = brainPath(scope, 'wiki', ...relativePath.split('/'));
     const existingRaw = fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, 'utf-8') : '';
     const parsed = parseJsonFrontmatter(existingRaw);
