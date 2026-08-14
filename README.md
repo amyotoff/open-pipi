@@ -450,19 +450,34 @@ Three operations:
 - **Save.** `wiki_save` writes a page into the shared wiki and `wiki_archive` files an answer
   there. `wiki_capture_documents` is the bulk intake: hand it a batch of already-converted
   documents — text extracted from PDFs, an exported folder of notes — and one confirmation
-  covers the lot. Conversion itself stays outside the runtime, which has to fit on a Pi.
+  covers the lot. Large documents are split deterministically and captured atomically as
+  model-safe source parts; part identity prevents repeated paragraphs from being lost, while
+  an unchanged resubmission is still reported once at document level. Conversion itself stays
+  outside the runtime, which has to fit on a Pi.
 - **Ingest.** `brain_capture` files a source into the current chat's `raw/` and queues it —
-  synchronous, one line of output. A background job then triages it against the index on the cheap model and, if it
+  long chat captures use the same atomic split as document intake. A background job then triages it against the index on the cheap model and, if it
   carries material, compiles it on the stronger model: pages are written or merged, affected
-  pages are patched section by section, and the outcome is appended to `log.md`. Sources that
-  add nothing get the `No material` disposition and stop there.
+  pages are patched section by section, and the outcome is appended to `log.md`. The whole
+  model plan is validated before an atomic batch write, and every cascade records the raw
+  source it came from. A missing page H1 is repaired mechanically; other malformed model
+  output retries up to three times with an escaped JSON validation error in the next prompt.
+  Network resets, timeouts, 429s and transient 5xx responses stay queued without consuming a
+  model-output attempt; deterministic visibility, storage and database errors fail once. Wiki
+  paths reject control characters. An unusable cascade target is logged and
+  skipped without discarding valid pages. An owner can explicitly re-queue a terminal failure
+  with `wiki_retry_source`. Sources that add nothing
+  get the `No material` disposition and stop there.
 - **Query.** `wiki_search` and `wiki_answer` search the index and full text and answer with
-  citations. `wiki_archive` files a good answer back as a snapshot page, so explorations
+  validated citations to pages the answer actually used. Relevance ranks are compared only
+  inside the index that produced them; result slots are reserved for both shared and chat-local
+  hits (5 + 3 at the default limit) before unused slots are filled.
+  `wiki_archive` files a good answer back as a snapshot page, so explorations
   compound instead of disappearing into chat history. A capped `[WIKI]` block of index rows —
   never page bodies — also rides along in ordinary turns beside the memory blocks.
 - **Lint.** `wiki_lint` runs on the memory-sprint cadence. It repairs index entries and broken
   links, verifies that every number, date, and quote on a page still appears in the raw source
-  it links, and reports contradictions, orphans, missing status blocks, and stale archives.
+  it links, and reports contradictions across linked, same-topic, and same-source pages,
+  plus orphans, missing status blocks, and stale archives.
   Bookkeeping is fixed automatically; facts are only ever reported.
 
 Two properties worth knowing about:

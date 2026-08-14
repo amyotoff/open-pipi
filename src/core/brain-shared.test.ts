@@ -140,6 +140,46 @@ describe('shared wiki', () => {
         expect(brain.listWikiPages(chatA)).toHaveLength(0);
     });
 
+    it('shows existing shared pages to shared ingest discovery', async () => {
+        const { brain, ingest, store, generateBrainText } = await loadBrain([
+            JSON.stringify({ disposition: 'no_material', targets: [], rationale: 'already covered' }),
+        ]);
+        const shared = store.sharedScope(chatA);
+        brain.updateWikiPage({
+            ...shared,
+            path: 'health/sleep.md',
+            body: '# Sleep\n\nSleep debt accumulates across the week.',
+        });
+        ingest.captureRawSource({
+            ...shared,
+            title: 'Sleep debt recap',
+            content: 'Sleep debt recap.',
+            topic: 'health',
+        });
+
+        await ingest.runIngestQueue({ ...shared });
+
+        const prompt = generateBrainText.mock.calls[0][0].prompt;
+        expect(prompt).toContain('<closest_pages>');
+        expect(prompt).toContain('health/sleep.md');
+    });
+
+    it('does not expose owner-only pages to a background chat compile', async () => {
+        const { brain, ingest, generateBrainText } = await loadBrain([
+            JSON.stringify({ disposition: 'no_material', targets: [], rationale: 'nothing useful' }),
+        ]);
+        brain.updateWikiPage({
+            ...chatA,
+            path: 'health/private.md',
+            body: '---\n{"visibility":"owner"}\n---\n# Private\n\nOwner-only launch secret.',
+        });
+        ingest.captureRawSource({ ...chatA, title: 'Public recap', content: 'Public recap.', topic: 'health' });
+
+        await ingest.runIngestQueue({ ...chatA });
+
+        expect(generateBrainText.mock.calls[0][0].prompt).not.toContain('Owner-only launch secret');
+    });
+
     it('files a batch of converted documents into the shared wiki under one decision', async () => {
         const { ingest, store } = await loadBrain();
 

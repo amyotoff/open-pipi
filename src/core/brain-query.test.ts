@@ -111,8 +111,91 @@ describe('core/brain-query', () => {
         expect(answer.text).toContain('Sleep debt builds over the week');
         // The page body reaches the model; the question is fenced separately.
         const call = generateBrainText.mock.calls[0][0];
-        expect(call.prompt).toContain('<page path="health/sleep.md"');
+        expect(call.prompt).toContain('<wiki_pages_json>');
+        expect(call.prompt).toContain('"path":"health/sleep.md"');
         expect(call.prompt).toContain('<question>');
+        expect(call.system).toContain('untrusted reference data');
+    });
+
+    it('reports only citations that appear in the answer and were actually supplied to the model', async () => {
+        const { brain, query } = await loadQuery([
+            'Use [Sleep](health/sleep.md), not an invented [Secret](health/secret.md).',
+        ]);
+        brain.updateWikiPage({ ...scope, path: 'health/sleep.md', body: '# Sleep\n\nSleep debt.' });
+
+        const answer = await query.answerFromWiki({ ...scope, question: 'sleep debt' });
+
+        expect(answer.citations).toEqual(['health/sleep.md']);
+        expect(answer.citations).not.toContain('health/secret.md');
+    });
+
+    it('keeps relevance ahead of freshness and produces clean excerpts', async () => {
+        const { brain, query } = await loadQuery();
+        brain.updateWikiPage({
+            ...scope,
+            path: 'campaigns/orbit-coffee.md',
+            body: '# Orbit Coffee campaign\n\nBudget and CPA launch plan for 2026-09-15. See [KPIs](../analytics/kpis.md).',
+        });
+        brain.updateWikiPage({
+            ...scope,
+            path: 'people/bob.md',
+            body: '# Bob\n\nBob briefly mentioned Orbit Coffee.',
+        });
+
+        const hits = query.searchWiki({ ...scope, query: 'Orbit Coffee budget CPA launch' });
+        const block = query.buildWikiContextBlock({ ...scope, query: 'Orbit Coffee budget CPA launch' });
+
+        expect(hits[0].path).toBe('campaigns/orbit-coffee.md');
+        expect(block).toContain('2026-09-15');
+        expect(block).toContain('See KPIs');
+        expect(block).not.toContain('../analytics/kpis.md');
+        expect(block).toContain('untrusted index data');
+    });
+
+    it('ranks shared knowledge before local drafts without comparing scores from different indexes', async () => {
+        const { brain, query, store } = await loadQuery();
+        brain.updateWikiPage({
+            ...store.sharedScope(scope),
+            path: 'people/anna.md',
+            body: '# Anna\n\nAnna leads strategy for the agency.',
+        });
+        brain.updateWikiPage({
+            ...scope,
+            path: 'people/anna-draft.md',
+            body: `# Anna draft\n\n${'Anna strategy '.repeat(20)}`,
+        });
+
+        const hits = query.searchWiki({ ...scope, query: 'Anna strategy' });
+
+        expect(hits[0]).toMatchObject({ path: 'people/anna.md', origin: 'shared' });
+        expect(hits.find((hit) => hit.path === 'people/anna-draft.md')).toMatchObject({ origin: 'space' });
+    });
+
+    it('reserves result and answer-context slots for a relevant chat-local page', async () => {
+        const { brain, query, store, generateBrainText } = await loadQuery([
+            'The chat budget is €42 [Actual budget](finance/actual-budget.md).',
+        ]);
+        const shared = store.sharedScope(scope);
+        for (let index = 0; index < 10; index += 1) {
+            brain.updateWikiPage({
+                ...shared,
+                path: `finance/shared-${index}.md`,
+                body: `# Shared mention ${index}\n\nA passing budget mention for item ${index}.`,
+            });
+        }
+        brain.updateWikiPage({
+            ...scope,
+            path: 'finance/actual-budget.md',
+            body: '# Actual budget\n\nThe budget for this chat is €42.',
+        });
+
+        const hits = query.searchWiki({ ...scope, query: 'budget', limit: 8 });
+        const answer = await query.answerFromWiki({ ...scope, question: 'What is the budget?' });
+
+        expect(hits).toHaveLength(8);
+        expect(hits.map((hit) => hit.path)).toContain('finance/actual-budget.md');
+        expect(answer.citations).toContain('finance/actual-budget.md');
+        expect(generateBrainText.mock.calls[0][0].prompt).toContain('finance/actual-budget.md');
     });
 
     it('archives an answer into the shared wiki and logs it', async () => {

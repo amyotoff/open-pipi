@@ -140,9 +140,33 @@ describe('brain skill', () => {
         expect(otherSpace).toContain('No captured sources');
     });
 
+    it('reports long captures and repeated document batches at document granularity', async () => {
+        const skill = await loadSkill();
+        const context = {
+            channel: 'telegram',
+            channelRef: 'chat-1',
+            chatId: 'chat-1',
+            userId: '111',
+            spaceId: 'telegram:chat-1',
+        };
+
+        const local = await skill.handlers.brain_capture(
+            { title: 'Long transcript', content: 'x'.repeat(30_000), topic: 'meetings' },
+            context
+        );
+        expect(local).toContain('atomically as 2 model-safe parts');
+
+        const document = { title: 'Repeated report', content: 'same paragraph '.repeat(2_000), topic: 'reports' };
+        const first = await skill.handlers.wiki_capture_documents({ documents: [document] }, context);
+        const second = await skill.handlers.wiki_capture_documents({ documents: [document] }, context);
+        expect(first).toContain('Filed 1 document(s)');
+        expect(second).toContain('1 unchanged document(s)');
+        expect(second).not.toContain('source part(s) were already there');
+    });
+
     it('searches, answers, archives, and lints through the tool surface', async () => {
         const { skill } = await loadSkillWithModel([
-            'Sleep debt builds across the week.',
+            'Sleep debt builds across the week — see [Sleep](health/sleep.md).',
             JSON.stringify({ contradictions: [] }),
         ]);
         const context = {
@@ -165,7 +189,7 @@ describe('brain skill', () => {
         expect(found).toContain('health/sleep.md');
 
         const answered = await skill.handlers.wiki_answer({ question: 'what about sleep debt?' }, context);
-        expect(answered).toContain('Sleep debt builds across the week.');
+        expect(answered).toContain('Sleep debt builds across the week');
         expect(answered).toContain('Cited: health/sleep.md');
 
         const archived = await skill.handlers.wiki_archive(

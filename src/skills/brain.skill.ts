@@ -3,13 +3,30 @@ import { SkillManifest } from './_types';
 import { appendNote, compileNotebook, promoteNoteToWiki, searchNotes, updateWikiPage } from '../core/brain';
 import { readWikiPageForReader, updateWikiPage as writeWikiPage } from '../core/brain-wiki';
 import { sharedScope } from '../core/brain-store';
-import { captureRawSource, captureSharedDocuments, listRawSources, RawSourceState } from '../core/brain-ingest';
+import {
+    captureRawSource,
+    captureSharedDocuments,
+    getRawSource,
+    listRawSources,
+    retryRawSource,
+    RawSourceState,
+} from '../core/brain-ingest';
 import { answerFromWiki, archiveAnswer, searchWiki } from '../core/brain-query';
 import { formatLintDigest, isLintDue, lintWiki } from '../core/brain-lint';
 import { getBrainSchema, readBrainTemplate } from '../core/brain-schema';
 import { resolveSpaceIdFromExecutionContext, RuntimeExecutionContext } from '../core/runtime-context';
+import { getMembership, getResident } from '../db';
 function brainScope(context?: RuntimeExecutionContext): { spaceId?: string } {
     return { spaceId: resolveSpaceIdFromExecutionContext(context) };
+}
+
+function isOwnerContext(context?: RuntimeExecutionContext): boolean {
+    if (!context?.userId) return false;
+    const spaceId = resolveSpaceIdFromExecutionContext(context);
+    return (
+        (spaceId ? ['owner', 'admin'].includes(getMembership(spaceId, context.userId)?.role || '') : false) ||
+        getResident(context.userId)?.role === 'owner'
+    );
 }
 
 function formatNoteLine(note: {
@@ -174,6 +191,18 @@ const skill: SkillManifest = {
                     },
                     limit: { type: Type.INTEGER, description: 'Maximum results, default 20, max 200.' },
                 },
+            },
+        },
+        {
+            name: 'wiki_retry_source',
+            description:
+                'Owner-only: reset one failed raw source to queued so the background compiler tries it again. Use only after inspecting its last error.',
+            parameters: {
+                type: Type.OBJECT,
+                properties: {
+                    path: { type: Type.STRING, description: 'Raw source path returned by list_raw_sources.' },
+                },
+                required: ['path'],
             },
         },
         {
@@ -435,7 +464,12 @@ const skill: SkillManifest = {
         ) {
             const result = captureRawSource({ ...args, ...brainScope(context) });
             if (result.duplicate) {
-                return `[TOOL_RESULT] This source is already in raw/ (identical content): ${result.source.path}\nState: ${result.source.state}. Nothing was written.`;
+                return `[TOOL_RESULT] This source is already in raw/ (identical content${result.split ? `, ${result.parts.length} parts` : ''}): ${result.source.path}\nState: ${result.source.state}. Nothing was written.`;
+            }
+            if (result.split) {
+                const written = result.parts.filter((part) => !part.duplicate);
+                const reused = result.parts.length - written.length;
+                return `[TOOL_RESULT] Source captured atomically as ${result.parts.length} model-safe parts (${written.length} new${reused ? `, ${reused} already present` : ''}).\nPaths:\n${result.parts.map((part) => `- ${part.source.path}`).join('\n')}\nState: queued — compilation runs as a background job.`;
             }
             return `[TOOL_RESULT] Source captured: ${result.source.title}\nPath: ${result.file_path}\nTopic: ${result.source.topic}\nState: ${result.source.state} — compilation runs as a background job.`;
         },
@@ -468,14 +502,31 @@ const skill: SkillManifest = {
         ) {
             const result = captureSharedDocuments({ documents: args.documents || [], ...brainScope(context) });
             const lines = [
-                `Filed ${result.captured.length} document(s) into the shared wiki.`,
-                result.duplicates > 0 ? `${result.duplicates} were already there and were skipped.` : '',
+                `Filed ${result.captured_documents} document(s) into the shared wiki as ${result.captured.length} new source part(s).`,
+                result.split_documents > 0
+                    ? `${result.split_documents} large document(s) were split into model-safe parts.`
+                    : '',
+                result.duplicates > 0
+                    ? `${result.duplicates} unchanged document(s) were already there and were skipped.`
+                    : '',
+                result.reused_parts > 0 && result.duplicates === 0
+                    ? `${result.reused_parts} existing part(s) were reused while completing partially captured documents.`
+                    : '',
                 result.failed.length > 0
                     ? `${result.failed.length} could not be filed: ${result.failed.map((entry) => `${entry.title} (${entry.reason})`).join('; ')}`
                     : '',
                 'Compilation into pages runs as a background job.',
             ].filter(Boolean);
             return `[TOOL_RESULT] ${lines.join('\n')}`;
+        },
+
+        async wiki_retry_source(args: { path: string }, context?: RuntimeExecutionContext) {
+            if (!isOwnerContext(context)) return '[TOOL_RESULT] Only an owner can retry a failed wiki source.';
+            const localScope = brainScope(context);
+            const shared = sharedScope(localScope);
+            const scope = getRawSource(args.path, shared) ? shared : localScope;
+            const source = retryRawSource(args.path, scope);
+            return `[TOOL_RESULT] Re-queued ${source.path}. Attempts reset; the background compiler will try it again.`;
         },
 
         async wiki_search(args: { query: string; limit?: number }, context?: RuntimeExecutionContext) {
