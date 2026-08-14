@@ -398,4 +398,27 @@ describe('brain ingest pipeline', () => {
         // Nothing was replaced on the strength of a name alone.
         expect(brain.readWikiPage('health/t9.md', scope).content).toContain('Old.');
     });
+
+    it('refuses to change an existing page that was only present in the catalogue', async () => {
+        const { brain, ingest } = await loadPipeline([
+            triage('update', ['health/shown.md']),
+            JSON.stringify({
+                subject: 'Unsafe plan',
+                pages: [
+                    { path: 'health/new.md', title: 'New', body: '# New\n\nShould not be written.' },
+                    { path: 'health/unseen.md', title: 'Unseen', body: '# Unseen\n\nReplacement.' },
+                ],
+            }),
+        ]);
+
+        brain.updateWikiPage({ ...scope, path: 'health/shown.md', body: '# Shown\n\nShown to the compiler.' });
+        brain.updateWikiPage({ ...scope, path: 'health/unseen.md', body: '# Unseen\n\nOriginal body.' });
+        const captured = ingest.captureRawSource({ ...scope, title: 'Source', content: 'Body.', topic: 'health' });
+        const run = await ingest.runIngestQueue({ ...scope });
+
+        expect(run.compiled).toBe(0);
+        expect(ingest.getRawSource(captured.source.path, scope)?.state).toBe('failed');
+        expect(brain.readWikiPage('health/unseen.md', scope).content).toContain('Original body.');
+        expect(brain.readWikiPage('health/new.md', scope).exists).toBe(false);
+    });
 });

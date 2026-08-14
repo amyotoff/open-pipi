@@ -16,12 +16,14 @@ import {
     nowIso,
     registerIndexRebuilder,
     scopedRelativePath,
+    sharedScope,
     toScope,
 } from './brain-store';
 import {
     normalizeWikiPath,
     parseJsonFrontmatter,
     projectWikiIndexFile,
+    readWikiPage,
     reindexWikiTree,
     writeWikiPageInternal,
 } from './brain-wiki';
@@ -441,6 +443,12 @@ export async function promoteNoteToWiki(
     }
 
     const relativePath = normalizeWikiPath(input.target_page);
+    if (!scope.shared && scope.spaceId && readWikiPage(relativePath, sharedScope(scope)).exists) {
+        throw new Error(
+            `${relativePath} lives in the shared wiki, which is what everyone reads. Use wiki_save to change it.`
+        );
+    }
+
     const absolutePath = brainPath(scope, 'wiki', ...relativePath.split('/'));
     const existingRaw = fs.existsSync(absolutePath) ? fs.readFileSync(absolutePath, 'utf-8') : '';
     const parsed = parseJsonFrontmatter(existingRaw);

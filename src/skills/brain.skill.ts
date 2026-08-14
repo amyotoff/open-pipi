@@ -91,7 +91,7 @@ const skill: SkillManifest = {
         {
             name: 'promote_note_to_wiki',
             description:
-                'Promote a notebook note into a curated wiki page. This records provenance, appends a promoted note section, and marks the note as promoted. Use only when the note is ready to become canonical or reviewable wiki knowledge.',
+                "Promote a notebook note into one of THIS CHAT's own wiki pages. Chat-local: it refuses if the target lives in the shared wiki — use wiki_save for those. This records provenance and marks the note as promoted.",
             parameters: {
                 type: Type.OBJECT,
                 properties: {

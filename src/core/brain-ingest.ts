@@ -600,16 +600,31 @@ export async function compileRawSource(
         );
     }
 
-    const written: string[] = [];
+    // A catalogue entry is not a page body. Existing pages may only be changed when
+    // triage selected them and the compiler was shown their contents above. Validate the
+    // whole plan before writing anything so one bad path cannot leave a partial result.
+    const readableTargets = new Set(targets.map((target) => normalizeWikiPath(target)));
+    for (const item of [...plan.pages, ...(plan.cascade || [])]) {
+        if (!item.path) continue;
+        const relative = normalizeWikiPath(item.path);
+        if (readWikiPage(relative, scope).exists && !readableTargets.has(relative)) {
+            throw new BrainOverflowError(`${relative} exists but was not selected by triage or shown to the compiler`);
+        }
+    }
     for (const page of plan.pages) {
-        if (!page.path || !page.body) continue;
+        if (!page.path) continue;
         const relative = normalizeWikiPath(page.path);
         if (patchOnly.has(relative)) {
-            // The model never saw the tail of this page, so a full body would silently drop it.
             throw new BrainOverflowError(
                 `${relative} is too long to replace wholesale; it must be updated section by section`
             );
         }
+    }
+
+    const written: string[] = [];
+    for (const page of plan.pages) {
+        if (!page.path || !page.body) continue;
+        const relative = normalizeWikiPath(page.path);
         const existing = readWikiPage(page.path, scope);
         const sources = [
             ...new Set([
