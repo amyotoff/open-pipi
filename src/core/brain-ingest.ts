@@ -20,11 +20,15 @@ import {
 } from './brain-store';
 import {
     appendWikiLog,
+    isWikiSpecialFile,
     normalizeWikiPath,
+    pageVisibility,
     parseJsonFrontmatter,
     patchWikiSection,
+    projectWikiIndexFile,
     readWikiLog,
     readWikiPage,
+    reindexWikiTree,
     searchWikiRows,
     wikiIndexDigest,
     writeWikiPageInternal,
@@ -225,6 +229,7 @@ export function captureRawSource(input: CaptureRawInput): CaptureRawResult {
     if (!title) throw new Error('A captured source needs a title.');
     if (!content) throw new Error('A captured source cannot be empty.');
     assertTextLimit('Captured source', content, MAX_RAW_BODY_CHARS);
+    assertTextLimit('Captured source for automatic compilation', content, MAX_SOURCE_PROMPT_CHARS);
 
     ensureBrainDirs(scope);
     const contentHash = hashContent(content);
@@ -323,7 +328,38 @@ export interface SharedDocumentInput {
 export interface SharedDocumentsResult {
     captured: CaptureRawResult[];
     duplicates: number;
+    split_documents: number;
     failed: Array<{ title: string; reason: string }>;
+}
+
+const SHARED_DOCUMENT_CHUNK_CHARS = 20_000;
+
+/** Paragraph-first deterministic chunking keeps every queued source inside one honest model pass. */
+function splitSharedDocument(content: string): string[] {
+    const normalized = normalizeContent(content);
+    if (normalized.length <= MAX_SOURCE_PROMPT_CHARS) return [normalized];
+
+    const units = normalized.split(/\n{2,}/).flatMap((paragraph) => {
+        if (paragraph.length <= SHARED_DOCUMENT_CHUNK_CHARS) return [paragraph];
+        const slices: string[] = [];
+        for (let offset = 0; offset < paragraph.length; offset += SHARED_DOCUMENT_CHUNK_CHARS) {
+            slices.push(paragraph.substring(offset, offset + SHARED_DOCUMENT_CHUNK_CHARS));
+        }
+        return slices;
+    });
+    const chunks: string[] = [];
+    let current = '';
+    for (const unit of units) {
+        const candidate = current ? `${current}\n\n${unit}` : unit;
+        if (candidate.length <= SHARED_DOCUMENT_CHUNK_CHARS) {
+            current = candidate;
+            continue;
+        }
+        if (current) chunks.push(current);
+        current = unit;
+    }
+    if (current) chunks.push(current);
+    return chunks;
 }
 
 /**
@@ -338,13 +374,22 @@ export function captureSharedDocuments(
     input: { documents: SharedDocumentInput[]; now?: Date } & BrainScopeInput
 ): SharedDocumentsResult {
     const scope = sharedScope(toScope(input));
-    const result: SharedDocumentsResult = { captured: [], duplicates: 0, failed: [] };
+    const result: SharedDocumentsResult = { captured: [], duplicates: 0, split_documents: 0, failed: [] };
 
     for (const document of input.documents) {
         try {
-            const captured = captureRawSource({ ...document, ...scope, now: input.now });
-            if (captured.duplicate) result.duplicates += 1;
-            else result.captured.push(captured);
+            const chunks = splitSharedDocument(document.content);
+            if (chunks.length === 0 || chunks.every((chunk) => !chunk.trim())) {
+                throw new Error('A captured source cannot be empty.');
+            }
+            if (chunks.length > 1) result.split_documents += 1;
+            for (const [index, content] of chunks.entries()) {
+                const title =
+                    chunks.length > 1 ? `${document.title} (part ${index + 1}/${chunks.length})` : document.title;
+                const captured = captureRawSource({ ...document, title, content, ...scope, now: input.now });
+                if (captured.duplicate) result.duplicates += 1;
+                else result.captured.push(captured);
+            }
         } catch (error: any) {
             result.failed.push({ title: document.title, reason: String(error?.message || error) });
         }
@@ -370,15 +415,16 @@ export interface IngestRunResult {
     compiled: number;
     no_material: number;
     failed: number;
+    retried: number;
     blocked?: string;
 }
 
 const MAX_CASCADE_PAGES = 8;
-const MAX_SOURCE_PROMPT_CHARS = 24_000;
+export const MAX_SOURCE_PROMPT_CHARS = 24_000;
 /** A page may only be replaced wholesale if the model was shown all of it. */
 const MAX_FULL_PAGE_PROMPT_CHARS = 24_000;
-/** Continuation passes for a plan that did not fit one job, before giving up. */
-const MAX_COMPILE_ATTEMPTS = 3;
+/** Automatic attempts for transient model output or a continuation plan, before giving up. */
+const MAX_INGEST_ATTEMPTS = 3;
 /** How many existing pages one compile job may read in full. Beyond this it refuses. */
 const MAX_TARGET_BODIES = 8;
 const DISPOSITIONS: Disposition[] = ['new', 'update', 'disputed', 'no_material'];
@@ -434,6 +480,21 @@ export function setRawSourceState(
         .run(patch.state, patch.disposition ?? null, patch.last_error ?? null, patch.bumpAttempts ? 1 : 0, rawPath);
 }
 
+/** Owner-triggered recovery after a terminal failure. Facts are untouched; only queue state resets. */
+export function retryRawSource(rawPath: string, scope?: BrainScopeInput): RawSource {
+    const source = getRawSource(rawPath, scope);
+    if (!source) throw new Error(`Raw source not found: ${rawPath}`);
+    if (source.state !== 'failed') throw new Error(`${rawPath} is ${source.state}, not failed.`);
+    getBrainDb(scope)
+        .prepare(
+            `UPDATE raw_sources
+             SET state = 'queued', disposition = NULL, attempts = 0, last_error = NULL
+             WHERE path = ?`
+        )
+        .run(rawPath);
+    return getRawSource(rawPath, scope)!;
+}
+
 function readRawBody(
     scope: BrainScopeInput | undefined,
     rawPath: string
@@ -459,6 +520,13 @@ export class BrainOverflowError extends Error {
     }
 }
 
+/** Background maintenance never gains owner visibility merely because no person is attached. */
+function maintenanceVisibility(scope: BrainScopeInput): string[] {
+    if (scope.shared) return ['shared'];
+    if (scope.spaceId) return ['space'];
+    return ['owner'];
+}
+
 export async function triageRawSource(input: { source: RawSource } & BrainScopeInput): Promise<TriageResult | null> {
     const scope: BrainScopeInput = toScope(input);
     const source = readRawBody(scope, input.source.path);
@@ -472,10 +540,16 @@ export async function triageRawSource(input: { source: RawSource } & BrainScopeI
     }
     const body = source.body;
 
-    const related = searchWikiRows({ ...scope, query: `${input.source.title} ${body.substring(0, 400)}`, limit: 10 });
+    const visibility = maintenanceVisibility(scope);
+    const related = searchWikiRows({
+        ...scope,
+        query: `${input.source.title} ${body.substring(0, 400)}`,
+        limit: 10,
+        visibility,
+    });
     const prompt = [
         '<wiki_catalogue>',
-        wikiIndexDigest({ ...scope, limit: 120 }),
+        wikiIndexDigest({ ...scope, limit: 120, visibility }),
         '</wiki_catalogue>',
         '<closest_pages>',
         related.map((row) => `- ${row.path} — ${row.title}: ${row.excerpt.substring(0, 160)}`).join('\n') || '(none)',
@@ -519,6 +593,101 @@ interface CompilePlan {
     cascade?: Array<{ path?: string; heading?: string; body?: string }>;
 }
 
+interface ValidCompilePlan {
+    subject: string;
+    pages: Array<{ path: string; title: string; body: string }>;
+    cascade: Array<{ path: string; heading: string; body: string }>;
+}
+
+function validArticlePath(value: string): string {
+    const relative = normalizeWikiPath(value);
+    if (isWikiSpecialFile(relative)) throw new Error(`${relative} is generated and cannot be compiled as a page.`);
+    if (relative.split('/').length !== 2) {
+        throw new Error(`${relative} must use exactly one topic directory, for example topic/page.md.`);
+    }
+    return relative;
+}
+
+/** Reject the entire model plan before any file changes; partial acceptance is data loss. */
+function validateCompilePlan(plan: CompilePlan | null, fallbackSubject: string): ValidCompilePlan {
+    if (!plan || !Array.isArray(plan.pages) || plan.pages.length === 0) {
+        throw new Error('The compiler returned no usable pages.');
+    }
+    if (plan.cascade !== undefined && !Array.isArray(plan.cascade)) {
+        throw new Error('The compiler returned an invalid cascade list.');
+    }
+
+    const pages = plan.pages.map((page, index) => {
+        const pathValue = typeof page?.path === 'string' ? page.path.trim() : '';
+        const title = typeof page?.title === 'string' ? page.title.trim() : '';
+        const body = typeof page?.body === 'string' ? page.body.trim() : '';
+        if (!pathValue || !title || !body) {
+            throw new Error(`Compiler page ${index + 1} requires non-empty path, title, and body.`);
+        }
+        if (!/^#\s+\S/.test(body)) throw new Error(`Compiler page ${index + 1} must start with a title heading.`);
+        return { path: validArticlePath(pathValue), title, body };
+    });
+
+    const cascade = (plan.cascade || []).map((patch, index) => {
+        const pathValue = typeof patch?.path === 'string' ? patch.path.trim() : '';
+        const heading = typeof patch?.heading === 'string' ? patch.heading.replace(/^#+\s*/, '').trim() : '';
+        const body = typeof patch?.body === 'string' ? patch.body.trim() : '';
+        if (!pathValue || !heading || !body) {
+            throw new Error(`Compiler cascade ${index + 1} requires non-empty path, heading, and body.`);
+        }
+        return { path: validArticlePath(pathValue), heading, body };
+    });
+
+    const pagePaths = pages.map((page) => page.path);
+    if (new Set(pagePaths).size !== pagePaths.length) throw new Error('The compiler returned duplicate page paths.');
+
+    return {
+        subject: typeof plan.subject === 'string' && plan.subject.trim() ? plan.subject.trim() : fallbackSubject,
+        pages,
+        cascade,
+    };
+}
+
+interface WikiFileSnapshot {
+    path: string;
+    existed: boolean;
+    content: string;
+}
+
+function snapshotWikiFiles(scope: BrainScopeInput, paths: string[]): WikiFileSnapshot[] {
+    return [...new Set(paths)].map((relativePath) => {
+        const absolute = brainPath(scope, 'wiki', ...relativePath.split('/'));
+        return {
+            path: relativePath,
+            existed: fs.existsSync(absolute),
+            content: fs.existsSync(absolute) ? fs.readFileSync(absolute, 'utf-8') : '',
+        };
+    });
+}
+
+function restoreWikiFiles(scope: BrainScopeInput, snapshots: WikiFileSnapshot[]): void {
+    for (const snapshot of snapshots) {
+        const absolute = brainPath(scope, 'wiki', ...snapshot.path.split('/'));
+        if (snapshot.existed) {
+            fs.mkdirSync(path.dirname(absolute), { recursive: true });
+            fs.writeFileSync(absolute, snapshot.content, 'utf-8');
+        } else if (fs.existsSync(absolute)) {
+            fs.unlinkSync(absolute);
+        }
+    }
+    const db = getBrainDb(scope);
+    const dropStalePage = db.transaction((relativePath: string) => {
+        db.prepare('DELETE FROM wiki_pages WHERE path = ?').run(relativePath);
+        db.prepare('DELETE FROM wiki_fts WHERE path = ?').run(relativePath);
+        db.prepare('DELETE FROM wiki_links WHERE from_path = ?').run(relativePath);
+    });
+    for (const snapshot of snapshots) {
+        if (!snapshot.existed) dropStalePage(snapshot.path);
+    }
+    reindexWikiTree(scope);
+    projectWikiIndexFile(scope);
+}
+
 export async function compileRawSource(
     input: { source: RawSource; triage: TriageResult } & BrainScopeInput
 ): Promise<{ subject: string; pages: string[]; cascaded: string[] }> {
@@ -531,9 +700,15 @@ export async function compileRawSource(
         );
     }
 
-    const targets = input.triage.targets.length
-        ? input.triage.targets
-        : searchWikiRows({ ...scope, query: input.source.title, limit: 5 }).map((row) => row.path);
+    const visibility = maintenanceVisibility(scope);
+    const targets = [
+        ...new Set(
+            (input.triage.targets.length
+                ? input.triage.targets
+                : searchWikiRows({ ...scope, query: input.source.title, limit: 5, visibility }).map((row) => row.path)
+            ).map((target) => validArticlePath(target))
+        ),
+    ];
 
     if (targets.length > MAX_TARGET_BODIES) {
         // Naming a page without showing it would let the compiler replace a body it never
@@ -549,6 +724,9 @@ export async function compileRawSource(
         .map((target) => {
             const page = readWikiPage(target, scope);
             if (!page.exists) return '';
+            if (!visibility.includes(pageVisibility(scope, page.content))) {
+                throw new Error(`${target} is not visible to this background compile job.`);
+            }
             if (page.content.length > MAX_FULL_PAGE_PROMPT_CHARS) {
                 patchOnly.add(normalizeWikiPath(target));
                 const headings = parseJsonFrontmatter(page.content)
@@ -569,7 +747,7 @@ export async function compileRawSource(
         targetBodies || '(no existing pages matched)',
         '</existing_pages>',
         '<wiki_catalogue>',
-        wikiIndexDigest({ ...scope, limit: 80 }),
+        wikiIndexDigest({ ...scope, limit: 80, visibility }),
         '</wiki_catalogue>',
         `<source title="${input.source.title.replace(/"/g, "'")}">`,
         source.body,
@@ -584,15 +762,12 @@ export async function compileRawSource(
         temperature: 0.3,
     });
 
-    const plan = parseModelJson<CompilePlan>(text);
-    if (!plan || !Array.isArray(plan.pages) || plan.pages.length === 0) {
-        throw new Error('The compiler returned no usable pages.');
-    }
+    const plan = validateCompilePlan(parseModelJson<CompilePlan>(text), input.source.title);
 
     // Each list is capped independently below, so each is checked independently here —
     // a total that fits says nothing about a single list that does not.
-    const plannedPages = plan.pages?.length || 0;
-    const plannedCascade = plan.cascade?.length || 0;
+    const plannedPages = plan.pages.length;
+    const plannedCascade = plan.cascade.length;
     if (plannedPages > MAX_CASCADE_PAGES || plannedCascade > MAX_CASCADE_PAGES) {
         throw new BrainOverflowError(
             `the compiler asked for ${plannedPages} pages and ${plannedCascade} cascade patches, over the per-job cap of ${MAX_CASCADE_PAGES} each; re-queued to continue`,
@@ -604,53 +779,76 @@ export async function compileRawSource(
     // triage selected them and the compiler was shown their contents above. Validate the
     // whole plan before writing anything so one bad path cannot leave a partial result.
     const readableTargets = new Set(targets.map((target) => normalizeWikiPath(target)));
-    for (const item of [...plan.pages, ...(plan.cascade || [])]) {
-        if (!item.path) continue;
-        const relative = normalizeWikiPath(item.path);
+    for (const item of [...plan.pages, ...plan.cascade]) {
+        const relative = item.path;
         if (readWikiPage(relative, scope).exists && !readableTargets.has(relative)) {
             throw new BrainOverflowError(`${relative} exists but was not selected by triage or shown to the compiler`);
         }
     }
     for (const page of plan.pages) {
-        if (!page.path) continue;
-        const relative = normalizeWikiPath(page.path);
-        if (patchOnly.has(relative)) {
+        if (patchOnly.has(page.path)) {
             throw new BrainOverflowError(
-                `${relative} is too long to replace wholesale; it must be updated section by section`
+                `${page.path} is too long to replace wholesale; it must be updated section by section`
             );
         }
     }
 
-    const written: string[] = [];
-    for (const page of plan.pages) {
-        if (!page.path || !page.body) continue;
-        const relative = normalizeWikiPath(page.path);
-        const existing = readWikiPage(page.path, scope);
-        const sources = [
-            ...new Set([
-                ...((parseJsonFrontmatter(existing.content).meta.sources as string[] | undefined) || []),
-                input.source.path,
-            ]),
-        ];
-        const result = writeWikiPageInternal(scope, relative, page.body, {
-            title: page.title,
-            sources,
-        });
-        written.push(result.path);
-    }
-
-    const cascaded: string[] = [];
-    for (const patch of plan.cascade || []) {
-        if (!patch.path || !patch.heading || !patch.body) continue;
-        if (written.includes(normalizeWikiPath(patch.path))) continue;
-        // Archive pages are point-in-time snapshots and are never cascade-updated.
+    const pagePaths = new Set(plan.pages.map((page) => page.path));
+    for (const patch of plan.cascade) {
+        if (pagePaths.has(patch.path)) continue;
         const target = readWikiPage(patch.path, scope);
-        if (!target.exists || parseJsonFrontmatter(target.content).meta.kind === 'archive') continue;
-        patchWikiSection({ ...scope, path: patch.path, heading: patch.heading, body: patch.body });
-        cascaded.push(normalizeWikiPath(patch.path));
+        if (!target.exists) throw new Error(`Cascade target ${patch.path} does not exist.`);
+        if (parseJsonFrontmatter(target.content).meta.kind === 'archive') {
+            throw new Error(`Archive ${patch.path} is a point-in-time snapshot and cannot be cascade-updated.`);
+        }
     }
 
-    return { subject: plan.subject?.trim() || input.source.title, pages: written, cascaded };
+    const snapshots = snapshotWikiFiles(scope, [...pagePaths, ...plan.cascade.map((patch) => patch.path)]);
+    const written: string[] = [];
+    const cascaded: string[] = [];
+
+    try {
+        for (const page of plan.pages) {
+            const existing = readWikiPage(page.path, scope);
+            const sources = [
+                ...new Set([
+                    ...((parseJsonFrontmatter(existing.content).meta.sources as string[] | undefined) || []),
+                    input.source.path,
+                ]),
+            ];
+            const result = writeWikiPageInternal(scope, page.path, page.body, { title: page.title, sources });
+            written.push(result.path);
+        }
+
+        for (const patch of plan.cascade) {
+            if (pagePaths.has(patch.path)) continue;
+            const target = readWikiPage(patch.path, scope);
+            const sources = [
+                ...new Set([
+                    ...((parseJsonFrontmatter(target.content).meta.sources as string[] | undefined) || []),
+                    input.source.path,
+                ]),
+            ];
+            patchWikiSection({
+                ...scope,
+                path: patch.path,
+                heading: patch.heading,
+                body: patch.body,
+                metaPatch: { sources },
+            });
+            cascaded.push(patch.path);
+        }
+    } catch (error) {
+        restoreWikiFiles(scope, snapshots);
+        throw error;
+    }
+
+    if (written.length === 0 && cascaded.length === 0) {
+        restoreWikiFiles(scope, snapshots);
+        throw new Error('The compiler plan produced no wiki mutations.');
+    }
+
+    return { subject: plan.subject, pages: written, cascaded };
 }
 
 /**
@@ -660,7 +858,19 @@ export async function compileRawSource(
 export async function runIngestQueue(input?: { limit?: number } & BrainScopeInput): Promise<IngestRunResult> {
     const scope: BrainScopeInput = toScope(input);
     const limit = clampLimit(input?.limit, 3, 1, 20);
-    const result: IngestRunResult = { processed: 0, compiled: 0, no_material: 0, failed: 0 };
+    const result: IngestRunResult = { processed: 0, compiled: 0, no_material: 0, failed: 0, retried: 0 };
+
+    const retryOrFail = (source: RawSource, message: string, retryable: boolean) => {
+        const exhausted = source.attempts + 1 >= MAX_INGEST_ATTEMPTS;
+        const retry = retryable && !exhausted;
+        setRawSourceState(scope, source.path, {
+            state: retry ? 'queued' : 'failed',
+            last_error: message.substring(0, 400),
+            bumpAttempts: true,
+        });
+        if (retry) result.retried += 1;
+        else result.failed += 1;
+    };
 
     return withScopeLock(scope, async () => {
         for (const source of listRawSources({ ...scope, state: 'queued', limit })) {
@@ -668,12 +878,7 @@ export async function runIngestQueue(input?: { limit?: number } & BrainScopeInpu
             try {
                 const triage = await triageRawSource({ ...scope, source });
                 if (!triage) {
-                    setRawSourceState(scope, source.path, {
-                        state: 'failed',
-                        last_error: 'triage returned no usable disposition',
-                        bumpAttempts: true,
-                    });
-                    result.failed += 1;
+                    retryOrFail(source, 'triage returned no usable disposition', true);
                     continue;
                 }
 
@@ -706,22 +911,10 @@ export async function runIngestQueue(input?: { limit?: number } & BrainScopeInpu
                     break;
                 }
                 if (error instanceof BrainOverflowError) {
-                    // Whatever was written stands, but the source is never called compiled.
-                    const exhausted = source.attempts + 1 >= MAX_COMPILE_ATTEMPTS;
-                    setRawSourceState(scope, source.path, {
-                        state: error.requeue && !exhausted ? 'queued' : 'failed',
-                        last_error: error.message.substring(0, 400),
-                        bumpAttempts: true,
-                    });
-                    result.failed += 1;
+                    retryOrFail(source, error.message, error.requeue);
                     continue;
                 }
-                setRawSourceState(scope, source.path, {
-                    state: 'failed',
-                    last_error: String(error?.message || error).substring(0, 400),
-                    bumpAttempts: true,
-                });
-                result.failed += 1;
+                retryOrFail(source, String(error?.message || error), true);
             }
         }
 

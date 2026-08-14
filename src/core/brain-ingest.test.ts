@@ -107,6 +107,20 @@ describe('core/brain-ingest', () => {
         expect(second.source.topic).toBe('health');
     });
 
+    it('lets an owner workflow reset a terminally failed source for retry', async () => {
+        const { ingest } = await loadBrain();
+        const captured = ingest.captureRawSource({ ...scope, title: 'Retry me', content: 'Body.', topic: 'health' });
+        ingest.setRawSourceState(scope, captured.source.path, {
+            state: 'failed',
+            last_error: 'model returned malformed output',
+            bumpAttempts: true,
+        });
+
+        const retried = ingest.retryRawSource(captured.source.path, scope);
+
+        expect(retried).toMatchObject({ state: 'queued', attempts: 0, last_error: null, disposition: null });
+    });
+
     it('recovers compile state from the log, because the file cannot carry it', async () => {
         const { brain, ingest } = await loadBrain();
 

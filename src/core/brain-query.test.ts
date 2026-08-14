@@ -111,8 +111,45 @@ describe('core/brain-query', () => {
         expect(answer.text).toContain('Sleep debt builds over the week');
         // The page body reaches the model; the question is fenced separately.
         const call = generateBrainText.mock.calls[0][0];
-        expect(call.prompt).toContain('<page path="health/sleep.md"');
+        expect(call.prompt).toContain('<wiki_pages_json>');
+        expect(call.prompt).toContain('"path":"health/sleep.md"');
         expect(call.prompt).toContain('<question>');
+        expect(call.system).toContain('untrusted reference data');
+    });
+
+    it('reports only citations that appear in the answer and were actually supplied to the model', async () => {
+        const { brain, query } = await loadQuery([
+            'Use [Sleep](health/sleep.md), not an invented [Secret](health/secret.md).',
+        ]);
+        brain.updateWikiPage({ ...scope, path: 'health/sleep.md', body: '# Sleep\n\nSleep debt.' });
+
+        const answer = await query.answerFromWiki({ ...scope, question: 'sleep debt' });
+
+        expect(answer.citations).toEqual(['health/sleep.md']);
+        expect(answer.citations).not.toContain('health/secret.md');
+    });
+
+    it('keeps relevance ahead of freshness and produces clean excerpts', async () => {
+        const { brain, query } = await loadQuery();
+        brain.updateWikiPage({
+            ...scope,
+            path: 'campaigns/orbit-coffee.md',
+            body: '# Orbit Coffee campaign\n\nBudget and CPA launch plan for 2026-09-15. See [KPIs](../analytics/kpis.md).',
+        });
+        brain.updateWikiPage({
+            ...scope,
+            path: 'people/bob.md',
+            body: '# Bob\n\nBob briefly mentioned Orbit Coffee.',
+        });
+
+        const hits = query.searchWiki({ ...scope, query: 'Orbit Coffee budget CPA launch' });
+        const block = query.buildWikiContextBlock({ ...scope, query: 'Orbit Coffee budget CPA launch' });
+
+        expect(hits[0].path).toBe('campaigns/orbit-coffee.md');
+        expect(block).toContain('2026-09-15');
+        expect(block).toContain('See KPIs');
+        expect(block).not.toContain('../analytics/kpis.md');
+        expect(block).toContain('untrusted index data');
     });
 
     it('archives an answer into the shared wiki and logs it', async () => {

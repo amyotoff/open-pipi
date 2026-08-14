@@ -194,25 +194,30 @@ describe('core/brain-lint', () => {
         expect(codes(report)).toContain('status_block_missing_date');
     });
 
-    it('asks the model for contradictions only across pages sharing a source', async () => {
+    it('checks linked pages for contradictions even when they come from different sources', async () => {
         const { brain, lint, ingest, generateBrainText } = await loadLint([
             JSON.stringify({
                 contradictions: [{ pages: ['health/a.md', 'health/b.md'], detail: 'both state a different figure' }],
             }),
         ]);
 
-        const captured = ingest.captureRawSource({ ...scope, title: 'S', content: 'Body.', topic: 'health' });
-        for (const name of ['a', 'b']) {
-            brain.updateWikiPage({
-                ...scope,
-                path: `health/${name}.md`,
-                body: `# ${name}\n\nClaim.\n\n[src](../../${captured.source.path})`,
-            });
-        }
+        const sourceA = ingest.captureRawSource({ ...scope, title: 'A source', content: 'Claim A.', topic: 'health' });
+        const sourceB = ingest.captureRawSource({ ...scope, title: 'B source', content: 'Claim B.', topic: 'health' });
+        brain.updateWikiPage({
+            ...scope,
+            path: 'health/a.md',
+            body: `---\n${JSON.stringify({ sources: [sourceA.source.path] })}\n---\n# A\n\nClaim A. See [B](b.md).`,
+        });
+        brain.updateWikiPage({
+            ...scope,
+            path: 'health/b.md',
+            body: `---\n${JSON.stringify({ sources: [sourceB.source.path] })}\n---\n# B\n\nClaim B.`,
+        });
 
         const report = await lint.lintWiki({ ...scope });
 
         expect(generateBrainText).toHaveBeenCalled();
+        expect(generateBrainText.mock.calls[0][0].prompt).toContain('<wiki_pages_json>');
         const finding = report.findings.find((entry) => entry.code === 'contradiction');
         expect(finding?.class).toBe('judgment');
         expect(finding?.detail).toContain('both state a different figure');

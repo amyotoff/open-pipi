@@ -142,7 +142,7 @@ describe('brain skill', () => {
 
     it('searches, answers, archives, and lints through the tool surface', async () => {
         const { skill } = await loadSkillWithModel([
-            'Sleep debt builds across the week.',
+            'Sleep debt builds across the week — see [Sleep](health/sleep.md).',
             JSON.stringify({ contradictions: [] }),
         ]);
         const context = {
@@ -165,7 +165,7 @@ describe('brain skill', () => {
         expect(found).toContain('health/sleep.md');
 
         const answered = await skill.handlers.wiki_answer({ question: 'what about sleep debt?' }, context);
-        expect(answered).toContain('Sleep debt builds across the week.');
+        expect(answered).toContain('Sleep debt builds across the week');
         expect(answered).toContain('Cited: health/sleep.md');
 
         const archived = await skill.handlers.wiki_archive(

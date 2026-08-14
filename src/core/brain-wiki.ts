@@ -125,7 +125,11 @@ function firstHeading(body: string, relativePath: string): string {
 function excerptOf(body: string): string {
     return body
         .replace(/^---[\s\S]*?---/m, '')
-        .replace(/[#>*_`-]/g, ' ')
+        .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+        .replace(/^\s*(?:[-*+]\s+|>\s?)/gm, '')
+        .replace(/[*_`~]/g, '')
         .replace(/\s+/g, ' ')
         .trim()
         .substring(0, 240);
@@ -530,6 +534,8 @@ export function readWikiLog(scope?: BrainScopeInput): WikiLogEntry[] {
 export interface WikiSearchHit extends BrainWikiSummary {
     visibility: string;
     status: string;
+    /** Lower is better. FTS uses bm25; the LIKE fallback receives a coarse rank. */
+    rank: number;
 }
 
 /** FTS5 is unforgiving about punctuation, so queries are rebuilt from word tokens. */
@@ -556,10 +562,10 @@ export function searchWikiRows(
     if (ftsQuery) {
         const hits = db
             .prepare(
-                `SELECT ${columns} FROM wiki_fts f
+                `SELECT ${columns}, bm25(wiki_fts) AS rank FROM wiki_fts f
                  JOIN wiki_pages p ON p.path = f.path
                  WHERE wiki_fts MATCH ? AND p.visibility IN (${placeholders})
-                 ORDER BY bm25(wiki_fts) LIMIT ?`
+                 ORDER BY rank ASC, p.knowledge_updated_at DESC LIMIT ?`
             )
             .all(ftsQuery, ...visibility, limit) as WikiSearchHit[];
         if (hits.length > 0) return hits;
@@ -568,21 +574,26 @@ export function searchWikiRows(
     const like = `%${input.query.trim().toLowerCase()}%`;
     return db
         .prepare(
-            `SELECT ${columns} FROM wiki_pages p
+            `SELECT ${columns},
+                    CASE WHEN LOWER(p.title) LIKE ? THEN 10.0 ELSE 20.0 END AS rank
+             FROM wiki_pages p
              WHERE (LOWER(p.title) LIKE ? OR LOWER(p.excerpt) LIKE ?) AND p.visibility IN (${placeholders})
-             ORDER BY p.knowledge_updated_at DESC LIMIT ?`
+             ORDER BY rank ASC, p.knowledge_updated_at DESC LIMIT ?`
         )
-        .all(like, like, ...visibility, limit) as WikiSearchHit[];
+        .all(like, like, like, ...visibility, limit) as WikiSearchHit[];
 }
 
 /** Compact catalogue lines for a model prompt — the index, never the page bodies. */
-export function wikiIndexDigest(input?: { limit?: number } & BrainScopeInput): string {
+export function wikiIndexDigest(input?: { limit?: number; visibility?: string[] } & BrainScopeInput): string {
+    const visibility = input?.visibility?.filter(Boolean) || [];
+    const where = visibility.length > 0 ? `WHERE visibility IN (${visibility.map(() => '?').join(', ')})` : '';
     const rows = getBrainDb(input)
         .prepare(
             `SELECT path, title, excerpt, knowledge_updated_at FROM wiki_pages
+             ${where}
              ORDER BY knowledge_updated_at DESC LIMIT ?`
         )
-        .all(clampLimit(input?.limit, 120, 1, 400)) as BrainWikiSummary[];
+        .all(...visibility, clampLimit(input?.limit, 120, 1, 400)) as BrainWikiSummary[];
 
     if (rows.length === 0) return '(the wiki has no pages yet)';
     return rows
@@ -600,7 +611,7 @@ function escapeRegExp(value: string): string {
  * and makes the diff unreadable.
  */
 export function patchWikiSection(
-    input: { path: string; heading: string; body: string } & BrainScopeInput
+    input: { path: string; heading: string; body: string; metaPatch?: Record<string, unknown> } & BrainScopeInput
 ): BrainWikiPage {
     const relativePath = normalizeWikiPath(input.path);
     if (isWikiSpecialFile(relativePath)) {
@@ -621,7 +632,7 @@ export function patchWikiSection(
 
     if (startIndex === -1) {
         const appended = [...lines, '', `## ${headingText}`, '', patch].join('\n');
-        return writeWikiPage(scope, relativePath, appended, parsed.meta);
+        return writeWikiPage(scope, relativePath, appended, { ...parsed.meta, ...(input.metaPatch || {}) });
     }
 
     const level = (lines[startIndex].trim().match(/^#+/) || ['##'])[0].length;
@@ -635,5 +646,8 @@ export function patchWikiSection(
     }
 
     const merged = [...lines.slice(0, startIndex + 1), '', patch, '', ...lines.slice(endIndex)].join('\n');
-    return writeWikiPage(scope, relativePath, merged.replace(/\n{3,}/g, '\n\n'), parsed.meta);
+    return writeWikiPage(scope, relativePath, merged.replace(/\n{3,}/g, '\n\n'), {
+        ...parsed.meta,
+        ...(input.metaPatch || {}),
+    });
 }

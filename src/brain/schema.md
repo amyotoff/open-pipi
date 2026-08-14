@@ -86,7 +86,11 @@ which you should whenever a conversation produces knowledge worth keeping.
 you are filing something on your own initiative;
 `wiki_capture_documents` files one or more already-converted documents into the shared wiki,
 which is where a document the owner hands you belongs.
-Either way a background job triages the source against the index, then compiles it. Triage
+Large documents are split into model-safe source parts before they enter the queue. Either
+way a background job triages the source against the index, then compiles it. The complete
+compile plan is validated before any page changes; cascade patches add their raw source to
+the target page. Transient malformed model output retries, while a terminal failure remains
+visible and can be explicitly re-queued by an owner. Triage
 dispositions:
 
 - `new` — creates one or more pages
