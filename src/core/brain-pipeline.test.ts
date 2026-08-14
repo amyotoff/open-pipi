@@ -231,6 +231,24 @@ describe('brain ingest pipeline', () => {
         expect(model.isTransientBrainModelError(new Error('deterministic filesystem failure'))).toBe(false);
     });
 
+    it('gives up on a validation error whose message quotes a network-sounding page path', async () => {
+        // The message embeds the path the model chose, so the provider heuristic would read
+        // "ops/policy/timeout.md" as a socket timeout and defer the source forever.
+        const badPlan = JSON.stringify({
+            subject: 'Timeouts',
+            pages: [{ path: 'ops/policy/timeout.md', title: 'Timeouts', body: '# Timeouts\n\nBody.' }],
+        });
+        const { ingest } = await loadPipeline([triage('new'), badPlan, triage('new'), badPlan, triage('new'), badPlan]);
+        const captured = ingest.captureRawSource({ ...scope, title: 'Timeouts', content: 'Useful source.' });
+
+        expect(await ingest.runIngestQueue({ ...scope })).toMatchObject({ failed: 0, retried: 1 });
+        expect(ingest.getRawSource(captured.source.path, scope)).toMatchObject({ state: 'queued', attempts: 1 });
+
+        await ingest.runIngestQueue({ ...scope });
+        expect(await ingest.runIngestQueue({ ...scope })).toMatchObject({ failed: 1, retried: 0 });
+        expect(ingest.getRawSource(captured.source.path, scope)).toMatchObject({ state: 'failed', attempts: 3 });
+    });
+
     it('retries unusable triage output before marking the source failed', async () => {
         const { ingest } = await loadPipeline(['not json at all', 'still not json', 'no json']);
 

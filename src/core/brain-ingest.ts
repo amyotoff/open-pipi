@@ -1100,11 +1100,19 @@ export async function runIngestQueue(input?: { limit?: number } & BrainScopeInpu
                     retryOrFail(source, error.message, error.requeue);
                     continue;
                 }
+                // Our own typed errors are classified before the provider heuristic. A
+                // validation message quotes the path the model chose, so a page like
+                // ops/timeout-policy.md would otherwise read as a network failure and
+                // defer forever without ever consuming an attempt.
+                if (error instanceof BrainModelOutputError) {
+                    retryOrFail(source, error.message, true);
+                    continue;
+                }
                 if (isTransientBrainModelError(error)) {
                     deferTransient(source, String(error?.message || error));
                     continue;
                 }
-                retryOrFail(source, String(error?.message || error), error instanceof BrainModelOutputError);
+                retryOrFail(source, String(error?.message || error), false);
             }
         }
 
