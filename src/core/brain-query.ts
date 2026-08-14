@@ -75,16 +75,32 @@ export function searchWiki(input: { query: string; limit?: number; personId?: st
         }
     }
 
-    return hits
-        .sort(
+    const sortWithinScope = (rows: WikiHit[]) =>
+        rows.sort(
             (left, right) =>
-                Number(right.origin === 'shared') - Number(left.origin === 'shared') ||
-                // FTS bm25 values and LIKE fallback values are only meaningful inside
-                // the SQLite corpus that produced them. Never compare them across scopes.
-                left.rank - right.rank ||
-                right.knowledge_updated_at.localeCompare(left.knowledge_updated_at)
-        )
-        .slice(0, limit);
+                left.rank - right.rank || right.knowledge_updated_at.localeCompare(left.knowledge_updated_at)
+        );
+    const sharedHits = sortWithinScope(hits.filter((hit) => hit.origin === 'shared'));
+    const spaceHits = sortWithinScope(hits.filter((hit) => hit.origin === 'space'));
+
+    if (sharedHits.length === 0) return spaceHits.slice(0, limit);
+    if (spaceHits.length === 0) return sharedHits.slice(0, limit);
+
+    // Ranks are not comparable across SQLite corpora. Reserve both origins a share of
+    // the result instead: 5 shared + 3 local at the default limit, then fill unused slots.
+    const sharedQuota = limit === 1 ? 1 : Math.min(limit - 1, Math.max(1, Math.round((limit * 5) / 8)));
+    const spaceQuota = limit - sharedQuota;
+    const selected = [...sharedHits.slice(0, sharedQuota), ...spaceHits.slice(0, spaceQuota)];
+    let sharedCursor = Math.min(sharedQuota, sharedHits.length);
+    let spaceCursor = Math.min(spaceQuota, spaceHits.length);
+
+    while (selected.length < limit) {
+        if (sharedCursor < sharedHits.length) selected.push(sharedHits[sharedCursor++]);
+        else if (spaceCursor < spaceHits.length) selected.push(spaceHits[spaceCursor++]);
+        else break;
+    }
+
+    return selected;
 }
 
 function citedPagesInAnswer(text: string, readablePaths: string[]): string[] {

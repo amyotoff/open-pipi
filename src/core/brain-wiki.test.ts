@@ -36,6 +36,13 @@ afterEach(async () => {
 const scope = { spaceId: 'telegram:chat-1' };
 
 describe('core/brain-wiki', () => {
+    it('rejects control characters inside model-provided wiki paths', async () => {
+        const { wiki } = await loadBrain();
+
+        expect(() => wiki.normalizeWikiPath('topic/pa\nge.md')).toThrow('control characters are not allowed');
+        expect(() => wiki.normalizeWikiPath('topic/pa\u0007ge.md')).toThrow('control characters are not allowed');
+    });
+
     it('projects wiki/index.md from the index, grouped by topic', async () => {
         const { brain, store } = await loadBrain();
 

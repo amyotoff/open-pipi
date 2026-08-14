@@ -171,6 +171,33 @@ describe('core/brain-query', () => {
         expect(hits.find((hit) => hit.path === 'people/anna-draft.md')).toMatchObject({ origin: 'space' });
     });
 
+    it('reserves result and answer-context slots for a relevant chat-local page', async () => {
+        const { brain, query, store, generateBrainText } = await loadQuery([
+            'The chat budget is €42 [Actual budget](finance/actual-budget.md).',
+        ]);
+        const shared = store.sharedScope(scope);
+        for (let index = 0; index < 10; index += 1) {
+            brain.updateWikiPage({
+                ...shared,
+                path: `finance/shared-${index}.md`,
+                body: `# Shared mention ${index}\n\nA passing budget mention for item ${index}.`,
+            });
+        }
+        brain.updateWikiPage({
+            ...scope,
+            path: 'finance/actual-budget.md',
+            body: '# Actual budget\n\nThe budget for this chat is €42.',
+        });
+
+        const hits = query.searchWiki({ ...scope, query: 'budget', limit: 8 });
+        const answer = await query.answerFromWiki({ ...scope, question: 'What is the budget?' });
+
+        expect(hits).toHaveLength(8);
+        expect(hits.map((hit) => hit.path)).toContain('finance/actual-budget.md');
+        expect(answer.citations).toContain('finance/actual-budget.md');
+        expect(generateBrainText.mock.calls[0][0].prompt).toContain('finance/actual-budget.md');
+    });
+
     it('archives an answer into the shared wiki and logs it', async () => {
         const { brain, query, store } = await loadQuery();
 

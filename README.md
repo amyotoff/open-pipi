@@ -460,14 +460,17 @@ Three operations:
   pages are patched section by section, and the outcome is appended to `log.md`. The whole
   model plan is validated before an atomic batch write, and every cascade records the raw
   source it came from. A missing page H1 is repaired mechanically; other malformed model
-  output retries up to three times with the validation error in the next prompt. Deterministic
-  visibility, storage and database errors fail once. An unusable cascade target is logged and
+  output retries up to three times with an escaped JSON validation error in the next prompt.
+  Network resets, timeouts, 429s and transient 5xx responses stay queued without consuming a
+  model-output attempt; deterministic visibility, storage and database errors fail once. Wiki
+  paths reject control characters. An unusable cascade target is logged and
   skipped without discarding valid pages. An owner can explicitly re-queue a terminal failure
   with `wiki_retry_source`. Sources that add nothing
   get the `No material` disposition and stop there.
 - **Query.** `wiki_search` and `wiki_answer` search the index and full text and answer with
-  validated citations to pages the answer actually used. Shared results are ordered before
-  chat-local fallbacks; relevance ranks are compared only inside the index that produced them.
+  validated citations to pages the answer actually used. Relevance ranks are compared only
+  inside the index that produced them; result slots are reserved for both shared and chat-local
+  hits (5 + 3 at the default limit) before unused slots are filled.
   `wiki_archive` files a good answer back as a snapshot page, so explorations
   compound instead of disappearing into chat history. A capped `[WIKI]` block of index rows —
   never page bodies — also rides along in ordinary turns beside the memory blocks.

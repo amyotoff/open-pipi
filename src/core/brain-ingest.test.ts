@@ -160,6 +160,23 @@ describe('core/brain-ingest', () => {
         expect(files.filter((file) => String(file).endsWith('.md'))).toHaveLength(0);
     });
 
+    it('removes only stale capture temp files from the target raw topic', async () => {
+        const { ingest, store } = await loadBrain();
+        const topicRoot = path.join(store.getBrainScopeRoot(scope), 'raw', 'reports');
+        fs.mkdirSync(topicRoot, { recursive: true });
+        const stale = path.join(topicRoot, 'old.md.capture-123-1000-0');
+        const recent = path.join(topicRoot, `recent.md.capture-123-${Date.now()}-0`);
+        fs.writeFileSync(stale, 'partial', 'utf-8');
+        fs.writeFileSync(recent, 'partial', 'utf-8');
+        const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+        fs.utimesSync(stale, old, old);
+
+        ingest.captureRawSource({ ...scope, title: 'Report', content: 'Complete.', topic: 'reports' });
+
+        expect(fs.existsSync(stale)).toBe(false);
+        expect(fs.existsSync(recent)).toBe(true);
+    });
+
     it('reuses an existing topic directory regardless of case', async () => {
         const { ingest } = await loadBrain();
 

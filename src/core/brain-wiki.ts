@@ -63,7 +63,17 @@ const LOG_HEADER = `# Wiki Log\n\n<!-- Format: ## [YYYY-MM-DD] <action> | <subje
 const LINK_RE = /\[([^\]]*)\]\(([^)\s]+)\)/g;
 const EXTERNAL_LINK_RE = /^(https?:|mailto:|#|data:)/i;
 
+function hasPathControlCharacter(value: string): boolean {
+    return [...value].some((character) => {
+        const code = character.codePointAt(0) || 0;
+        return code <= 0x1f || (code >= 0x7f && code <= 0x9f) || code === 0x2028 || code === 0x2029;
+    });
+}
+
 export function normalizeWikiPath(targetPath: string): string {
+    if (hasPathControlCharacter(targetPath)) {
+        throw new Error('Unsafe wiki path: control characters are not allowed.');
+    }
     if (targetPath.trim().startsWith('/') || path.isAbsolute(targetPath)) {
         throw new Error(`Unsafe wiki path: ${targetPath}`);
     }

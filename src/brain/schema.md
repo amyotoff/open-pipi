@@ -93,8 +93,10 @@ against the index, then compiles it. The complete compile plan is validated befo
 changes; usable cascade patches add their raw source to the target page, while unusable
 cascade targets are logged and skipped without losing valid pages. A missing page H1 is
 repaired mechanically. Other malformed model output retries with the previous validation
-error; deterministic visibility or storage failures stop immediately and remain visible for
-an owner to re-queue explicitly. Triage
+error serialized as escaped JSON. Network resets, timeouts, 429s and transient 5xx responses
+remain queued without consuming a model-output attempt; deterministic visibility or storage
+failures stop immediately and remain visible for an owner to re-queue explicitly. Model-provided
+wiki paths may not contain control characters. Triage
 dispositions:
 
 - `new` — creates one or more pages
@@ -105,8 +107,8 @@ dispositions:
 Choose `no_material` freely. A thin source forced into a page makes the index worse.
 
 **Query.** Search with `wiki_search`, read with `read_wiki_page`, answer with `wiki_answer`.
-All three order the shared wiki first and the chat's own pages second; relevance ranks are
-only compared inside their originating index. A result marked
+All three compare relevance ranks only inside their originating index and reserve result slots
+for both the shared wiki and the chat's own pages (5 + 3 at the default limit). A result marked
 `[this chat only]` is not visible elsewhere.
 Prefer what the wiki says over prior knowledge, and cite the pages used. Never say the wiki
 has nothing until both the index and the full-text search came back empty — and say that
