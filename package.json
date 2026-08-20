@@ -1,6 +1,6 @@
 {
     "name": "open-pipi",
-    "version": "2.6.0",
+    "version": "2.7.1",
     "private": true,
     "description": "Open PiPi — a Telegram-first, owner-operated assistant runtime with memory, planning, and research skills",
     "main": "dist/index.js",

@@ -4,6 +4,12 @@ All notable changes to Open PiPi will be documented in this file.
 
 ## [Unreleased]
 
+## [2.7.1] — 2026-08-20
+
+Open PiPi gains a shared, owner-approved wiki for the whole install, plus a complete Brain Layer
+pipeline that turns captured sources into cited, linted knowledge. This release also adds optional
+voice-call and Home Assistant addons while keeping both capabilities gated and off by default.
+
 ### Added
 
 - One install now has one **shared wiki** — one household, department or office, one body of

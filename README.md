@@ -11,7 +11,7 @@ Private memory. Shared know-how. Your hardware.
 ✓ **Team-native** · ✓ **Runs on Raspberry Pi 4** · ✓ **Token-frugal** · ✓ **Open source**
 
 [![CI](https://github.com/amyotoff/open-pipi/actions/workflows/ci.yml/badge.svg)](https://github.com/amyotoff/open-pipi/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-2.6.0-informational.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-2.7.1-informational.svg)](package.json)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D24-green.svg)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue.svg)](https://www.typescriptlang.org)
