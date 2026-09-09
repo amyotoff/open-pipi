@@ -88,7 +88,7 @@ export const PUBLIC_ONBOARDING_HEADERS = {
     'Cache-Control': 'public, max-age=0, must-revalidate',
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
-    'X-Robots-Tag': 'noindex, nofollow',
+    'X-Robots-Tag': 'noindex',
     'Content-Security-Policy':
         "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
 };

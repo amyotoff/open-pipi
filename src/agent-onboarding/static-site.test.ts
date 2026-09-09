@@ -39,7 +39,8 @@ describe('public onboarding release artifact', () => {
         const headers = fs.readFileSync(path.join(outputDir, '_headers'), 'utf8');
         expect(headers).toContain('/agent-onboarding/SKILL.md\n  Content-Type: text/markdown; charset=utf-8');
         expect(headers).toContain("frame-ancestors 'none'");
-        expect(headers).toContain('noindex, nofollow');
+        expect(headers).toContain('X-Robots-Tag: noindex');
+        expect(fs.readFileSync(path.join(outputDir, 'robots.txt'), 'utf8')).toBe('User-agent: *\nAllow: /\n');
     });
 
     it('refuses a mixed or stale publication directory instead of uploading extra files', () => {

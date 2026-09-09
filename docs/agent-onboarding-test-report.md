@@ -2,6 +2,18 @@
 
 ## Public MVP extension
 
+Test site: <https://open-pipi-onboarding-mvp.amyote.workers.dev/>. The deployed `release.json`
+records the exact published source revision for fresh installation. Desktop/mobile visual QA and
+interaction evidence are in [design-qa.md](../design-qa.md). Public HTML, all five Markdown files,
+JSON, CSS, and JS returned 200; `/api/status`, `/api/agent-onboarding/confirm`, `/mcp`, `/.env`, and
+`/setup` returned 404. Robots allow fetching instructions; `noindex` suppresses search indexing.
+
+A fresh official clone detached at `38b52db` passed frozen full dependency installation. The first
+macOS build hit ENOSPC while copying extended attributes on a host with about 100 MB free. The
+same build passed with `COPYFILE_DISABLE=1`; no source change was needed. Its actual built status
+CLI returned `needs_configuration` and did not create a data directory. Main-checkout `pnpm verify`
+and GitHub Node 24 build/security passed without this environment override.
+
 `pnpm verify` passed for the extension: 129 test files / 1108 tests, 20 feature smoke tests,
 format, typecheck, lint, content validation, coverage thresholds, and build. Coverage: 82.67%
 statements, 70.65% branches, 90.29% functions, 85.25% lines. Cloudflare Wrangler dry-run passed

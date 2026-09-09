@@ -41,6 +41,7 @@ export function buildOnboardingStaticSite(options: {
             .map((entry) => `${entry.route}\n  Content-Type: ${entry.contentType}\n`)
             .join('\n');
     writeFileSync(path.join(options.outputDir, '_headers'), headers, { flag: 'wx' });
-    writeFileSync(path.join(options.outputDir, 'robots.txt'), 'User-agent: *\nDisallow: /\n', { flag: 'wx' });
+    // Agents must be able to fetch and follow the public instructions; noindex is a separate header.
+    writeFileSync(path.join(options.outputDir, 'robots.txt'), 'User-agent: *\nAllow: /\n', { flag: 'wx' });
     return [...entries.map((entry) => entry.file), '_headers', 'robots.txt'];
 }
