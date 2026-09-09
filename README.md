@@ -1,14 +1,43 @@
-# PiPi Agents
+# Open PiPi
 
-## Teach one. Share the pack.
+**A self-hosted AI companion for households and teams — with a long memory, a steady character,
+and an Atelier for the abilities it needs next.**
 
-**Your Telegram assistant. Starts as Jeeves. Make it your own.**
+Every family and office has a small kingdom of unfinished business: promises made in passing,
+decisions buried in chat, and splendid ideas that have mislaid their owners. PiPi joins you in
+Telegram and quietly gathers the threads before they tangle. It remembers plans and preferences,
+turns discussions into tasks and briefs, researches questions, and helps the next person carry the
+work forward. One PiPi can serve a household, a project team, or an entire office while each
+conversation keeps its proper context.
 
-Private memory. Shared know-how. Your hardware.
+PiPi does not wake with an empty head every morning. Its structured memory keeps current work close
+at hand, distils older events into useful recollections, and leaves the exact conversation
+searchable when the wording matters. A timeline and journal preserve the course of events; a
+source-backed, citable wiki turns the knowledge you choose to keep into something the whole group
+can use. Each private conversation keeps its own memory, and nothing enters the shared library
+until its owner chooses to put it there.
 
-[Install Open PiPi](#quickstart) · [Install with a coding agent](CODING_AGENT_INSTALLATION.md) · [Choose a Pack](#packs-and-plug-and-play) · [See the Flow](#telegram-flow)
+PiPi arrives as **Jeeves** — courteous, discreet, and rather fond of putting things in order —
+but that is only the opening chapter. Shape its voice, role, speciality, skills, and standing rules.
+Make it a brisk office coordinator, a patient family tutor, or a tireless researcher. Its character
+stays consistent within each group or private conversation, across sessions, restarts, and software
+updates, until you decide to [change it](#packs-and-plug-and-play).
 
-✓ **Team-native** · ✓ **Runs on Raspberry Pi 4** · ✓ **Token-frugal** · ✓ **Open source**
+When PiPi meets a task for which it lacks the proper instrument, it can place an order with its
+**Atelier**. There, a missing capability becomes a visible request; repeated needs gather weight,
+and the request can become a concrete implementation ticket. Each Atelier request remains a visible,
+reviewable commission for its owner or developer.
+
+Run PiPi on your computer, a Raspberry Pi, or a server that stays awake while you do not. Its memory
+and configuration remain on your infrastructure, and you choose the models behind it through
+OpenRouter or direct OpenAI, Anthropic, and Gemini connections.
+
+Installing PiPi is, happily, the least adventurous part. Hand the repository to **Codex or Claude
+Code**: the guided pipeline safely installs and verifies PiPi, then opens a private local page where
+you connect AI and Telegram without placing secrets in the chat. A few small introductions, and
+PiPi is ready for its first assignment.
+
+**[Ask your coding agent to install PiPi →](#let-your-coding-agent-set-it-up)**
 
 [![CI](https://github.com/amyotoff/open-pipi/actions/workflows/ci.yml/badge.svg)](https://github.com/amyotoff/open-pipi/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/badge/version-2.9.0-informational.svg)](package.json)
