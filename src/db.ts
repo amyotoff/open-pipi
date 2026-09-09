@@ -2273,10 +2273,15 @@ export function getTransportTopologyReport(): TransportTopologyReport {
 
 export function listGroundingOverrides(
     spaceId: string,
-    options?: { includeInactive?: boolean; limit?: number }
+    options?: { includeInactive?: boolean; limit?: number; subject?: string }
 ): GroundingOverride[] {
     const limit = clampLimit(options?.limit, 24, 1, 100);
-    const where = options?.includeInactive ? 'space_id = ?' : "space_id = ? AND status = 'active'";
+    let where = options?.includeInactive ? 'space_id = ?' : "space_id = ? AND status = 'active'";
+    const parameters = [spaceId];
+    if (options?.subject !== undefined) {
+        where += ' AND subject = ?';
+        parameters.push(options.subject);
+    }
 
     return getDb()
         .prepare(
@@ -2290,7 +2295,7 @@ export function listGroundingOverrides(
         LIMIT ?
     `
         )
-        .all(spaceId, limit) as GroundingOverride[];
+        .all(...parameters, limit) as GroundingOverride[];
 }
 
 export function getSpaceGroundingLevel(spaceId: string): 0 | 1 | 2 | 3 {

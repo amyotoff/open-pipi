@@ -99,6 +99,45 @@ describe('pending owner context runtime application', () => {
         expect(db.listGroundingOverrides(space.id)[0].content).toBe('Owner corrected this context.');
     });
 
+    it.each([false, true])('preserves older owner context beyond the listing limit (disabled=%s)', async (disabled) => {
+        const db = await import('../db');
+        db.initDatabase();
+        db.ensureSpace('telegram', '111', { kind: 'direct_chat' });
+        const original = db.upsertGroundingOverride({
+            space_id: 'telegram:111',
+            kind: 'person',
+            subject: 'Owner setup context',
+            content: 'Owner corrected this context.',
+            created_by: 'owner',
+        });
+        if (disabled) db.disableGroundingOverride(original.id);
+        for (let index = 0; index < 101; index++) {
+            db.upsertGroundingOverride({
+                space_id: 'telegram:111',
+                kind: 'rule',
+                subject: `Later rule ${index}`,
+                content: 'An unrelated owner rule.',
+                created_by: 'owner',
+            });
+        }
+        expect(
+            db
+                .listGroundingOverrides('telegram:111', { includeInactive: true, limit: 100 })
+                .some((row) => row.id === original.id)
+        ).toBe(false);
+        const ownerContext = await import('../setup/owner-context');
+        ownerContext.saveOwnerContext(dataDir, { language: 'en', timezone: 'UTC', facts: ['Setup suggestion'] });
+        const runtimeContext = await import('./setup-owner-context');
+        runtimeContext.applyPendingOwnerContext({ dataDir, ownerTelegramIds: ['111'] });
+
+        expect(db.getGroundingOverride(original.id)?.content).toBe('Owner corrected this context.');
+        expect(
+            db
+                .listGroundingOverrides('telegram:111', { limit: 100 })
+                .some((row) => row.content.includes('Setup suggestion'))
+        ).toBe(false);
+    });
+
     it('refreshes an active setup-owned context on a later explicit save', async () => {
         const ownerContext = await import('../setup/owner-context');
         ownerContext.saveOwnerContext(dataDir, {

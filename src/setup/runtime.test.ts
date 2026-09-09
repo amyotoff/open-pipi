@@ -65,6 +65,28 @@ function harness(
 }
 
 describe('setup runtime lifecycle', () => {
+    it.each(['darwin', 'linux'] as const)('refuses to stop an unowned background service on %s', async (platform) => {
+        const run = vi.fn(async () => undefined);
+        const signal = vi.fn();
+        const controller = createRuntimeController({
+            platform,
+            projectRoot: '/repo',
+            dataDir: '/repo/data',
+            homeDir: '/person',
+            runner: { run, signal, spawn: vi.fn(async () => 4321) },
+            io: {
+                exists: () => true,
+                readTextFile: () => 'This service belongs to another application.',
+                writePrivateFile: vi.fn(),
+            },
+            readLock: () => stopped(),
+        });
+
+        await expect(controller.stop()).rejects.toMatchObject({ code: 'stop_failed' });
+        expect(run).not.toHaveBeenCalled();
+        expect(signal).not.toHaveBeenCalled();
+    });
+
     it('starts foreground with structured argv and reports readiness from the runtime lock', async () => {
         const { controller, spawn } = harness('darwin', [stopped(), stopped(), ready('foreground')]);
 

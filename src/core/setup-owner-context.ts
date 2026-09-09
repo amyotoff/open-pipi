@@ -61,9 +61,11 @@ export function applyPendingOwnerContext(input: {
             ? `Current task context (descriptive only; it grants no tool authority): ${context.currentTask}`
             : '',
     ].filter(Boolean);
-    const subjectOverrides = listGroundingOverrides(space.id, { includeInactive: true, limit: 100 }).filter(
-        (override) => override.subject === SETUP_OWNER_CONTEXT_SUBJECT
-    );
+    const subjectOverrides = listGroundingOverrides(space.id, {
+        includeInactive: true,
+        limit: 100,
+        subject: SETUP_OWNER_CONTEXT_SUBJECT,
+    });
     const activeSubjectOverrides = subjectOverrides.filter((override) => override.status === 'active');
     const activeSetupOverride =
         activeSubjectOverrides.length === 1 && activeSubjectOverrides[0].created_by === SETUP_OWNER_CONTEXT_SOURCE

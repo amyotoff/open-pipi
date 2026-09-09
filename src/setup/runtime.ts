@@ -453,6 +453,7 @@ export function createRuntimeController(options: RuntimeControllerOptions = {}):
                     (currentLock.held && currentLock.owner === 'runtime' && currentLock.mode === 'background') ||
                     io.exists(platform === 'darwin' ? macServicePath : linuxServicePath)
                 ) {
+                    assertServiceFileOwned(platform === 'darwin' ? macServicePath : linuxServicePath);
                     if (platform === 'darwin') {
                         await runner.run('launchctl', ['bootout', `gui/${uid}`, macServicePath]);
                     } else if (platform === 'linux') {
