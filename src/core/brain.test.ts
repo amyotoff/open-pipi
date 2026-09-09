@@ -10,7 +10,7 @@ async function loadBrain() {
     vi.resetModules();
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'open-pipi-brain-'));
     // No model configured: promotion must take its visible fallback, not call the network.
-    process.env = { ...ORIGINAL_ENV, DATA_DIR: dataDir, GEMINI_API_KEY: '' };
+    process.env = { ...ORIGINAL_ENV, DATA_DIR: dataDir, LLM_PROVIDER: 'openrouter', OPENROUTER_API_KEY: '' };
     return await import('./brain');
 }
 

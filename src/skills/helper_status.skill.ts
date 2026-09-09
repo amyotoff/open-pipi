@@ -1,4 +1,4 @@
-import { Type } from '@google/genai';
+import { Type } from '../core/llm-types';
 import { SkillManifest } from './_types';
 import { getDailyTokenCost, getSpace, getSpaceGroundingLevel, listGroundingOverrides, memberHasTrustFlag } from '../db';
 import { resolveSpacePolicy } from '../core/policy';
@@ -82,6 +82,9 @@ const skill: SkillManifest = {
                 `Policy: browser=${policy.browser}, tasks=${policy.tasks}, memory_sprint_days=${policy.memory_sprint_days}`,
                 backupLine,
                 spendLine,
+                ...(usage.unpriced_calls
+                    ? [`Unpriced calls: ${usage.unpriced_calls}; totals and daily limit exclude that spend.`]
+                    : []),
             ];
 
             return lines.join('\n');

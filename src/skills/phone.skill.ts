@@ -12,7 +12,7 @@
  * the pattern this is an example of.
  */
 
-import { Type } from '@google/genai';
+import { Type } from '../core/llm-types';
 import { SkillManifest } from './_types';
 import { getSpaceParticipants } from '../db';
 import { logWarn } from '../utils/logging';

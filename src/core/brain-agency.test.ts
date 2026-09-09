@@ -9,7 +9,7 @@ let dataDir = '';
 async function loadAgency() {
     vi.resetModules();
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'open-pipi-brain-agency-'));
-    process.env = { ...ORIGINAL_ENV, DATA_DIR: dataDir, GEMINI_API_KEY: 'test-key' };
+    process.env = { ...ORIGINAL_ENV, DATA_DIR: dataDir, LLM_PROVIDER: 'openrouter', OPENROUTER_API_KEY: 'test-key' };
     const generateBrainText = vi.fn();
     vi.doMock('./brain-model', async () => {
         const actual = await vi.importActual<typeof import('./brain-model')>('./brain-model');

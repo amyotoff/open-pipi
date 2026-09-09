@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { Type } from '@google/genai';
+import { Type } from '../core/llm-types';
 import type { CapabilityMeta, SkillManifest } from './_types';
 import { buildSkillToolRegistry } from './tool-registry';
 

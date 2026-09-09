@@ -14,7 +14,7 @@ function buildInput(overrides: Partial<DoctorInput['env']> = {}): DoctorInput {
         envFileFound: true,
         env: {
             TELEGRAM_BOT_TOKEN: '123456:real-token',
-            GEMINI_API_KEY: 'real-gemini-key',
+            OPENROUTER_API_KEY: 'real-openrouter-key',
             OWNER_TG_IDS: '123456',
             BOOTSTRAP_OWNER_MODE: 'false',
             BOOTSTRAP_PACK: 'jeeves',
@@ -52,13 +52,13 @@ describe('Open PiPi doctor', () => {
     });
 
     it('fails safely for missing secrets and never prints their values', () => {
-        const input = buildInput({ TELEGRAM_BOT_TOKEN: '...', GEMINI_API_KEY: '<your-key>', OWNER_TG_IDS: '' });
+        const input = buildInput({ TELEGRAM_BOT_TOKEN: '...', OPENROUTER_API_KEY: '<your-key>', OWNER_TG_IDS: '' });
         const checks = inspectDoctor(input, buildIO());
         const report = formatDoctorReport(checks);
 
         expect(checks.filter((item) => item.status === 'fail').map((item) => item.id)).toEqual([
             'telegram-token',
-            'gemini-key',
+            'llm-key',
             'owner',
         ]);
         expect(report).not.toContain('123456:real-token');

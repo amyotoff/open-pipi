@@ -12,7 +12,8 @@ import * as readline from 'readline';
 import * as fs from 'fs';
 import * as path from 'path';
 import dotenv from 'dotenv';
-import { GoogleGenAI } from '@google/genai';
+import { generateLLM } from '../core/llm-gateway';
+import { LLM_EXECUTOR_MODEL } from '../config';
 
 dotenv.config({ quiet: true });
 
@@ -51,20 +52,14 @@ Operator description:
 `;
 
 async function extractConfig(description: string): Promise<BootstrapResult> {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-        throw new Error('GEMINI_API_KEY is not set. Add it to your .env file.');
-    }
-
-    const ai = new GoogleGenAI({ apiKey });
-    const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: [{ role: 'user', parts: [{ text: EXTRACTION_PROMPT + description }] }],
-        config: { temperature: 0.3 },
+    const response = await generateLLM({
+        model: LLM_EXECUTOR_MODEL,
+        messages: [{ role: 'user', content: EXTRACTION_PROMPT + description }],
+        temperature: 0.3,
     });
 
     const text = (response as any).text?.trim() || '';
-    if (!text) throw new Error('Empty response from Gemini.');
+    if (!text) throw new Error('Empty response from LLM.');
 
     // Strip markdown code fences if model wrapped the JSON
     const clean = text
@@ -139,7 +134,7 @@ async function main() {
         process.exit(1);
     }
 
-    console.log('\nExtracting configuration with Gemini...');
+    console.log('\nExtracting configuration with LLM...');
 
     let data: BootstrapResult;
     try {

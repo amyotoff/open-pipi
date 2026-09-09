@@ -97,9 +97,9 @@ describe('feature smokes', () => {
     });
 
     it('webrun smoke', async () => {
-        const generateContent = vi.fn().mockResolvedValue({
-            usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1 },
-            functionCalls: [],
+        const generateLLM = vi.fn().mockResolvedValue({
+            usage: { inputTokens: 1, outputTokens: 1 },
+            toolCalls: [],
             text: 'final',
         });
         const { default: skill } = await loadSkill<any>('./webrun.skill', () => {
@@ -112,15 +112,11 @@ describe('feature smokes', () => {
                 const actual = await importOriginal<typeof import('../config')>();
                 return {
                     ...actual,
-                    GEMINI_API_KEY: 'test',
+                    LLM_EXECUTOR_MODEL: 'test-model',
                 };
             });
-            vi.doMock('@google/genai', () => ({
-                GoogleGenAI: class {
-                    models = { generateContent };
-                },
-                Type: { OBJECT: 'object', STRING: 'string' },
-            }));
+            vi.doMock('../core/healthcheck', () => ({ guardLLMCall: vi.fn(() => null) }));
+            vi.doMock('../core/llm-gateway', () => ({ generateLLM }));
         });
         expect(
             await skill.handlers.webrun_execute({ task: 'test research' }, { chatId: 'chat-1', userId: '111' })

@@ -1,4 +1,4 @@
-import { Type } from '@google/genai';
+import { Type } from '../core/llm-types';
 import { SkillManifest } from './_types';
 import { appendNote, compileNotebook, promoteNoteToWiki, searchNotes, updateWikiPage } from '../core/brain';
 import { readWikiPageForReader, updateWikiPage as writeWikiPage } from '../core/brain-wiki';

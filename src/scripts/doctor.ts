@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import dotenv from 'dotenv';
+import { LLM_KEY_ENV, resolveLlmConfig } from '../core/llm-config';
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail';
 
@@ -252,15 +253,29 @@ export function inspectDoctor(input: DoctorInput, io: DoctorIO = defaultIO): Doc
                 )
     );
 
-    for (const [id, label, name] of [
-        ['telegram-token', 'Telegram token', 'TELEGRAM_BOT_TOKEN'],
-        ['gemini-key', 'Gemini API key', 'GEMINI_API_KEY'],
-    ] as const) {
+    for (const [id, label, name] of [['telegram-token', 'Telegram token', 'TELEGRAM_BOT_TOKEN']] as const) {
         checks.push(
             hasConfiguredValue(input.env[name])
                 ? check(id, label, 'pass', `${name} is configured.`)
                 : check(id, label, 'fail', `${name} is missing or still contains a placeholder.`)
         );
+    }
+
+    try {
+        const llm = resolveLlmConfig(input.env);
+        const keyName = LLM_KEY_ENV[llm.provider];
+        checks.push(
+            hasConfiguredValue(llm.apiKey)
+                ? check('llm-key', 'LLM API key', 'pass', `${keyName} is configured (${llm.provider}).`)
+                : check(
+                      'llm-key',
+                      'LLM API key',
+                      'fail',
+                      `${keyName} is missing or still contains a placeholder (${llm.provider}).`
+                  )
+        );
+    } catch (error: any) {
+        checks.push(check('llm-key', 'LLM provider', 'fail', error.message));
     }
 
     const ownerConfigured = [input.env.OWNER_TG_IDS, input.env.OWNER_IDENTITIES].some((value) =>

@@ -4,7 +4,7 @@ const ORIGINAL_ENV = { ...process.env };
 
 async function loadSchema(overrides: Array<{ subject: string; content: string; status: string }> = []) {
     vi.resetModules();
-    process.env = { ...ORIGINAL_ENV, GEMINI_API_KEY: '' };
+    process.env = { ...ORIGINAL_ENV, LLM_PROVIDER: 'openrouter', OPENROUTER_API_KEY: '' };
 
     const listGroundingOverrides = vi.fn().mockReturnValue(overrides);
     vi.doMock('../db', () => ({ listGroundingOverrides }));

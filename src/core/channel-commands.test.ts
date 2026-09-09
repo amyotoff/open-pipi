@@ -35,7 +35,7 @@ async function loadChannelCommands(options?: {
     const getJeevesMvpStatusForSpace = vi.fn(() => 'PA Jeeves MVP');
     const processWithOllama = vi.fn(async () => ({ text: 'A short archived summary.' }));
     const getHealthState = vi.fn(() => ({
-        gemini: true,
+        llm: true,
         ollama: true,
         internet: true,
         killswitch: false,

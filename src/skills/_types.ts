@@ -1,4 +1,4 @@
-import { FunctionDeclaration } from '@google/genai';
+import { FunctionDeclaration } from '../core/llm-types';
 import { TrustFlag } from '../core/authority';
 import { RuntimeExecutionContext } from '../core/runtime-context';
 

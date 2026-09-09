@@ -9,7 +9,7 @@ import { runCommand } from '../utils/shell';
 
 interface HealthState {
     ollama: boolean;
-    gemini: boolean;
+    llm: boolean;
     internet: boolean;
     disk_ok: boolean;
     temp_ok: boolean;
@@ -22,7 +22,7 @@ interface HealthState {
 
 const state: HealthState = {
     ollama: false,
-    gemini: true, // assume ok until proven otherwise
+    llm: true, // assume ok until proven otherwise
     internet: true,
     disk_ok: true,
     temp_ok: true,
@@ -156,8 +156,8 @@ export function guardLLMCall(): string | null {
     return null;
 }
 
-export function isGeminiAvailable(): boolean {
-    return state.gemini && !state.killswitch;
+export function isLLMAvailable(): boolean {
+    return state.llm && !state.killswitch;
 }
 
 export function isOllamaHealthy(): boolean {
@@ -168,15 +168,15 @@ export function isInternetAvailable(): boolean {
     return state.internet;
 }
 
-/** Report a Gemini call result for tracking */
-export function reportGeminiResult(ok: boolean): void {
-    updateComponent('gemini', ok);
+/** Report a LLM call result for tracking */
+export function reportLLMResult(ok: boolean): void {
+    updateComponent('llm', ok);
 }
 
 export function getHealthSummary(): string {
     const lines: string[] = [];
     lines.push(`Platform: ${RUNTIME_PLATFORM}`);
-    lines.push(`Gemini: ${state.gemini ? 'OK' : 'DOWN'}`);
+    lines.push(`LLM: ${state.llm ? 'OK' : 'DOWN'}`);
     lines.push(`Ollama: ${state.ollama ? 'OK' : 'DOWN'}`);
     lines.push(`Интернет: ${state.internet ? 'OK' : 'DOWN'}`);
     lines.push(`Диск: ${state.disk_ok ? 'OK' : 'КРИТИЧНО'}`);
@@ -194,6 +194,7 @@ export function getHealthSummary(): string {
     try {
         const daily = getDailyTokenCost();
         lines.push(`Токены сегодня: $${daily.cost_usd.toFixed(2)} (${daily.calls} вызовов)`);
+        if (daily.unpriced_calls) lines.push(`Без цены: ${daily.unpriced_calls} вызовов; не включены в сумму и лимит.`);
     } catch {}
 
     return lines.join('\n');

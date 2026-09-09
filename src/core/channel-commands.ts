@@ -192,7 +192,7 @@ async function runStatusCommand(context: ChannelCommandExecutionContext): Promis
     const daily = getDailyTokenCost();
 
     const svc = [
-        `${state.gemini ? 'OK' : 'DOWN'} Gemini`,
+        `${state.llm ? 'OK' : 'DOWN'} LLM`,
         `${state.ollama ? 'OK' : 'DOWN'} Ollama`,
         `${state.internet ? 'OK' : 'DOWN'} Internet`,
     ];
@@ -202,7 +202,9 @@ async function runStatusCommand(context: ChannelCommandExecutionContext): Promis
 
     const swap = m.swapTotalMB > 0 ? `\nSwap ${m.swapUsedMB}/${m.swapTotalMB} MB` : '';
     const hw = `CPU ${m.tempC.toFixed(1)}C\nRAM ${m.ramUsedMB}/${m.ramTotalMB} MB (${m.ramPercent}%)${swap}\nDisk ${m.diskPercent}%\nUptime ${m.uptime}`;
-    const tokens = `$${daily.cost_usd.toFixed(2)} / ${daily.calls} calls\nIn ${daily.input_tokens.toLocaleString()} Out ${daily.output_tokens.toLocaleString()}`;
+    const tokens =
+        `$${daily.cost_usd.toFixed(2)} / ${daily.calls} calls\nIn ${daily.input_tokens.toLocaleString()} Out ${daily.output_tokens.toLocaleString()}` +
+        (daily.unpriced_calls ? `\n${daily.unpriced_calls} calls unpriced; totals exclude that spend.` : '');
 
     await context.reply(
         [

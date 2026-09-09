@@ -1,4 +1,4 @@
-import type { FunctionDeclaration } from '@google/genai';
+import type { FunctionDeclaration } from '../core/llm-types';
 import type { CapabilityMeta, SkillManifest } from './_types';
 
 export type SkillToolHandler = SkillManifest['handlers'][string];

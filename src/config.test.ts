@@ -101,10 +101,28 @@ describe('config', () => {
     });
 
     describe('validateCriticalConfig', () => {
+        it.each([
+            ['openai', 'OPENAI_API_KEY'],
+            ['anthropic', 'ANTHROPIC_API_KEY'],
+            ['gemini', 'GEMINI_API_KEY'],
+        ])('starts with only the selected %s direct key', async (provider, key) => {
+            const { validateCriticalConfig } = await loadConfig({
+                TELEGRAM_BOT_TOKEN: 'test-token',
+                LLM_PROVIDER: provider,
+                OPENROUTER_API_KEY: '',
+                OPENAI_API_KEY: '',
+                ANTHROPIC_API_KEY: '',
+                GEMINI_API_KEY: '',
+                [key]: 'test-key',
+            });
+            expect(() => validateCriticalConfig()).not.toThrow();
+        });
+
         it('should throw when env vars are missing', async () => {
             const { validateCriticalConfig } = await loadConfig({
                 TELEGRAM_BOT_TOKEN: '',
-                GEMINI_API_KEY: '',
+                LLM_PROVIDER: 'openrouter',
+                OPENROUTER_API_KEY: '',
             });
 
             expect(() => validateCriticalConfig()).toThrow(/Unsafe config/);
@@ -113,7 +131,8 @@ describe('config', () => {
         it('should not throw when critical tokens are present', async () => {
             const { validateCriticalConfig } = await loadConfig({
                 TELEGRAM_BOT_TOKEN: 'test-token',
-                GEMINI_API_KEY: 'test-key',
+                LLM_PROVIDER: 'openrouter',
+                OPENROUTER_API_KEY: 'test-key',
             });
 
             expect(() => validateCriticalConfig()).not.toThrow();
@@ -127,6 +146,9 @@ describe('config', () => {
             expect(config.GEMINI_API_KEY).toBeDefined();
             expect(config.GEMINI_EXECUTOR_MODEL).toBeDefined();
             expect(config.GEMINI_ADVISOR_MODEL).toBeDefined();
+            expect(config.LLM_PROVIDER).toBeDefined();
+            expect(config.LLM_EXECUTOR_MODEL).toBeDefined();
+            expect(config.LLM_ADVISOR_MODEL).toBeDefined();
             expect(config.PIPI_ADVISOR_ENABLED).toBeDefined();
             expect(config.PIPI_ADVISOR_MAX_CALLS_PER_TURN).toBeDefined();
             expect(config.OLLAMA_URL).toBeDefined();

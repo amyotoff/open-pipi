@@ -72,8 +72,8 @@ export async function processWithOllama(
     const available = await isOllamaAvailable();
 
     if (!available) {
-        console.log('[OLLAMA] Not available, falling back to Gemini');
-        return fallbackToGemini(prompt, systemPrompt);
+        console.log('[OLLAMA] Not available, falling back to LLM');
+        return fallbackToLLM(prompt, systemPrompt);
     }
 
     try {
@@ -98,8 +98,8 @@ export async function processWithOllama(
         clearTimeout(timeout);
 
         if (!res.ok) {
-            console.warn(`[OLLAMA] HTTP ${res.status}, falling back to Gemini`);
-            return fallbackToGemini(prompt, systemPrompt);
+            console.warn(`[OLLAMA] HTTP ${res.status}, falling back to LLM`);
+            return fallbackToLLM(prompt, systemPrompt);
         }
 
         const data = await res.json();
@@ -118,13 +118,13 @@ export async function processWithOllama(
 
         return { text, fromOllama: true };
     } catch (err: any) {
-        console.warn(`[OLLAMA] Error: ${err.message}, falling back to Gemini`);
+        console.warn(`[OLLAMA] Error: ${err.message}, falling back to LLM`);
         ollamaAvailable = false; // Mark as unavailable for CHECK_INTERVAL
-        return fallbackToGemini(prompt, systemPrompt);
+        return fallbackToLLM(prompt, systemPrompt);
     }
 }
 
-async function fallbackToGemini(prompt: string, systemPrompt?: string): Promise<{ text: string; fromOllama: boolean }> {
+async function fallbackToLLM(prompt: string, systemPrompt?: string): Promise<{ text: string; fromOllama: boolean }> {
     const { processWithLLM } = await import('./llm');
     const messages: any[] = [];
 

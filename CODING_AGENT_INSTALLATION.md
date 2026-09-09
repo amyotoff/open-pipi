@@ -91,20 +91,20 @@ Do not silently fix unrelated failures. Record the failing command and the small
 
 ## 5. Hand configuration to the operator
 
-Coding agents must not open, print, create, or edit `.env`, and must never ask the operator to paste tokens into chat. Ask the operator to create and fill it privately from `.env.example`.
+Coding agents must not open, print, create, or edit `.env`, and must never ask the operator to paste tokens into chat. Ask the operator to create and fill it privately from `config.example`.
 
 The operator-side setup is:
 
 ```bash
-cp .env.example .env
+cp config.example .env
 chmod 600 .env
 ```
 
-Minimum values:
+Minimum values (OpenRouter is the default; see [direct provider bypass](docs/llm-gateway.md) for existing Gemini installs):
 
 ```dotenv
 TELEGRAM_BOT_TOKEN=...
-GEMINI_API_KEY=...
+OPENROUTER_API_KEY=...
 OWNER_TG_IDS=123456789
 TZ=UTC
 ```
@@ -119,7 +119,7 @@ Continue only when the JSON result has `"ready": true`. On failure, report only 
 
 ## 6. Treat optional actions as opt-in
 
-- `pnpm bootstrap` is personalization, not installation. It calls Gemini and can overwrite an existing grounding when the generated slug collides. Never run it automatically: first warn the operator, require separate confirmation, and stop if `src/groundings/` has uncommitted or untracked work. Afterward, inspect the diff and run `pnpm content:check`.
+- `pnpm bootstrap` is personalization, not installation. It calls the configured LLM provider and can overwrite an existing grounding when the generated slug collides. Never run it automatically: first warn the operator, require separate confirmation, and stop if `src/groundings/` has uncommitted or untracked work. Afterward, inspect the diff and run `pnpm content:check`.
 - `pnpm dev` and `pnpm start` connect to external services and write runtime state under `DATA_DIR`; start one only when explicitly requested and after checking that another bot instance is not already running.
 - Docker is a separate full-stack mode. Use it only when explicitly requested, require the operator to set a strong `SANDBOXD_TOKEN` privately, and validate with `docker compose config --quiet` so expanded secrets are not printed.
 - Deployment, production configuration, restores, migrations, and background service installation require separate explicit authorization.

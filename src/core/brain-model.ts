@@ -74,8 +74,8 @@ export function isTransientBrainModelError(error: unknown): boolean {
 }
 
 export async function generateBrainText(request: BrainModelRequest): Promise<string> {
-    const { GEMINI_API_KEY } = await import('../config');
-    if (!GEMINI_API_KEY?.trim()) {
+    const { LLM_API_KEY } = await import('../config');
+    if (!LLM_API_KEY?.trim()) {
         throw new BrainBudgetError('no model is configured for this install');
     }
 

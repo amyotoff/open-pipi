@@ -57,7 +57,7 @@ describe('core/healthcheck', () => {
         const mod = await loadHealthcheck();
         const summary = mod.getHealthSummary();
 
-        expect(summary).toContain('Gemini');
+        expect(summary).toContain('LLM');
         expect(summary).toContain('Ollama');
     });
 
@@ -73,17 +73,17 @@ describe('core/healthcheck', () => {
         expect(mod.storeSystemMetricsSample).toHaveBeenCalledTimes(1);
     });
 
-    it('marks Gemini down after repeated failures and can recover', async () => {
+    it('marks LLM down after repeated failures and can recover', async () => {
         const mod = await loadHealthcheck();
 
-        mod.reportGeminiResult(false);
-        mod.reportGeminiResult(false);
-        mod.reportGeminiResult(false);
-        expect(mod.getHealthSummary()).toContain('Gemini: DOWN');
+        mod.reportLLMResult(false);
+        mod.reportLLMResult(false);
+        mod.reportLLMResult(false);
+        expect(mod.getHealthSummary()).toContain('LLM: DOWN');
 
-        mod.reportGeminiResult(true);
-        mod.reportGeminiResult(true);
-        expect(mod.getHealthSummary()).toContain('Gemini: OK');
+        mod.reportLLMResult(true);
+        mod.reportLLMResult(true);
+        expect(mod.getHealthSummary()).toContain('LLM: OK');
     });
 
     it('skips Pi-specific checks on generic hosts', async () => {

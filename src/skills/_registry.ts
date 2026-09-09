@@ -1,4 +1,4 @@
-import { FunctionDeclaration } from '@google/genai';
+import { FunctionDeclaration } from '../core/llm-types';
 import { CapabilityMeta, SkillManifest } from './_types';
 import { getDb, getMembership, getResident, getSpace, memberHasTrustFlag } from '../db';
 import { getAssistantPack } from '../core/assistant-pack';

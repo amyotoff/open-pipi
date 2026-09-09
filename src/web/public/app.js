@@ -329,6 +329,16 @@ function renderBudget(body, data) {
     stats.append(stat('Calls', thousands(total.calls)));
     body.append(stats);
 
+    if (total.unpriced_calls > 0) {
+        body.append(
+            node(
+                'p',
+                'bad',
+                `${total.unpriced_calls} calls have no price. Totals and the daily limit exclude that spend.`
+            )
+        );
+    }
+
     const meter = node('div', 'meter');
     const fill = node('div', `meter-fill${share >= 0.8 ? ' is-bad' : ''}`);
     fill.style.width = `${Math.round(share * 100)}%`;
@@ -378,7 +388,7 @@ async function renderOverview(body, data) {
     const health = data.health || {};
     const stats = node('div', 'stats');
     for (const [label, key] of [
-        ['Gemini', 'gemini'],
+        ['LLM', 'llm'],
         ['Ollama', 'ollama'],
         ['Internet', 'internet'],
         ['Disk', 'disk_ok'],
