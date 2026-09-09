@@ -41,6 +41,7 @@ coverage/
 # Local scratch artifacts
 /output/
 /tmp/
+/.tmp/
 
 # Logs
 *.log

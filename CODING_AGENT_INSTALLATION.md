@@ -91,7 +91,28 @@ Do not silently fix unrelated failures. Record the failing command and the small
 
 ## 5. Hand configuration to the operator
 
-Coding agents must not open, print, create, or edit `.env`, and must never ask the operator to paste tokens into chat. Ask the operator to create and fill it privately from `config.example`.
+An ordinary install-only request still stops here. If the operator separately asks to configure
+PiPi, use the guided local setup:
+
+```bash
+pnpm setup
+```
+
+The command opens the private loopback page directly and does not print its session-bearing URL.
+The operator enters OpenRouter and Telegram credentials only in that page; never ask them to paste
+a token into the agent chat. The setup process reports safe status enums and connection messages,
+and `pnpm setup -- --json` prints a bounded, secret-free status snapshot without opening a browser
+or waiting interactively. If automatic opening fails, ask the operator to run
+`pnpm setup -- --show-link` in their own private terminal; that explicit fallback prints a
+short-lived local link which must not be copied into an agent transcript or shared.
+
+The page first offers a temporary runtime trial. Background startup remains an explicit operator
+choice; do not select it on their behalf. A local background process cannot answer while the
+computer is asleep or off. Report a working Telegram conversation only after the setup status says
+the dialogue was verified.
+
+For manual configuration instead, coding agents must not open, print, create, or edit `.env`. Ask
+the operator to create and fill it privately from `config.example`.
 
 The operator-side setup is:
 
@@ -122,7 +143,7 @@ Continue only when the JSON result has `"ready": true`. On failure, report only 
 ## 6. Treat optional actions as opt-in
 
 - `pnpm bootstrap` is personalization, not installation. It calls the configured LLM provider and can overwrite an existing grounding when the generated slug collides. Never run it automatically: first warn the operator, require separate confirmation, and stop if `src/groundings/` has uncommitted or untracked work. Afterward, inspect the diff and run `pnpm content:check`.
-- `pnpm dev` and `pnpm start` connect to external services and write runtime state under `DATA_DIR`; start one only when explicitly requested and after checking that another bot instance is not already running.
+- `pnpm setup`, `pnpm dev`, and `pnpm start` connect to external services and write runtime state under `DATA_DIR`; start one only when explicitly requested. Setup detects an existing configured installation and refuses conflicting bot/runtime ownership rather than replacing it.
 - Docker is a separate full-stack mode. Use it only when explicitly requested, require the operator to set a strong `SANDBOXD_TOKEN` privately, and validate with `docker compose config --quiet` so expanded secrets are not printed.
 - Deployment, production configuration, restores, migrations, and background service installation require separate explicit authorization.
 

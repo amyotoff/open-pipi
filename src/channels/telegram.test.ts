@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const setMyCommands = vi.fn(() => Promise.resolve(true));
-const launch = vi.fn();
+const launch = vi.fn(async () => undefined);
+const getWebhookInfo = vi.fn(async () => ({ url: '' }));
+const callApi = vi.fn(async (_method: string, _payload?: unknown, _signal?: unknown) => []);
+let rejectPolling: (error: unknown) => void;
+let pollingLifetime = new Promise<void>((_resolve, reject) => {
+    rejectPolling = reject;
+});
 const stop = vi.fn();
 const pinChatMessage = vi.fn(async () => true);
 const unpinChatMessage = vi.fn(async () => true);
@@ -20,6 +26,8 @@ vi.mock('telegraf', () => {
     class Telegraf {
         telegram = {
             setMyCommands,
+            getWebhookInfo,
+            callApi,
             sendMessage: vi.fn(async () => ({ message_id: 42 })),
             sendChatAction: vi.fn(),
             pinChatMessage,
@@ -29,7 +37,11 @@ vi.mock('telegraf', () => {
         command = vi.fn();
         action = vi.fn();
         on = vi.fn();
-        launch = launch;
+        launch = async () => {
+            await launch();
+            await this.telegram.callApi('getUpdates', { timeout: 50 });
+            return pollingLifetime;
+        };
         stop = stop;
 
         constructor(_token: string) {}
@@ -89,6 +101,13 @@ describe('channels/telegram', () => {
     afterEach(() => {
         setMyCommands.mockClear();
         launch.mockClear();
+        getWebhookInfo.mockReset();
+        getWebhookInfo.mockResolvedValue({ url: '' });
+        callApi.mockReset();
+        callApi.mockResolvedValue([]);
+        pollingLifetime = new Promise<void>((_resolve, reject) => {
+            rejectPolling = reject;
+        });
         stop.mockClear();
         pinChatMessage.mockClear();
         unpinChatMessage.mockClear();
@@ -109,7 +128,7 @@ describe('channels/telegram', () => {
     it('registers only the compact everyday Telegram menu', async () => {
         const telegram = await import('./telegram');
 
-        telegram.startTelegramBot();
+        await telegram.startTelegramBot();
 
         expect(setMyCommands).toHaveBeenCalledTimes(1);
 
@@ -126,6 +145,39 @@ describe('channels/telegram', () => {
         expect(action.mock.calls.some((call: unknown[]) => String(call[0]).includes('daily:'))).toBe(true);
         expect(action.mock.calls.some((call: unknown[]) => String(call[0]).includes('tasks:'))).toBe(true);
         expect(launch).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not report Telegram ready when launch rejects before polling starts', async () => {
+        launch.mockImplementationOnce(async () => {
+            throw new Error('connection failed');
+        });
+        const telegram = await import('./telegram');
+
+        await expect(telegram.startTelegramBot()).rejects.toThrow('Telegram polling could not be started.');
+        expect(telegram.isTelegramBotLaunched()).toBe(false);
+    });
+
+    it('refuses an active webhook without deleting it or launching polling', async () => {
+        getWebhookInfo.mockResolvedValueOnce({ url: 'https://example.test/telegram' });
+        const telegram = await import('./telegram');
+
+        await expect(telegram.startTelegramBot()).rejects.toThrow('active webhook');
+        expect(launch).not.toHaveBeenCalled();
+        expect(callApi).not.toHaveBeenCalled();
+    });
+
+    it('uses a zero-timeout first getUpdates and escalates a later terminal polling failure', async () => {
+        const telegram = await import('./telegram');
+        const onFailure = vi.fn();
+        telegram.onTelegramBotTerminalFailure(onFailure);
+
+        await telegram.startTelegramBot();
+        expect(callApi).toHaveBeenCalledWith('getUpdates', { timeout: 0 }, undefined);
+        rejectPolling(new Error('409 with bot token in request'));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(onFailure).toHaveBeenCalledTimes(1);
+        expect(telegram.isTelegramBotLaunched()).toBe(false);
     });
 
     it('runs daily dashboard actions as their existing commands', async () => {

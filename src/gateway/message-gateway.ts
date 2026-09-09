@@ -23,6 +23,7 @@ import { resolveTransportBinding } from './binding-resolver';
 import { resolveParticipant } from './participant-resolver';
 import { evaluateParticipation, shouldHandlePrimaryGroupMessage } from './participation';
 import { getTransport } from '../transports/registry';
+import { markDialogueAccepted } from '../setup/dialogue-evidence';
 import type { IncomingAttachment, IncomingMessage } from '../transports/types';
 
 const ACCESS_DENIED_REPLY = 'Sorry. I only work with approved users.';
@@ -364,6 +365,23 @@ export async function handleIncoming(message: IncomingMessage, options?: HandleI
                 if (approval.handled) return;
                 content = approval.content;
                 addSpanAttributes({ 'app.route': 'direct_butler' });
+                if (
+                    message.transport === 'telegram' &&
+                    isOwner(message.sender.transportUserId, 'telegram') &&
+                    message.endpoint.id === message.sender.transportUserId &&
+                    text.trim().length > 0 &&
+                    !text.trimStart().startsWith('/')
+                ) {
+                    try {
+                        markDialogueAccepted({
+                            transport: message.transport,
+                            endpointType: message.endpoint.type,
+                            endpointId: message.endpoint.id,
+                            ownerTelegramId: message.sender.transportUserId,
+                            correlationId: message.correlationId,
+                        });
+                    } catch {}
+                }
                 await handleButlerMessage({
                     channel: message.transport,
                     channelRef: message.endpoint.id,

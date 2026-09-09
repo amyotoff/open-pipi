@@ -2,8 +2,17 @@ import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 import { LLM_KEY_ENV, resolveLlmConfig } from './core/llm-config';
+import { resolveSetupEnvironment } from './setup/config-store';
 
 dotenv.config({ quiet: true });
+
+// dotenv keeps already-exported values, then the local setup store fills only
+// missing keys. Copy the resolved values back so legacy modules that still read
+// process.env observe the same configuration as this module.
+const resolvedEnvironment = resolveSetupEnvironment(process.env);
+for (const [name, value] of Object.entries(resolvedEnvironment)) {
+    if (process.env[name] === undefined && value !== undefined) process.env[name] = value;
+}
 
 function readBooleanEnv(name: string, fallback: boolean): boolean {
     const raw = process.env[name];

@@ -26,7 +26,7 @@ Private memory. Shared know-how. Your hardware.
 - A `pack` changes the assistant's voice, enabled skills, default policies, seeded tasks, and optional pack-local tools.
 - A `grounding` holds stable facts and operating rules. Memory handles the changing stuff.
 - There is a local web client and, for owners, a dashboard showing health, spaces, stuck deliveries, the wiki, and memory. Off by default, loopback-only.
-- The happy path is simple: copy `config.example`, fill a few vars, run `pnpm setup:check`, bootstrap, then `pnpm dev`.
+- The guided local path is one command: `pnpm setup`. It opens a private browser page for OpenRouter, Telegram, owner pairing, and the first runtime check.
 - `DATA_DIR` is the assistant's suitcase: database, auth state, restore points, and pinned per-space behavior all live there.
 - Safe updates are meant to preserve both memory and behavior. Existing spaces keep their current pack + grounding snapshot until you intentionally switch them.
 - If you want something hackable rather than a hosted SaaS or a no-code agent builder, this repo is aimed at that.
@@ -37,13 +37,19 @@ This repo is `pnpm`-first.
 
 Using a coding agent? Give it the [non-destructive, machine-checkable installation runbook](CODING_AGENT_INSTALLATION.md).
 
+For the complete guided path, paste this request into the coding agent from the project checkout:
+
+> Install and configure Open PiPi using `CODING_AGENT_INSTALLATION.md`. Verify the install, then
+> start `pnpm setup` and open its local page for me. Do not ask me to paste credentials into chat,
+> and do not enable background startup unless I choose it on the page.
+
 ### 1. Requirements
 
 - Node.js 24+
 - `pnpm` 10 (the repo pins `10.26.2`; Corepack is optional and is not bundled with every Node release)
-- a Telegram bot token
-- an OpenRouter API key for text (or an explicitly selected direct provider); the default tools, vision and grounding routes also use a Gemini API key
-- at least one owner ID
+
+The guided page helps you connect OpenRouter and create or connect a Telegram bot. It links your
+Telegram account without asking you to find a numeric owner ID.
 
 Optional:
 
@@ -55,8 +61,8 @@ Optional:
 ```bash
 git clone https://github.com/amyotoff/open-pipi.git
 cd open-pipi
-cp config.example .env
 pnpm install
+pnpm build
 ```
 
 If `pnpm` is missing and your Node distribution includes Corepack, run `corepack enable` before the install block. Otherwise install pnpm 10 using your normal toolchain manager.
@@ -71,9 +77,38 @@ That skips optional support for `Discord`, `WhatsApp`, `Gmail`, and browser auto
 
 If you later enable `Discord`, `WhatsApp`, or `Gmail` in `.env` without reinstalling the optional packages, PiPi will fail fast with a clear startup error instead of partially booting. Browser automation is loaded on demand, so missing browser packages fail when a browser-based skill is invoked.
 
-### 3. Fill the minimum `.env`
+### 3. Guided local setup
 
-If you only want the simplest working setup, these are the key vars:
+```bash
+pnpm setup
+```
+
+The command opens one loopback-only page and continues from the first incomplete step when run
+again. Connect OpenRouter there (or enter an existing key in the private password field), create a
+Telegram bot with the short BotFather guide, and confirm your own account through a one-time link.
+The page checks each connection before advancing and never returns credentials to a coding agent.
+
+PiPi starts as **Jeeves**, a useful personal-assistant starting character. It is not a permanent
+persona choice: tell PiPi how to change its tone, standing rules, and role as you work, or use
+`/pack` to see available specializations. Existing installations keep their current choice when
+setup is run again.
+
+At the end, try PiPi in the current process or explicitly choose supported background operation.
+Local background mode keeps running after the setup command closes, but PiPi is unavailable while
+the computer is asleep or off. The setup page also provides a stop control.
+
+OpenRouter provides and bills the AI model usage. A ChatGPT or Claude subscription does not sign in
+to OpenRouter or pay for these calls.
+
+### 4. Manual configuration
+
+Skip this section when using the guided page. For manual setup, copy the public template first:
+
+```bash
+cp config.example .env
+```
+
+Then edit `.env`. These are the key vars:
 
 ```dotenv
 TELEGRAM_BOT_TOKEN=...
@@ -109,7 +144,7 @@ pnpm setup:check
 
 The command reports missing required values, unsafe owner access, invalid pack/grounding IDs, data-directory permissions, and missing dependencies for optional channels you enabled. `pnpm setup:check -- --json` returns the same read-only result for scripts.
 
-### 4. Bootstrap your assistant
+### 5. Optional bootstrap
 
 ```bash
 pnpm bootstrap
@@ -124,7 +159,7 @@ This is the fastest way to make PiPi feel like your assistant instead of a gener
 
 `config.example` starts with the built-in Jeeves pack and grounding. The bootstrap script prints replacement values when you generate your own grounding.
 
-### 5. Run it
+### 6. Run a manually configured installation
 
 ```bash
 pnpm dev
@@ -164,7 +199,7 @@ Advanced setup and operator commands remain available for compatibility:
 - `/backup status` shows the latest backup info and a pre-upgrade reminder
 - `/approve [browse_web|deep_research]` and `/deny [browse_web|deep_research]` resolve pending risky actions explicitly
 
-### 6. Optional: run the full local stack
+### 7. Optional: run the full local stack
 
 If you want local fallback models, safer tool execution, and browser automation, use Docker Compose.
 
@@ -972,6 +1007,7 @@ Useful scripts:
 | `pnpm bootstrap` | Description to grounding bootstrap flow |
 | `pnpm content:check` | Validate installable packs and groundings |
 | `pnpm content:new` | Scaffold a pack or grounding without overwriting content |
+| `pnpm setup` | Guided local AI, Telegram, and owner setup |
 | `pnpm setup:check` | Read-only first-run and configuration diagnostics |
 | `pnpm backup:restore` | Restore a runtime backup by id, path, `latest`, or `latest-healthy` |
 

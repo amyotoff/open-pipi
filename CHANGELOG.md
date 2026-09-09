@@ -4,6 +4,13 @@ All notable changes to Open PiPi will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `pnpm setup` opens a resumable, loopback-only onboarding page for private OpenRouter connection,
+  Telegram bot validation, one-time owner pairing, and an explicit foreground or supported
+  background start. It begins with Jeeves as an adaptable personal-assistant character, preserves
+  existing character choices, and exposes only secret-free status to coding agents.
+
 ## [2.9.0] — 2026-09-09
 
 Open PiPi gains a provider-neutral LLM Gateway: OpenRouter handles cloud text by default,

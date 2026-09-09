@@ -11,6 +11,7 @@ import {
     bot,
     isTelegramBotLaunched,
     markTelegramBotStopped,
+    onTelegramBotTerminalFailure,
     registerTelegramFallbackHandlers,
     startTelegramBot,
 } from '../../channels/telegram';
@@ -36,7 +37,10 @@ const MAX_INBOUND_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 export class TelegramTransportAdapter implements TransportAdapter {
     readonly name = 'telegram';
 
+    constructor(private readonly options: { onTerminalFailure?: () => void | Promise<void> } = {}) {}
+
     async start(context: TransportRuntimeContext): Promise<void> {
+        onTelegramBotTerminalFailure(() => this.options.onTerminalFailure?.());
         registerTelegramFallbackHandlers({
             onMessage: async (update) => {
                 const message = normalizeTelegramMessage({
@@ -58,7 +62,7 @@ export class TelegramTransportAdapter implements TransportAdapter {
             },
         });
 
-        startTelegramBot();
+        await startTelegramBot();
     }
 
     async stop(): Promise<void> {

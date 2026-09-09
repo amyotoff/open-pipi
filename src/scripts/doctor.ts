@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import dotenv from 'dotenv';
 import { LLM_KEY_ENV, resolveLlmConfig } from '../core/llm-config';
+import { getSetupConfigPaths, loadOperatorEnvironment, resolveSetupEnvironment } from '../setup/config-store';
 
 export type DoctorStatus = 'pass' | 'warn' | 'fail';
 
@@ -17,6 +17,8 @@ export type DoctorInput = {
     nodeVersion: string;
     envFileFound: boolean;
     envFileError?: boolean;
+    localConfigFound?: boolean;
+    localConfigError?: boolean;
     env: Record<string, string | undefined>;
 };
 
@@ -240,17 +242,32 @@ export function inspectDoctor(input: DoctorInput, io: DoctorIO = defaultIO): Doc
               )
     );
 
+    if (input.localConfigFound || input.localConfigError) {
+        checks.push(
+            input.localConfigError
+                ? check('local-config', 'Local setup configuration', 'fail', 'Local setup configuration is invalid.')
+                : check('local-config', 'Local setup configuration', 'pass', 'Local setup configuration was found.')
+        );
+    }
+
     checks.push(
         input.envFileError
             ? check('env-file', '.env file', 'fail', '.env exists but could not be read.')
             : input.envFileFound
               ? check('env-file', '.env file', 'pass', '.env was found.')
-              : check(
-                    'env-file',
-                    '.env file',
-                    'warn',
-                    '.env was not found; only exported environment variables are used.'
-                )
+              : input.localConfigFound
+                ? check(
+                      'env-file',
+                      'Configuration source',
+                      'pass',
+                      'Using local setup configuration and exported overrides.'
+                  )
+                : check(
+                      'env-file',
+                      '.env file',
+                      'warn',
+                      '.env was not found; only exported environment variables are used.'
+                  )
     );
 
     for (const [id, label, name] of [['telegram-token', 'Telegram token', 'TELEGRAM_BOT_TOKEN']] as const) {
@@ -453,20 +470,31 @@ export function loadDoctorInput(cwd = process.cwd()): DoctorInput {
     const envPath = path.join(cwd, '.env');
     const envFileFound = fs.existsSync(envPath);
     let envFileError = false;
-    let fileEnv: Record<string, string> = {};
-    if (envFileFound) {
-        try {
-            fileEnv = dotenv.parse(fs.readFileSync(envPath));
-        } catch {
-            envFileError = true;
-        }
+    let operatorEnv: NodeJS.ProcessEnv;
+    try {
+        operatorEnv = loadOperatorEnvironment(cwd, process.env);
+    } catch {
+        envFileError = true;
+        operatorEnv = { ...process.env };
+    }
+    const dataDir = path.resolve(cwd, operatorEnv.DATA_DIR || 'data');
+    const configPaths = getSetupConfigPaths(dataDir);
+    const localConfigFound = fs.existsSync(configPaths.settings) || fs.existsSync(configPaths.credentials);
+    let localConfigError = false;
+    let env = operatorEnv;
+    try {
+        env = resolveSetupEnvironment(operatorEnv, { cwd, dataDir });
+    } catch {
+        localConfigError = true;
     }
     return {
         cwd,
         nodeVersion: process.versions.node,
         envFileFound,
         envFileError,
-        env: { ...fileEnv, ...process.env },
+        localConfigFound,
+        localConfigError,
+        env,
     };
 }
 
