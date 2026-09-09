@@ -85,6 +85,22 @@ describe('owner context private file', () => {
         expect(readOwnerContext(dataDir)?.revision).toBe(second?.revision);
     });
 
+    it('can atomically persist a preallocated server revision without changing regular saves', () => {
+        const intendedRevision = '33333333-3333-4333-8333-333333333333';
+        const saved = saveOwnerContextIfRevision(dataDir, { language: 'en', timezone: 'UTC' }, null, {
+            revision: intendedRevision,
+        });
+        expect(saved?.revision).toBe(intendedRevision);
+        expect(() =>
+            saveOwnerContextIfRevision(dataDir, { language: 'it', timezone: 'Europe/Rome' }, intendedRevision, {
+                revision: 'caller-controlled',
+            })
+        ).toThrow(/revision/);
+        expect(saveOwnerContext(dataDir, { language: 'fr', timezone: 'Europe/Paris' }).revision).not.toBe(
+            intendedRevision
+        );
+    });
+
     it('rejects an unsafe owner context target instead of replacing it', () => {
         const outside = path.join(dataDir, 'outside.json');
         fs.writeFileSync(outside, '{}', { mode: 0o600 });

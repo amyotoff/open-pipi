@@ -6,9 +6,9 @@ under `.tmp`, and no real provider, Telegram, or user client configuration chang
 
 ## Quality gate
 
-`pnpm verify` passed: format, typecheck, lint, content validation, 125 test files / 1091 tests,
-20 feature smoke tests, coverage thresholds, and the production build. Coverage was 82.53%
-statements, 70.34% branches, 90.20% functions, and 85.14% lines. A final `pnpm build` also passed
+`pnpm verify` passed: format, typecheck, lint, content validation, 125 test files / 1094 tests,
+20 feature smoke tests, coverage thresholds, and the production build. Coverage was 82.54%
+statements, 70.39% branches, 90.21% functions, and 85.14% lines. A final `pnpm build` also passed
 after the client instructions were completed.
 
 Focused checks are reproducible with `pnpm test:onboarding`. The new flow smoke runs an actual
@@ -28,7 +28,8 @@ owner context. The SDK version is pinned to `@modelcontextprotocol/sdk` 1.30.0.
 - Preview persists only the proposal, preserves omitted optional context, and exposes exact changes.
 - Hash mismatch, expired first application, changed base revision, and reused keys are rejected.
 - Exact application, including explicit clearing of facts and the current task.
-- Durable attempt recovery after a committed context write, including after preview expiry.
+- Durable attempt recovery using the exact preallocated context revision, including after expiry;
+  a separate same-valued write cannot complete another attempt.
 - Historical applied proposals report when current context has subsequently changed.
 - Private pages require the existing session; GET never saves; confirmation requires Origin and CSRF.
 - HTML/inline-script escaping, same-key browser retry, and no confirmation button for expired/applied previews.
@@ -66,4 +67,12 @@ or production configuration were tested or changed. The successful first result 
 context persistence. Real runtime readiness remains a separate operator trial.
 
 The ledger and lock recovery limits are documented in [the operations guide](agent-onboarding.md).
-Terra review findings and their disposition are recorded in the PR after review.
+Terra's initial review found one P2: recovery could attribute a separate same-valued context write
+to an interrupted confirmation. The fix persists the intended revision before the conditional write
+and requires that exact revision to reconcile. Regression tests distinguish a real committed attempt
+from an unrelated save. A separate two-process concurrency check also confirmed that simultaneous
+applications from one base produce one success and one `VERSION_CONFLICT`.
+
+Terra's re-review also caught compatibility with earlier incomplete ledger records. Those remain
+readable, but cannot be used to assert an unprovable write outcome; new proposals continue to work.
+The final Terra review approved both fixes and reported no remaining actionable findings.

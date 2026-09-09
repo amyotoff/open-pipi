@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { readOwnerContext, saveOwnerContext } from '../setup/owner-context';
+import { readOwnerContext, saveOwnerContext, saveOwnerContextIfRevision } from '../setup/owner-context';
 import { AgentOnboardingError, createAgentOnboardingService } from './service';
 
 let dataDir: string;
@@ -36,7 +36,7 @@ describe('agent onboarding service', () => {
         saveOwnerContext(dataDir, {
             language: 'en',
             timezone: 'UTC',
-            displayName: 'Amy',
+            displayName: 'Synthetic owner',
             facts: ['Existing fact'],
             currentTask: 'Existing task',
         });
@@ -49,7 +49,7 @@ describe('agent onboarding service', () => {
             ownerContext: {
                 language: 'it',
                 timezone: 'Europe/Rome',
-                displayName: 'Amy',
+                displayName: 'Synthetic owner',
                 facts: ['New fact'],
                 currentTask: 'Existing task',
             },
@@ -194,15 +194,26 @@ describe('agent onboarding service', () => {
         const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8')) as {
             attempts: Array<Record<string, string>>;
         };
+        const intendedRevision = '11111111-1111-4111-8111-111111111111';
         ledger.attempts.push({
             idempotencyKey: 'request-crash',
             previewId: preview.previewId,
             previewHash: preview.previewHash,
             startedAt: instant.toISOString(),
+            ownerContextRevision: intendedRevision,
         });
         fs.writeFileSync(ledgerPath, `${JSON.stringify(ledger)}\n`, { encoding: 'utf8', mode: 0o600 });
-        saveOwnerContext(dataDir, preview.ownerContext);
+        expect(
+            saveOwnerContextIfRevision(dataDir, preview.ownerContext, preview.baseRevision, {
+                revision: intendedRevision,
+            })
+        ).not.toBeNull();
         instant = new Date('2026-09-09T10:31:00.000Z');
+
+        expect(onboarding.readState(preview.previewId)).toMatchObject({
+            state: 'applied',
+            currentMatchesPreview: true,
+        });
 
         const recovered = onboarding.confirmAndApply({
             previewId: preview.previewId,
@@ -217,6 +228,70 @@ describe('agent onboarding service', () => {
                 idempotencyKey: 'request-crash',
             })
         ).toEqual(recovered);
+    });
+
+    it('does not attribute an unrelated same-valued owner save to an uncommitted intent', () => {
+        const onboarding = service();
+        const preview = onboarding.preview({ language: 'it', timezone: 'Europe/Rome', facts: ['Same values'] });
+        const ledgerPath = path.join(dataDir, 'agent-onboarding.json');
+        const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8')) as {
+            attempts: Array<Record<string, string>>;
+        };
+        ledger.attempts.push({
+            idempotencyKey: 'request-uncommitted',
+            previewId: preview.previewId,
+            previewHash: preview.previewHash,
+            startedAt: instant.toISOString(),
+            ownerContextRevision: '22222222-2222-4222-8222-222222222222',
+        });
+        fs.writeFileSync(ledgerPath, `${JSON.stringify(ledger)}\n`, { encoding: 'utf8', mode: 0o600 });
+        saveOwnerContext(dataDir, preview.ownerContext);
+
+        expect(
+            errorCode(() =>
+                onboarding.confirmAndApply({
+                    previewId: preview.previewId,
+                    previewHash: preview.previewHash,
+                    idempotencyKey: 'request-uncommitted',
+                })
+            )
+        ).toBe('VERSION_CONFLICT');
+    });
+
+    it('reads a legacy incomplete attempt safely while requiring a new preview for its retry', () => {
+        const onboarding = service();
+        const legacyPreview = onboarding.preview({ language: 'en', timezone: 'UTC' });
+        const ledgerPath = path.join(dataDir, 'agent-onboarding.json');
+        const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8')) as {
+            attempts: Array<Record<string, string>>;
+        };
+        ledger.attempts.push({
+            idempotencyKey: 'request-legacy',
+            previewId: legacyPreview.previewId,
+            previewHash: legacyPreview.previewHash,
+            startedAt: instant.toISOString(),
+        });
+        fs.writeFileSync(ledgerPath, `${JSON.stringify(ledger)}\n`, { encoding: 'utf8', mode: 0o600 });
+
+        expect(onboarding.readState(legacyPreview.previewId)).toMatchObject({ state: 'awaiting_confirmation' });
+        expect(
+            errorCode(() =>
+                onboarding.confirmAndApply({
+                    previewId: legacyPreview.previewId,
+                    previewHash: legacyPreview.previewHash,
+                    idempotencyKey: 'request-legacy',
+                })
+            )
+        ).toBe('VERSION_CONFLICT');
+
+        const replacement = onboarding.preview({ language: 'it', timezone: 'Europe/Rome' });
+        expect(
+            onboarding.confirmAndApply({
+                previewId: replacement.previewId,
+                previewHash: replacement.previewHash,
+                idempotencyKey: 'request-after-legacy',
+            }).ownerContext
+        ).toMatchObject({ language: 'it', timezone: 'Europe/Rome' });
     });
 
     it('fails closed when an existing owner context file is unreadable', () => {

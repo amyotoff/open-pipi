@@ -201,7 +201,15 @@ function withOwnerContextLock<T>(dataDir: string, action: () => T): T {
     }
 }
 
-function buildOwnerContext(input: OwnerContextInput, previous: StoredOwnerContext | null): StoredOwnerContext {
+function validRevision(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function buildOwnerContext(
+    input: OwnerContextInput,
+    previous: StoredOwnerContext | null,
+    revision: string = randomUUID()
+): StoredOwnerContext {
     const language = input.language.trim();
     const timezone = input.timezone.trim();
     if (!validLanguage(language) || !validTimeZone(timezone)) throw new Error('Owner locale metadata is invalid.');
@@ -216,10 +224,11 @@ function buildOwnerContext(input: OwnerContextInput, previous: StoredOwnerContex
     if (input.facts !== undefined && (input.facts.length > MAX_FACTS || facts?.length !== input.facts.length)) {
         throw new Error('Owner context exceeds the supported bounds.');
     }
+    if (!validRevision(revision)) throw new Error('Owner context revision is invalid.');
 
     return {
         version: 1,
-        revision: randomUUID(),
+        revision,
         updatedAt: new Date().toISOString(),
         language,
         timezone,
@@ -243,13 +252,14 @@ export function saveOwnerContext(dataDir: string, input: OwnerContextInput): Sto
 export function saveOwnerContextIfRevision(
     dataDir: string,
     input: OwnerContextInput,
-    expectedRevision: string | null
+    expectedRevision: string | null,
+    options?: { revision?: string }
 ): StoredOwnerContext | null {
     return withOwnerContextLock(dataDir, () => {
         assertSafeOwnerContextTarget(dataDir);
         const previous = readOwnerContext(dataDir);
         if ((previous?.revision ?? null) !== expectedRevision) return null;
-        const context = buildOwnerContext(input, previous);
+        const context = buildOwnerContext(input, previous, options?.revision);
         writeOwnerContext(dataDir, context);
         return context;
     });

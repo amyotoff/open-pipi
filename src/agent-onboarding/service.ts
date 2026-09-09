@@ -107,6 +107,7 @@ type Ledger = {
         previewId: string;
         previewHash: string;
         startedAt: string;
+        ownerContextRevision?: string;
     }>;
 };
 
@@ -268,6 +269,20 @@ function readLedger(root: string): Ledger {
                     typeof preview.previewId !== 'string' ||
                     typeof preview.previewHash !== 'string' ||
                     hashPreview(previewCore(preview)) !== preview.previewHash
+            ) ||
+            value.attempts.some(
+                (attempt) =>
+                    !attempt ||
+                    typeof attempt !== 'object' ||
+                    typeof attempt.idempotencyKey !== 'string' ||
+                    typeof attempt.previewId !== 'string' ||
+                    typeof attempt.previewHash !== 'string' ||
+                    typeof attempt.startedAt !== 'string' ||
+                    (attempt.ownerContextRevision !== undefined &&
+                        (typeof attempt.ownerContextRevision !== 'string' ||
+                            !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+                                attempt.ownerContextRevision
+                            )))
             )
         ) {
             throw new Error('invalid');
@@ -388,13 +403,23 @@ export function createAgentOnboardingService(options: { dataDir: string; now?: (
                 preview.state === 'awaiting_confirmation' && now().getTime() >= Date.parse(preview.expiresAt)
                     ? { ...preview, state: 'expired' as const }
                     : preview;
+            const committedAttempt = ledger.attempts.find(
+                (attempt) =>
+                    attempt.previewId === preview.previewId &&
+                    attempt.previewHash === preview.previewHash &&
+                    ownerContext?.revision === attempt.ownerContextRevision &&
+                    contextsEqual(ownerContext, preview.ownerContext)
+            );
+            const effectivePreview = committedAttempt
+                ? { ...visiblePreview, state: 'applied' as const }
+                : visiblePreview;
             return {
                 schemaVersion: 1,
-                state: visiblePreview.state,
+                state: effectivePreview.state,
                 ownerContext,
-                preview: visiblePreview,
-                ...(visiblePreview.state === 'applied'
-                    ? { currentMatchesPreview: contextsEqual(ownerContext, visiblePreview.ownerContext) }
+                preview: effectivePreview,
+                ...(effectivePreview.state === 'applied'
+                    ? { currentMatchesPreview: contextsEqual(ownerContext, effectivePreview.ownerContext) }
                     : {}),
             };
         },
@@ -459,11 +484,17 @@ export function createAgentOnboardingService(options: { dataDir: string; now?: (
                     }
                     return prior.result;
                 }
-                const attempt = ledger.attempts.find((candidate) => candidate.idempotencyKey === idempotencyKey);
+                let attempt = ledger.attempts.find((candidate) => candidate.idempotencyKey === idempotencyKey);
                 if (attempt && (attempt.previewId !== previewId || attempt.previewHash !== previewHash)) {
                     throw new AgentOnboardingError(
                         'IDEMPOTENCY_KEY_REUSED',
                         'Idempotency key was already used for another preview.'
+                    );
+                }
+                if (attempt && !attempt.ownerContextRevision) {
+                    throw new AgentOnboardingError(
+                        'VERSION_CONFLICT',
+                        'Legacy apply outcome cannot be verified; create a new preview.'
                     );
                 }
                 const preview = ledger.previews.find((candidate) => candidate.previewId === previewId);
@@ -475,7 +506,7 @@ export function createAgentOnboardingService(options: { dataDir: string; now?: (
                 const completedAttempt = Boolean(
                     attempt &&
                     current &&
-                    current.revision !== preview.baseRevision &&
+                    current.revision === attempt.ownerContextRevision &&
                     contextsEqual(current, preview.ownerContext)
                 );
                 if (now().getTime() >= Date.parse(preview.expiresAt) && !completedAttempt) {
@@ -483,7 +514,7 @@ export function createAgentOnboardingService(options: { dataDir: string; now?: (
                 }
                 let saved: StoredOwnerContext;
                 if ((current?.revision ?? null) !== preview.baseRevision) {
-                    if (!attempt || !current || !contextsEqual(current, preview.ownerContext)) {
+                    if (!completedAttempt || !current) {
                         throw new AgentOnboardingError('VERSION_CONFLICT', 'Owner context changed after preview.');
                     }
                     saved = current;
@@ -497,9 +528,13 @@ export function createAgentOnboardingService(options: { dataDir: string; now?: (
                             previewId,
                             previewHash,
                             startedAt: now().toISOString(),
+                            ownerContextRevision: randomUUID(),
                         });
                         writeLedger(root, ledger);
+                        attempt = ledger.attempts.at(-1);
                     }
+                    if (!attempt)
+                        throw new AgentOnboardingError('LEDGER_UNAVAILABLE', 'Apply intent was not recorded.');
                     const applied = saveOwnerContextIfRevision(
                         root,
                         {
@@ -507,11 +542,16 @@ export function createAgentOnboardingService(options: { dataDir: string; now?: (
                             facts: preview.ownerContext.facts ?? [],
                             currentTask: preview.ownerContext.currentTask ?? '',
                         },
-                        preview.baseRevision
+                        preview.baseRevision,
+                        { revision: attempt.ownerContextRevision }
                     );
                     if (!applied) {
                         current = readCurrentOwnerContext(root);
-                        if (!current || !contextsEqual(current, preview.ownerContext)) {
+                        if (
+                            !current ||
+                            current.revision !== attempt.ownerContextRevision ||
+                            !contextsEqual(current, preview.ownerContext)
+                        ) {
                             throw new AgentOnboardingError('VERSION_CONFLICT', 'Owner context changed after preview.');
                         }
                         saved = current;

@@ -2,8 +2,8 @@
 
 This experiment tests one local journey: give a coding agent an instruction link, connect a
 local MCP server, preview personal context, review it in PiPi's private setup page, and read back
-the saved result. It adapts the supplied Autodispatch handoff to **Open PiPi**. It does not add
-brand monitoring, a remote MCP endpoint, or a hosted service.
+the saved result. The public instructions and private setup are separate surfaces; the MCP
+server runs locally over stdio.
 
 The first result is an owner context file that PiPi already knows how to consume: conversation
 language, time zone, up to five facts, and a current task. Saving context is separate from starting
@@ -113,7 +113,13 @@ Preview validity is 30 minutes. The private ledger retains at most 100 previews,
 application records, and 100 incomplete attempts, with a 1 MB file limit. Unexpired pending
 previews are not silently evicted. Replay guarantees apply while the application record is
 retained; a new preview is required if an older record has been pruned. A committed write with
-a durable matching attempt can be reconciled after preview expiry without writing again.
+a durable matching attempt and its exact preallocated owner-context revision can be reconciled
+after preview expiry without writing again. A separate save containing the same values is a
+different revision and cannot complete that attempt. State reads can observe an already committed
+intended revision even if the process stopped before recording the final result in the ledger.
+Earlier experimental ledger records without an intended revision remain readable. Their unknown
+write outcome cannot be reconciled; confirmation requires a new preview, while other proposals
+remain usable.
 
 File locks fail closed. After an interrupted process, a leftover `agent-onboarding.lock` or
 `setup-owner-context.json.lock` can require manual recovery. Stop the relevant setup/runtime
