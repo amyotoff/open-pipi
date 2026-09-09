@@ -9,7 +9,7 @@ import {
 } from './observability';
 import { SandboxErrorResponse, SandboxPackToolRequest } from './core/sandbox-contract';
 
-const APP_VERSION = process.env.npm_package_version || '2.5.0';
+const APP_VERSION = process.env.npm_package_version || '2.9.0';
 const SANDBOXD_PORT = Number(process.env.SANDBOXD_PORT || 4100);
 const SANDBOXD_TOKEN = process.env.SANDBOXD_TOKEN || '';
 const SANDBOXD_MAX_IN_FLIGHT = Math.max(1, Number(process.env.SANDBOXD_MAX_IN_FLIGHT || 2));

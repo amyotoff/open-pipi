@@ -4,6 +4,11 @@ All notable changes to Open PiPi will be documented in this file.
 
 ## [Unreleased]
 
+## [2.9.0] — 2026-09-09
+
+Open PiPi gains a provider-neutral LLM Gateway: OpenRouter handles cloud text by default,
+with configurable direct routes for tools, vision and native grounding.
+
 ### Changed
 
 - OpenRouter is now the default text inference bus behind a small, provider-neutral LLM Gateway.

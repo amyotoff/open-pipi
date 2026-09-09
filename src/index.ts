@@ -1,6 +1,6 @@
 import { initializeOpenTelemetry, shutdownOpenTelemetry } from './observability';
 
-const APP_VERSION = process.env.npm_package_version || '2.5.0';
+const APP_VERSION = process.env.npm_package_version || '2.9.0';
 
 let shuttingDown = false;
 let closeDatabaseRef: (() => void) | null = null;
