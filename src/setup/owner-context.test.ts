@@ -1,14 +1,22 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { getOwnerContextPath, readOwnerContext, readOwnerSetupStatus, saveOwnerContext } from './owner-context';
+import {
+    getOwnerContextPath,
+    markOwnerContextApplied,
+    readOwnerContext,
+    readOwnerSetupStatus,
+    saveOwnerContext,
+    saveOwnerContextIfRevision,
+} from './owner-context';
 
 let dataDir: string;
 
 beforeEach(() => {
-    dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'open-pipi-owner-context-'));
+    const testRoot = path.resolve(process.cwd(), '.tmp');
+    fs.mkdirSync(testRoot, { recursive: true });
+    dataDir = fs.mkdtempSync(path.join(testRoot, 'open-pipi-owner-context-'));
 });
 
 afterEach(() => {
@@ -64,6 +72,26 @@ describe('owner context private file', () => {
                 facts: ['1', '2', '3', '4', '5', '6'],
             })
         ).toThrow(/bounds/);
+    });
+
+    it('uses revision CAS and prevents an applied marker from overwriting a newer save', () => {
+        const first = saveOwnerContext(dataDir, { language: 'en', timezone: 'UTC' });
+        const second = saveOwnerContextIfRevision(dataDir, { language: 'it', timezone: 'Europe/Rome' }, first.revision);
+        expect(second?.language).toBe('it');
+        expect(
+            saveOwnerContextIfRevision(dataDir, { language: 'fr', timezone: 'Europe/Paris' }, first.revision)
+        ).toBeNull();
+        expect(markOwnerContextApplied(dataDir, first.revision, 'owner-space')).toBe(false);
+        expect(readOwnerContext(dataDir)?.revision).toBe(second?.revision);
+    });
+
+    it('rejects an unsafe owner context target instead of replacing it', () => {
+        const outside = path.join(dataDir, 'outside.json');
+        fs.writeFileSync(outside, '{}', { mode: 0o600 });
+        fs.symlinkSync(outside, getOwnerContextPath(dataDir));
+
+        expect(() => saveOwnerContext(dataDir, { language: 'en', timezone: 'UTC' })).toThrow(/unsafe/);
+        expect(fs.lstatSync(getOwnerContextPath(dataDir)).isSymbolicLink()).toBe(true);
     });
 });
 

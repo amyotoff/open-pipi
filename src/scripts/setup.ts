@@ -7,6 +7,7 @@ import { startSetupServer } from '../setup/server';
 import { createSetupService, type SetupService } from '../setup/service';
 import { isDialogueVerified } from '../setup/dialogue-evidence';
 import { readOwnerSetupStatus, saveOwnerContext } from '../setup/owner-context';
+import { createAgentOnboardingService } from '../agent-onboarding/service';
 
 type SetupCliService = SetupService;
 
@@ -23,7 +24,7 @@ export type SetupCliDependencies = {
     stdout(message: string): void;
     stderr(message: string): void;
     createService(options: { readOnly: boolean }): Promise<SetupCliService>;
-    startServer(service: SetupCliService): Promise<SetupCliServer>;
+    startServer(service: SetupCliService, options?: { agentOnboarding: boolean }): Promise<SetupCliServer>;
     openUrl(url: string, platform: NodeJS.Platform): Promise<boolean>;
     onceSignal(signal: 'SIGINT' | 'SIGTERM', handler: () => void): void;
 };
@@ -98,7 +99,12 @@ function defaultDependencies(): SetupCliDependencies {
                 }),
             });
         },
-        startServer: (service) => startSetupServer({ service, renderSetupPage }),
+        startServer: (service, options) =>
+            startSetupServer({
+                service,
+                renderSetupPage: (input) => renderSetupPage({ ...input, agentOnboarding: options?.agentOnboarding }),
+                ...(options?.agentOnboarding ? { onboarding: createAgentOnboardingService({ dataDir }) } : {}),
+            }),
         openUrl: openWithPlatform,
         onceSignal: (signal, handler) => process.once(signal, handler),
     };
@@ -118,9 +124,12 @@ export async function runSetupCli(
 ): Promise<number> {
     const json = argv.includes('--json');
     const showLink = argv.includes('--show-link');
-    const unknown = argv.filter((argument) => !['--json', '--show-link', '--'].includes(argument));
-    if (unknown.length > 0 || (json && showLink)) {
-        dependencies.stderr('Usage: pnpm setup [-- --json|--show-link]\n');
+    const agentOnboarding = argv.includes('--agent-onboarding');
+    const unknown = argv.filter(
+        (argument) => !['--json', '--show-link', '--agent-onboarding', '--'].includes(argument)
+    );
+    if (unknown.length > 0 || (json && (showLink || agentOnboarding))) {
+        dependencies.stderr('Usage: pnpm setup [-- --json|--show-link] [--agent-onboarding]\n');
         return 2;
     }
 
@@ -135,7 +144,9 @@ export async function runSetupCli(
             return 0;
         }
 
-        server = await dependencies.startServer(service);
+        server = agentOnboarding
+            ? await dependencies.startServer(service, { agentOnboarding: true })
+            : await dependencies.startServer(service);
         if (showLink) {
             dependencies.stdout(`Short-lived local setup link (keep private): ${server.url}\n`);
         } else {

@@ -157,6 +157,10 @@ are optional operator paths.
 
 ## Manual setup (optional)
 
+For the optional local **agent-onboarding experiment** — instruction link, MCP preview, and
+private confirmation of owner context — see [the experiment guide](docs/agent-onboarding.md).
+
+
 Skip this section when using the guided page. For manual setup, copy the public template first:
 
 ```bash

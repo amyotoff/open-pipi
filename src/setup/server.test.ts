@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SetupSafeStatus, SetupService } from './service';
 import { SetupServer, startSetupServer } from './server';
+import type { AgentOnboardingService } from '../agent-onboarding/service';
 
 function status(): SetupSafeStatus {
     return {
@@ -213,4 +214,103 @@ describe('local setup HTTP server', () => {
         expect(callback).toHaveBeenCalledWith('state-value', 'private-code');
         expect(response.headers.get('location')).not.toContain('private-code');
     });
+
+    it('keeps onboarding review private and GET never confirms it', async () => {
+        const preview = onboardingPreview();
+        const confirmAndApply = vi.fn();
+        const onboarding = {
+            readState: vi.fn(() => ({ schemaVersion: 1, state: 'awaiting_confirmation', ownerContext: null, preview })),
+            preview: vi.fn(),
+            confirmAndApply,
+        } as unknown as AgentOnboardingService;
+        const server = await startSetupServer({
+            service: fakeService(),
+            renderSetupPage: ({ csrfToken }) => csrfToken,
+            onboarding,
+        });
+        running.push(server);
+
+        const unauthorized = await fetch(`${server.origin}/agent-onboarding/review?previewId=${preview.previewId}`);
+        expect(unauthorized.status).toBe(401);
+        const session = await authenticated(server);
+        const review = await fetch(`${server.origin}/agent-onboarding/review?previewId=${preview.previewId}`, {
+            headers: { cookie: session.cookie },
+        });
+        const html = await review.text();
+        expect(review.status).toBe(200);
+        expect(review.headers.get('cache-control')).toBe('no-store');
+        expect(html).toContain(preview.previewHash);
+        expect(html).toContain('Saved &lt;locally&gt;');
+        expect(confirmAndApply).not.toHaveBeenCalled();
+    });
+
+    it('requires exact Origin and CSRF before confirming the exact preview and supports replay', async () => {
+        const preview = onboardingPreview();
+        const applied = { ...preview, state: 'applied' as const, appliedAt: '2026-09-09T10:05:00.000Z' };
+        const confirmAndApply = vi.fn(() => applied);
+        const onboarding = {
+            readState: vi.fn(() => ({ schemaVersion: 1, state: 'awaiting_confirmation', ownerContext: null, preview })),
+            preview: vi.fn(),
+            confirmAndApply,
+        } as unknown as AgentOnboardingService;
+        const server = await startSetupServer({
+            service: fakeService(),
+            renderSetupPage: ({ csrfToken }) => csrfToken,
+            onboarding,
+        });
+        running.push(server);
+        const session = await authenticated(server);
+        const payload = { previewId: preview.previewId, previewHash: preview.previewHash, idempotencyKey: 'apply_1' };
+
+        const missingOrigin = await postOnboarding(server, session, payload, { origin: '' });
+        expect(missingOrigin.status).toBe(403);
+        const missingCsrf = await postOnboarding(server, session, payload, { csrf: '' });
+        expect(missingCsrf.status).toBe(403);
+        expect(confirmAndApply).not.toHaveBeenCalled();
+
+        const first = await postOnboarding(server, session, payload);
+        const replay = await postOnboarding(server, session, payload);
+        expect(first.status).toBe(200);
+        expect(replay.status).toBe(200);
+        expect(await first.json()).toEqual({ result: applied });
+        expect(await replay.json()).toEqual({ result: applied });
+        expect(confirmAndApply).toHaveBeenNthCalledWith(1, payload);
+        expect(confirmAndApply).toHaveBeenNthCalledWith(2, payload);
+    });
 });
+
+function onboardingPreview() {
+    return {
+        schemaVersion: 1 as const,
+        previewId: 'preview_1',
+        previewHash: 'hash_1',
+        createdAt: '2026-09-09T10:00:00.000Z',
+        expiresAt: '2026-09-09T10:30:00.000Z',
+        baseRevision: null,
+        ownerContext: { language: 'en', timezone: 'Europe/Rome', facts: ['Saved <locally>'], currentTask: 'Plan' },
+        diff: [{ field: 'facts' as const, before: [], after: ['Saved <locally>'] }],
+        effects: { ownerContextWrite: true as const, runtimeCalls: false as const, providerCalls: false as const },
+        state: 'awaiting_confirmation' as const,
+    };
+}
+
+function postOnboarding(
+    server: SetupServer,
+    session: { cookie: string; csrf: string },
+    body: Record<string, string>,
+    overrides: { origin?: string; csrf?: string } = {}
+): Promise<Response> {
+    const headers: Record<string, string> = {
+        cookie: session.cookie,
+        'content-type': 'application/json',
+        origin: overrides.origin === undefined ? server.origin : overrides.origin,
+        'x-pipi-csrf': overrides.csrf === undefined ? session.csrf : overrides.csrf,
+    };
+    if (!headers.origin) delete headers.origin;
+    if (!headers['x-pipi-csrf']) delete headers['x-pipi-csrf'];
+    return fetch(`${server.origin}/api/agent-onboarding/confirm`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+    });
+}

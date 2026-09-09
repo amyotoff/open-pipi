@@ -30,6 +30,19 @@ function harness(options: { opened?: boolean } = {}) {
 }
 
 describe('setup CLI', () => {
+    it('enables the private proposal review only with the experimental flag', async () => {
+        const test = harness();
+        expect(await runSetupCli(['--agent-onboarding'], test.dependencies)).toBe(0);
+        expect(test.dependencies.startServer).toHaveBeenCalledWith(test.service, { agentOnboarding: true });
+        expect(test.output.join('')).not.toContain('private-bootstrap-token');
+    });
+
+    it('rejects combining read-only JSON with the experimental interactive page', async () => {
+        const test = harness();
+        expect(await runSetupCli(['--json', '--agent-onboarding'], test.dependencies)).toBe(2);
+        expect(test.dependencies.createService).not.toHaveBeenCalled();
+    });
+
     it('returns a bounded read-only JSON status without starting a server', async () => {
         const test = harness();
 
