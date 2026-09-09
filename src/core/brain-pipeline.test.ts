@@ -10,7 +10,7 @@ let dataDir = '';
 async function loadPipeline(responses: Array<string | Error>) {
     vi.resetModules();
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'open-pipi-brain-pipeline-'));
-    process.env = { ...ORIGINAL_ENV, DATA_DIR: dataDir, GEMINI_API_KEY: 'test-key' };
+    process.env = { ...ORIGINAL_ENV, DATA_DIR: dataDir, LLM_PROVIDER: 'openrouter', OPENROUTER_API_KEY: 'test-key' };
 
     const generateBrainText = vi.fn();
     for (const response of responses) {

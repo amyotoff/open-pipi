@@ -1,0 +1,31 @@
+# Public startup template. Copy to .env and fill credentials privately.
+# Provider routes and optional settings: docs/llm-gateway.md and README.md.
+TELEGRAM_BOT_TOKEN=...
+OWNER_TG_IDS=123456789
+TZ=UTC
+
+# Default text inference bus. Native bypass: openai, anthropic, or gemini.
+LLM_PROVIDER=openrouter
+OPENROUTER_API_KEY=...
+# Model defaults follow LLM_PROVIDER. Optional OpenRouter overrides:
+# LLM_EXECUTOR_MODEL=google/gemini-2.5-flash
+# LLM_ADVISOR_MODEL=anthropic/claude-sonnet-4.6
+
+# Native tools, vision and grounding default to Gemini alongside OpenRouter text.
+# Required when those capabilities are used:
+# GEMINI_API_KEY=...
+# Tools/vision follow LLM_PROVIDER when it selects a direct API.
+# Override independently (openai, anthropic, gemini, or openrouter):
+# LLM_TOOLS_PROVIDER=gemini
+# LLM_TOOLS_MODEL=gemini-2.5-flash
+# LLM_VISION_PROVIDER=gemini
+# LLM_VISION_MODEL=gemini-2.5-flash
+# Grounding defaults to Gemini; OpenRouter search is an explicit alternative:
+# LLM_SEARCH_PROVIDER=gemini
+# LLM_SEARCH_MODEL=gemini-2.5-flash
+
+# Direct routes need their own keys and native model IDs.
+# OPENAI_API_KEY=...
+# ANTHROPIC_API_KEY=...
+# Existing GEMINI_EXECUTOR_MODEL / GEMINI_ADVISOR_MODEL aliases apply
+# to Gemini routes when no corresponding LLM_*_MODEL override is set.

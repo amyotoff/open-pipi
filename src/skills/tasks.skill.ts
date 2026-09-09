@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { Type } from '@google/genai';
+import { Type } from '../core/llm-types';
 import { SkillManifest } from './_types';
 import { getTask, listTasks, memberHasTrustFlag } from '../db';
 import { getTaskDeadlineAt } from '../core/tasks';

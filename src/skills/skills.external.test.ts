@@ -61,36 +61,45 @@ describe('External-facing skills', () => {
             })
         );
 
-        const generateContent = vi
+        const generateLLM = vi
             .fn()
             .mockResolvedValueOnce({
-                usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 50 },
-                functionCalls: [
-                    { name: 'web_search', args: { query: 'best espresso rome' } },
-                    { name: 'read_page', args: { url: 'https://example.com' } },
+                usage: { inputTokens: 100, outputTokens: 50 },
+                message: {
+                    role: 'assistant',
+                    content: '',
+                    providerState: { provider: 'openrouter', model: 'test-model', value: {} },
+                },
+                toolCalls: [
+                    { id: 'search-1', name: 'web_search', args: { query: 'best espresso rome' } },
+                    { id: 'read-1', name: 'read_page', args: { url: 'https://example.com' } },
                 ],
             })
             .mockResolvedValueOnce({
-                usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 50 },
-                functionCalls: [],
+                usage: { inputTokens: 100, outputTokens: 50 },
+                message: {
+                    role: 'assistant',
+                    content: '',
+                    providerState: { provider: 'openrouter', model: 'test-model', value: {} },
+                },
+                toolCalls: [],
                 text: 'Final report with links',
             });
 
         const { default: skill } = await loadModule<any>('./webrun.skill', () => {
             vi.doMock('../utils/search', () => ({ searchAndSummarize }));
             vi.doMock('../utils/browser', () => ({ assertSafeBrowserUrl, withBrowserContext }));
-            vi.doMock('../config', () => ({ GEMINI_API_KEY: 'test-key' }));
-            vi.doMock('@google/genai', () => ({
-                GoogleGenAI: class {
-                    models = { generateContent };
-                },
-                Type: { OBJECT: 'object', STRING: 'string' },
-            }));
+            vi.doMock('../config', () => ({ LLM_TOOLS_PROVIDER: 'gemini', LLM_TOOLS_MODEL: 'test-tools-model' }));
+            vi.doMock('../core/healthcheck', () => ({ guardLLMCall: vi.fn(() => null) }));
+            vi.doMock('../core/llm-gateway', () => ({ generateLLM }));
         });
 
         expect(
             await skill.handlers.webrun_execute({ task: 'Find the best espresso bar' }, { chatId: 'c', userId: 'u' })
         ).toContain('Final report with links');
-        expect(generateContent).toHaveBeenCalledTimes(2);
+        expect(generateLLM).toHaveBeenCalledTimes(2);
+        for (const [request] of generateLLM.mock.calls) {
+            expect(request).toEqual(expect.objectContaining({ provider: 'gemini', model: 'test-tools-model' }));
+        }
     });
 });

@@ -3886,27 +3886,42 @@ export function summarizeToolLogs(filters: ToolLogQuery = {}): ToolLogSummary {
 // Token Usage
 // ==========================================
 
-// Gemini token pricing (per 1M tokens).
+// Estimates per 1M tokens for direct routes; OpenRouter's reported cost takes precedence.
 // Gemini 3 Pro Preview uses a higher tier once the prompt exceeds 200k input tokens.
 const PRICING: Record<string, { input: number; output: number }> = {
     'gemini-2.5-flash': { input: 0.15, output: 0.6 },
     'gemini-2.5-pro': { input: 1.25, output: 10.0 },
     'gemini-3-pro-preview': { input: 2.0, output: 12.0 },
+    'gpt-4.1-mini': { input: 0.4, output: 1.6 },
+    'gpt-4.1': { input: 2.0, output: 8.0 },
+    'claude-sonnet-4-6': { input: 3.0, output: 15.0 },
 };
 
-function resolvePricing(model: string, inputTokens: number): { input: number; output: number } {
+function resolvePricing(model: string, inputTokens: number): { input: number; output: number } | null {
     if (model === 'gemini-3-pro-preview' && inputTokens > 200_000) {
         return { input: 4.0, output: 18.0 };
     }
 
-    return PRICING[model] || PRICING['gemini-2.5-flash'];
+    return PRICING[model] || null;
 }
 
-export function logTokenUsage(model: string, inputTokens: number, outputTokens: number, spaceId?: string | null): void {
+export function logTokenUsage(
+    model: string,
+    inputTokens: number,
+    outputTokens: number,
+    spaceId?: string | null,
+    reportedCostUsd?: number
+): void {
     const today = new Date().toISOString().split('T')[0];
     const isLocal = model.startsWith('ollama:');
     const pricing = isLocal ? { input: 0, output: 0 } : resolvePricing(model, inputTokens);
-    const cost = (inputTokens * pricing.input + outputTokens * pricing.output) / 1_000_000;
+    const cost =
+        Number.isFinite(reportedCostUsd) && reportedCostUsd! >= 0
+            ? reportedCostUsd!
+            : pricing
+              ? (inputTokens * pricing.input + outputTokens * pricing.output) / 1_000_000
+              : null;
+    if (cost === null) console.warn('[LLM] Usage recorded without a price; spend totals exclude this call.');
 
     getDb()
         .prepare(
@@ -3924,6 +3939,7 @@ export interface SpendRow {
     output_tokens: number;
     cost_usd: number;
     calls: number;
+    unpriced_calls: number;
 }
 
 export interface SpendReport {
@@ -3942,7 +3958,8 @@ const SPEND_COLUMNS = `
     COALESCE(SUM(input_tokens), 0) AS input_tokens,
     COALESCE(SUM(output_tokens), 0) AS output_tokens,
     COALESCE(SUM(cost_usd), 0) AS cost_usd,
-    COUNT(*) AS calls
+    COUNT(*) AS calls,
+    COALESCE(SUM(CASE WHEN cost_usd IS NULL THEN 1 ELSE 0 END), 0) AS unpriced_calls
 `;
 
 /**
@@ -3996,6 +4013,7 @@ export function getDailyTokenCost(date?: string): {
     output_tokens: number;
     cost_usd: number;
     calls: number;
+    unpriced_calls: number;
 } {
     const day = date || new Date().toISOString().split('T')[0];
     const row = getDb()
@@ -4004,7 +4022,8 @@ export function getDailyTokenCost(date?: string): {
         SELECT COALESCE(SUM(input_tokens), 0) as input_tokens,
                COALESCE(SUM(output_tokens), 0) as output_tokens,
                COALESCE(SUM(cost_usd), 0) as cost_usd,
-               COUNT(*) as calls
+               COUNT(*) as calls,
+               COALESCE(SUM(CASE WHEN cost_usd IS NULL THEN 1 ELSE 0 END), 0) as unpriced_calls
         FROM token_usage WHERE date = ?
     `
         )

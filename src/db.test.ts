@@ -573,6 +573,19 @@ describe('db module', () => {
         expect(rows[1]?.cost_usd).toBeCloseTo((250000 * 4 + 10000 * 18) / 1_000_000);
     });
 
+    it('uses reported cost, preserves free calls, and marks unknown prices instead of guessing', async () => {
+        const dbModule = await loadDbModule();
+        dbModule.initDatabase();
+        dbModule.logTokenUsage('anthropic/claude-sonnet-4.6', 1000, 500, 'space-a', 0.034);
+        dbModule.logTokenUsage('open-model/free', 1000, 500, 'space-a', 0);
+        dbModule.logTokenUsage('unknown/model', 1000, 500, 'space-a');
+        dbModule.logTokenUsage('ollama:qwen', 1000, 500, 'space-a');
+        const rows = dbModule.getDb().prepare('SELECT cost_usd FROM token_usage ORDER BY id').all() as any[];
+        expect(rows.map((row) => row.cost_usd)).toEqual([0.034, 0, null, 0]);
+        expect(dbModule.getDailyTokenCost()).toMatchObject({ cost_usd: 0.034, calls: 4, unpriced_calls: 1 });
+        expect(dbModule.getSpendReport().total.unpriced_calls).toBe(1);
+    });
+
     it('stores tasks and task runs', async () => {
         const dbModule = await loadDbModule();
         dbModule.initDatabase();

@@ -42,23 +42,22 @@ describe('core/work-lenses', () => {
                 groundingPackId: 'jeeves_personal',
             })),
         }));
-        vi.doMock('./llm', () => ({
-            processWithLLM: vi.fn(async () => ({
-                text: [
-                    '## Findings',
-                    '- Missing regression coverage for the latest path.',
-                    '',
-                    '## Risks',
-                    '- Behavior may drift quietly.',
-                    '',
-                    '## Open questions',
-                    '- Should the fallback stay permissive?',
-                    '',
-                    '## Next step',
-                    '- Add one narrow regression test.',
-                ].join('\n'),
-            })),
+        const processWithLLM = vi.fn(async () => ({
+            text: [
+                '## Findings',
+                '- Missing regression coverage for the latest path.',
+                '',
+                '## Risks',
+                '- Behavior may drift quietly.',
+                '',
+                '## Open questions',
+                '- Should the fallback stay permissive?',
+                '',
+                '## Next step',
+                '- Add one narrow regression test.',
+            ].join('\n'),
         }));
+        vi.doMock('./llm', () => ({ processWithLLM }));
 
         const lenses = await import('./work-lenses');
         const text = await lenses.runWorkLensForSpace({
@@ -76,5 +75,6 @@ describe('core/work-lenses', () => {
         expect(artifact?.summary).toContain('Review output');
         const timeline = db.listTimelineEvents(space.id, { limit: 10 });
         expect(timeline.some((event) => event.type === 'review.generated')).toBe(true);
+        expect(processWithLLM).toHaveBeenCalledWith(expect.any(Array), expect.objectContaining({ allowedTools: [] }));
     });
 });

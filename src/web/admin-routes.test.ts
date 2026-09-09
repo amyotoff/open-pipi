@@ -157,7 +157,7 @@ describe('dashboard views', () => {
 
         const { body } = await get('/api/admin/overview', cookie);
 
-        expect(body.health).toHaveProperty('gemini');
+        expect(body.health).toHaveProperty('llm');
         expect(body.topology.spaces).toBeGreaterThan(0);
         expect(body.topology.bindings).toBeGreaterThan(0);
         expect(body.outbox).toBeTypeOf('object');

@@ -9,7 +9,7 @@ let dataDir = '';
 async function loadQuery(responses: string[] = []) {
     vi.resetModules();
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'open-pipi-brain-query-'));
-    process.env = { ...ORIGINAL_ENV, DATA_DIR: dataDir, GEMINI_API_KEY: 'test-key' };
+    process.env = { ...ORIGINAL_ENV, DATA_DIR: dataDir, LLM_PROVIDER: 'openrouter', OPENROUTER_API_KEY: 'test-key' };
 
     const generateBrainText = vi.fn();
     for (const response of responses) generateBrainText.mockResolvedValueOnce(response);

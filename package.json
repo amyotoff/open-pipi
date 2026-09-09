@@ -42,7 +42,7 @@
         "raspberry-pi",
         "ai-assistant",
         "jeeves",
-        "gemini",
+        "openrouter",
         "personal-assistant"
     ],
     "author": "Amyote",
@@ -57,7 +57,6 @@
     },
     "type": "commonjs",
     "dependencies": {
-        "@google/genai": "^1.47.0",
         "@opentelemetry/api": "^1.9.1",
         "@opentelemetry/instrumentation-express": "^0.68.0",
         "@opentelemetry/instrumentation-http": "^0.220.0",
@@ -76,9 +75,9 @@
         "@hapi/boom": "^10.0.1",
         "@whiskeysockets/baileys": "^7.0.0-rc13",
         "discord.js": "^14.26.5",
-        "nodemailer": "^9.0.3",
+        "nodemailer": "^9.1.0",
         "playwright-core": "^1.58.2",
-        "sharp": "^0.35.3"
+        "sharp": "^0.35.4"
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",

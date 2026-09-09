@@ -46,7 +46,7 @@ function buildChatTypeLabel(space: Space | undefined, senderName: string, partic
     return kind;
 }
 
-// Context window budget — keeps the assembled prompt within Gemini's safe limits.
+// Context window budget — keeps the assembled prompt within the runtime context limit.
 // The system prompt is unbounded (packs, grounding, memory are naturally small);
 // history is the main variable-size section and gets capped here.
 const MAX_HISTORY_CHARS = 80_000;

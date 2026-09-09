@@ -1,4 +1,4 @@
-import { Type } from '@google/genai';
+import { Type } from '../core/llm-types';
 import { SkillManifest } from './_types';
 import {
     getDb,
@@ -262,6 +262,7 @@ Output exactly:
                                 spaceId: space.id,
                                 channel: space.channel || 'telegram',
                                 channelRef: space.external_ref,
+                                allowedTools: [],
                             }
                         );
 

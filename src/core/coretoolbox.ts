@@ -1,4 +1,4 @@
-import { FunctionDeclaration, Type } from '@google/genai';
+import { FunctionDeclaration, Type } from './llm-types';
 import { getMemberEffectiveAuthority, getResident, getSpace, getSpaceParticipants } from '../db';
 import { LOCATION_LAT, LOCATION_LON } from '../config';
 import {

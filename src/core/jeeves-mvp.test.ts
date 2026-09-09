@@ -170,6 +170,7 @@ describe('core/jeeves-mvp', () => {
         ];
         const llmMessages = firstCall[0];
         expect(llmMessages[1].content).toContain('on-demand Jeeves personal briefing');
+        expect(firstCall[1]).toEqual(expect.objectContaining({ allowedTools: [] }));
 
         const messages = db.getRecentMessages('chat-1', 10);
         const workMemory = db.getMemoryEntries('work', 'telegram:chat-1', 'jeeves_brief', 10);

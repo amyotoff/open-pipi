@@ -229,10 +229,10 @@ export async function handleButlerMessage(
 
                 const result = await processWithOllama(prompt, systemPrompt);
                 responseText = result.text;
-                addSpanAttributes({ 'app.butler.engine': result.fromOllama ? 'ollama' : 'gemini_fallback' });
+                addSpanAttributes({ 'app.butler.engine': result.fromOllama ? 'ollama' : 'llm_fallback' });
                 logEvent('triage', { simple: true, ollama: result.fromOllama, routing_source: routing.source });
                 logInfo('BUTLER', 'triage_complete', {
-                    engine: result.fromOllama ? 'ollama' : 'gemini_fallback',
+                    engine: result.fromOllama ? 'ollama' : 'llm_fallback',
                     ...summarizeText(responseText),
                 });
             } else {
@@ -251,10 +251,10 @@ export async function handleButlerMessage(
                     turnId: input.correlationId,
                 });
                 responseText = response.text;
-                addSpanAttributes({ 'app.butler.engine': 'gemini' });
+                addSpanAttributes({ 'app.butler.engine': 'llm' });
                 logEvent('triage', { simple: false, ollama: false, routing_source: routing.source });
                 logInfo('BUTLER', 'triage_complete', {
-                    engine: 'gemini',
+                    engine: 'llm',
                     ...summarizeText(responseText),
                 });
             }

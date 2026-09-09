@@ -10,7 +10,7 @@ let dataDir = '';
 async function loadBrain() {
     vi.resetModules();
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'open-pipi-brain-ingest-'));
-    process.env = { ...ORIGINAL_ENV, DATA_DIR: dataDir, GEMINI_API_KEY: '' };
+    process.env = { ...ORIGINAL_ENV, DATA_DIR: dataDir, LLM_PROVIDER: 'openrouter', OPENROUTER_API_KEY: '' };
     return {
         brain: await import('./brain'),
         ingest: await import('./brain-ingest'),

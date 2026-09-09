@@ -1,4 +1,4 @@
-import { Type } from '@google/genai';
+import { Type } from '../core/llm-types';
 import {
     createHomeAssistantClient,
     HOME_ASSISTANT_ACTIONS,

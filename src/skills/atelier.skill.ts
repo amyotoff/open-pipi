@@ -1,4 +1,4 @@
-import { Type } from '@google/genai';
+import { Type } from '../core/llm-types';
 import { SkillManifest } from './_types';
 import {
     clearSkillRequests,

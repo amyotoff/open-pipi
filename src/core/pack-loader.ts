@@ -1,4 +1,4 @@
-import { Type } from '@google/genai';
+import { Type } from './llm-types';
 import fs from 'fs';
 import path from 'path';
 import {

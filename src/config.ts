@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
+import { LLM_KEY_ENV, resolveLlmConfig } from './core/llm-config';
 
 dotenv.config({ quiet: true });
 
@@ -59,6 +60,15 @@ export const BOT_NAME_ALIASES: string[] = [
 export const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 export const GEMINI_EXECUTOR_MODEL = process.env.GEMINI_EXECUTOR_MODEL || 'gemini-2.5-flash';
 export const GEMINI_ADVISOR_MODEL = process.env.GEMINI_ADVISOR_MODEL || 'gemini-3-pro-preview';
+export const LLM_CONFIG = resolveLlmConfig(process.env);
+export const LLM_PROVIDER = LLM_CONFIG.provider;
+export const LLM_API_KEY = LLM_CONFIG.apiKey;
+export const LLM_EXECUTOR_MODEL = LLM_CONFIG.executorModel;
+export const LLM_ADVISOR_MODEL = LLM_CONFIG.advisorModel;
+export const LLM_TOOLS_PROVIDER = LLM_CONFIG.toolsProvider;
+export const LLM_TOOLS_MODEL = LLM_CONFIG.toolsModel;
+export const LLM_VISION_PROVIDER = LLM_CONFIG.visionProvider;
+export const LLM_VISION_MODEL = LLM_CONFIG.visionModel;
 export const PIPI_ADVISOR_ENABLED = readBooleanEnv('PIPI_ADVISOR_ENABLED', true);
 export const PIPI_ADVISOR_MAX_CALLS_PER_TURN = readPositiveIntEnv('PIPI_ADVISOR_MAX_CALLS_PER_TURN', 1);
 export const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
@@ -176,7 +186,7 @@ export function validateCriticalConfig(): void {
     const errors: string[] = [];
 
     if (!TELEGRAM_BOT_TOKEN) errors.push('TELEGRAM_BOT_TOKEN is not set');
-    if (!GEMINI_API_KEY) errors.push('GEMINI_API_KEY is not set');
+    if (!LLM_API_KEY) errors.push(`${LLM_KEY_ENV[LLM_PROVIDER]} is not set for LLM_PROVIDER=${LLM_PROVIDER}`);
 
     if (errors.length > 0) {
         console.error('[SECURITY] Critical config errors:\n' + errors.map((entry) => `- ${entry}`).join('\n'));

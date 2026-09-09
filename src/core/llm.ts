@@ -1,19 +1,26 @@
-import { GoogleGenAI, Type, FunctionDeclaration } from '@google/genai';
+import { Type, FunctionDeclaration, LLMMessage, LLMRequest, LLMResponse } from './llm-types';
+import { generateLLM } from './llm-gateway';
+export type { LLMMessage } from './llm-types';
 import { SpanKind } from '@opentelemetry/api';
 import {
-    GEMINI_API_KEY,
-    GEMINI_EXECUTOR_MODEL,
-    GEMINI_ADVISOR_MODEL,
+    LLM_PROVIDER,
+    LLM_TOOLS_PROVIDER,
+    LLM_TOOLS_MODEL,
+    LLM_VISION_PROVIDER,
+    LLM_VISION_MODEL,
+    LLM_EXECUTOR_MODEL,
+    LLM_ADVISOR_MODEL,
     OLLAMA_URL,
     OLLAMA_MODEL,
     PIPI_ADVISOR_ENABLED,
     PIPI_ADVISOR_MAX_CALLS_PER_TURN,
 } from '../config';
 import { logEvent, logTokenUsage, getDailyTokenCost } from '../db';
-import { guardLLMCall, reportGeminiResult, isOllamaHealthy } from './healthcheck';
+import { guardLLMCall, reportLLMResult, isOllamaHealthy } from './healthcheck';
 import { reportOperationalFailure, reportOperationalRecovery } from '../utils/failure-monitor';
 import { logError, logInfo, logWarn, summarizeError, summarizeText } from '../utils/logging';
 import { RuntimeExecutionContext } from './runtime-context';
+import { LLM_KEY_ENV } from './llm-config';
 import { CORE_TOOLBOX_TOOL_DECLARATIONS, handleCoreToolboxTool, isCorePrimitiveBackingTool } from './coretoolbox';
 import { executeToolCall } from './tool-executor';
 import {
@@ -98,20 +105,6 @@ const TOOL_RESULT_FAILURE_PATTERN =
 const MUTATION_REQUEST_PATTERN =
     /(?:^|[^\p{L}\p{N}_])(?:удал(?:и|ить|ил)|очист(?:и|ить|ил)|обнов(?:и|ить|ил)|созда(?:й|ть|л)|установ(?:и|ить|ил)|зафиксир(?:уй|овать|овал)|отмет(?:ь|ить|ил)|добав(?:ь|ить|ил)|сохран(?:и|ить|ил)|отправ(?:ь|ить|ил)|измен(?:и|ить|ил)|перен(?:еси|ести|ес|ёс)|закр(?:ой|ыть|ыл)|выполн(?:и|ить|ил)|напомни|поставь|запиши|delete|clear|update|create|set|record|mark|add|save|send|change|move|close|complete|schedule|cancel)(?=$|[^\p{L}\p{N}_])/iu;
 
-let ai: GoogleGenAI | null = null;
-
-function getGeminiClient(): GoogleGenAI {
-    if (!ai) {
-        ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-    }
-    return ai;
-}
-
-export interface LLMMessage {
-    role: 'system' | 'user' | 'assistant';
-    content: string;
-}
-
 const LIST_SKILLS_TOOL: FunctionDeclaration = {
     name: 'list_skills',
     description: 'List all currently loaded skills and their capabilities.',
@@ -149,37 +142,15 @@ function trimAdvisorText(value: string | undefined, maxLength: number): string {
     return `${normalized.slice(0, Math.max(0, maxLength - 3))}...`;
 }
 
-function serializeConversationPart(part: any): string {
-    if (typeof part?.text === 'string') {
-        return trimAdvisorText(part.text, 800);
-    }
-
-    if (part?.functionCall?.name) {
-        return trimAdvisorText(
-            `[tool_call] ${part.functionCall.name} ${JSON.stringify(part.functionCall.args || {})}`,
-            800
-        );
-    }
-
-    if (part?.functionResponse?.name) {
-        return trimAdvisorText(
-            `[tool_result] ${part.functionResponse.name}: ${part.functionResponse.response?.content || ''}`,
-            1200
-        );
-    }
-
-    return '';
-}
-
-function renderAdvisorConversationSnippet(conversationHistory: any[]): string {
+function renderAdvisorConversationSnippet(conversationHistory: LLMMessage[]): string {
     return conversationHistory
         .slice(-MAX_ADVISOR_CONTEXT_TURNS)
         .map((turn) => {
-            const role = turn.role === 'model' ? 'ASSISTANT' : 'USER';
-            const body = (turn.parts || []).map(serializeConversationPart).filter(Boolean).join('\n');
-            return body ? `${role}:\n${body}` : '';
+            const calls = (turn.toolCalls || [])
+                .map((call) => `[tool_call] ${call.name} ${JSON.stringify(call.args)}`)
+                .join('\n');
+            return `${turn.role.toUpperCase()}:\n${trimAdvisorText(turn.content, 1200)}${calls ? `\n${calls}` : ''}`;
         })
-        .filter(Boolean)
         .join('\n\n');
 }
 
@@ -187,7 +158,7 @@ function buildExecutorSystemInstruction(
     systemInstruction?: string,
     noToolsAvailable: boolean = false
 ): string | undefined {
-    const advisorEnabled = PIPI_ADVISOR_ENABLED && Boolean(GEMINI_ADVISOR_MODEL?.trim());
+    const advisorEnabled = PIPI_ADVISOR_ENABLED && Boolean(LLM_ADVISOR_MODEL?.trim());
     const parts: string[] = [];
 
     if (systemInstruction?.trim()) {
@@ -394,8 +365,8 @@ export async function processWithLLM(
         },
         async () => {
             const startedMs = Date.now();
-            let finalProvider = 'gemini';
-            let finalModel = GEMINI_EXECUTOR_MODEL;
+            let finalProvider: string = LLM_PROVIDER;
+            let finalModel = LLM_EXECUTOR_MODEL;
             let finalStatus = 'ok';
 
             try {
@@ -418,32 +389,18 @@ export async function processWithLLM(
                 const originalSystemInstruction = messages.find((m) => m.role === 'system')?.content;
                 const noToolsAvailable = Array.isArray(context.allowedTools) && context.allowedTools.length === 0;
                 const systemInstruction = buildExecutorSystemInstruction(originalSystemInstruction, noToolsAvailable);
-                const advisorEnabled = PIPI_ADVISOR_ENABLED && Boolean(GEMINI_ADVISOR_MODEL?.trim());
+                const advisorEnabled = PIPI_ADVISOR_ENABLED && Boolean(LLM_ADVISOR_MODEL?.trim());
                 addSpanAttributes({
-                    'app.llm.executor_model': GEMINI_EXECUTOR_MODEL,
+                    'app.llm.executor_model': LLM_EXECUTOR_MODEL,
                     'app.llm.advisor_enabled': advisorEnabled,
-                    'app.llm.advisor_model': advisorEnabled ? GEMINI_ADVISOR_MODEL : 'disabled',
+                    'app.llm.advisor_model': advisorEnabled ? LLM_ADVISOR_MODEL : 'disabled',
                 });
 
-                const rawHistory = messages
+                const conversationHistory: LLMMessage[] = messages
                     .filter((m) => m.role !== 'system')
-                    .map((m) => ({
-                        role: m.role === 'assistant' ? 'model' : 'user',
-                        parts: [{ text: m.content }],
-                    }));
-
-                const conversationHistory: any[] = [];
-                for (const msg of rawHistory) {
-                    const last = conversationHistory[conversationHistory.length - 1];
-                    if (last && last.role === msg.role) {
-                        last.parts.push({ text: msg.parts[0].text });
-                    } else {
-                        conversationHistory.push({ role: msg.role, parts: [...msg.parts] });
-                    }
-                }
-
+                    .map((m) => ({ ...m }));
                 if (conversationHistory.length === 0) {
-                    conversationHistory.push({ role: 'user', parts: [{ text: 'Start.' }] });
+                    conversationHistory.push({ role: 'user', content: 'Start.' });
                 }
 
                 const { getRegisteredToolsForContext, getRegisteredHandlersForContext } =
@@ -460,115 +417,108 @@ export async function processWithLLM(
                     ? defaultTools.filter((tool) => !!tool.name && context.allowedTools!.includes(tool.name))
                     : defaultTools;
                 const allTools = [...skillTools, ...additionalTools];
+                const toolsExposed = allTools.length > 0;
+                const executorProvider = toolsExposed ? LLM_TOOLS_PROVIDER : LLM_PROVIDER;
+                const executorModel = toolsExposed ? LLM_TOOLS_MODEL : LLM_EXECUTOR_MODEL;
+                finalProvider = executorProvider;
+                finalModel = executorModel;
+                addSpanAttributes({
+                    'app.llm.provider': executorProvider,
+                    'app.llm.model': executorModel,
+                    'app.llm.executor_model': executorModel,
+                });
                 addSpanAttributes({ 'app.llm.tool_declarations': allTools.length });
                 addSpanAttributes({
                     'app.llm.backing_tool_declarations_hidden': registeredSkillTools.length - skillTools.length,
                 });
 
-                const trackTokens = (model: string, resp: any) => {
-                    const inputTokens = resp?.usageMetadata?.promptTokenCount || 0;
-                    const outputTokens = resp?.usageMetadata?.candidatesTokenCount || 0;
-                    if (inputTokens > 0 || outputTokens > 0) {
+                const trackTokens = (model: string, resp: LLMResponse) => {
+                    const inputTokens = resp?.usage?.inputTokens || 0;
+                    const outputTokens = resp?.usage?.outputTokens || 0;
+                    if (inputTokens > 0 || outputTokens > 0 || resp.usage.costUsd !== undefined) {
                         // Attributed to the space whose turn this is, so the
                         // dashboard can say which conversation costs money.
                         // Undefined for work that belongs to no conversation.
-                        logTokenUsage(model, inputTokens, outputTokens, context.spaceId);
+                        logTokenUsage(model, inputTokens, outputTokens, context.spaceId, resp.usage.costUsd);
                     }
                 };
 
-                const isGemini3Executor = /^gemini-3(?:[.-]|$)/i.test(GEMINI_EXECUTOR_MODEL);
                 const isDeepInitiativeTurn =
                     /(?:^|[:_-])daily_initiative(?:$|[:_-])/i.test(context.taskId || '') ||
                     (context.taskId || '').startsWith('system:atelier-self-review:');
-                const baseConfig: any = {
-                    systemInstruction: systemInstruction ? { parts: [{ text: systemInstruction }] } : undefined,
-                    tools: allTools.length > 0 ? [{ functionDeclarations: allTools }] : undefined,
+                const baseConfig = {
+                    system: systemInstruction,
+                    tools: allTools.length > 0 ? allTools : undefined,
                     temperature: isDeepInitiativeTurn ? 0.4 : 0.3,
-                    thinkingConfig: isGemini3Executor
-                        ? { thinkingLevel: isDeepInitiativeTurn ? 'high' : 'minimal' }
-                        : undefined,
+                    reasoning: isDeepInitiativeTurn ? ('high' as const) : undefined,
                 };
 
-                const generateGemini = async (args: {
-                    modelToUse: string;
-                    contents: any[];
-                    config: any;
-                    mode: 'executor' | 'advisor';
-                }) => {
+                const generate = async (request: LLMRequest, mode: 'executor' | 'advisor') => {
                     return await withSpan(
-                        'llm.gemini.generate_content',
+                        'llm.gateway.generate',
                         {
                             kind: SpanKind.CLIENT,
                             attributes: {
-                                provider: 'gemini',
-                                model: args.modelToUse,
-                                mode: args.mode,
-                                history_turns: args.contents.length,
-                                has_tools: Boolean(args.config?.tools),
+                                provider: request.provider ?? LLM_PROVIDER,
+                                model: request.model,
+                                mode,
+                                history_turns: request.messages.length,
+                                has_tools: Boolean(request.tools?.length),
                             },
                         },
                         async () => {
-                            const requestPromise = getGeminiClient().models.generateContent({
-                                model: args.modelToUse,
-                                contents: args.contents,
-                                config: args.config,
-                            });
-
-                            let timeoutId: ReturnType<typeof setTimeout>;
-                            const timeoutPromise = new Promise((_, reject) => {
-                                timeoutId = setTimeout(
-                                    () => reject(new Error(`[TIMEOUT] ${args.modelToUse} did not respond within 45s`)),
-                                    45000
-                                );
-                            });
-
-                            const candidate: any = await Promise.race([requestPromise, timeoutPromise]);
-                            clearTimeout(timeoutId!);
-                            requestPromise.catch(() => {}); // suppress orphaned rejection if timeout won the race
+                            const candidate = await generateLLM(request);
+                            trackTokens(request.model, candidate);
                             addSpanAttributes({
-                                'app.llm.finish_reason': candidate?.candidates?.[0]?.finishReason || 'N/A',
-                                'app.llm.tool_calls': candidate?.functionCalls?.length || 0,
-                                'app.llm.has_text': Boolean(candidate?.text),
+                                'app.llm.finish_reason': candidate.finishReason || 'N/A',
+                                'app.llm.tool_calls': candidate.toolCalls.length,
+                                'app.llm.has_text': Boolean(candidate.text),
                             });
                             return candidate;
                         }
                     );
                 };
-
-                const callGemini = async (modelToUse: string, contents: any[], extraConfig?: any) => {
-                    const mergedConfig = extraConfig ? { ...baseConfig, ...extraConfig } : baseConfig;
-                    return await generateGemini({
-                        modelToUse,
-                        contents,
-                        config: mergedConfig,
-                        mode: 'executor',
-                    });
-                };
-
-                const attempts = [
-                    { model: GEMINI_EXECUTOR_MODEL, label: GEMINI_EXECUTOR_MODEL },
-                    {
-                        model: GEMINI_EXECUTOR_MODEL,
-                        label: `${GEMINI_EXECUTOR_MODEL}-nothink`,
-                        extra: {
-                            thinkingConfig: isGemini3Executor ? { thinkingLevel: 'minimal' } : { thinkingBudget: 0 },
+                const callModel = async (
+                    model: string,
+                    history: LLMMessage[],
+                    extra?: Partial<LLMRequest> & { system?: string }
+                ) => {
+                    const config = { ...baseConfig, ...extra };
+                    return await generate(
+                        {
+                            ...config,
+                            provider: executorProvider,
+                            model,
+                            messages: [
+                                ...(config.system ? [{ role: 'system' as const, content: config.system }] : []),
+                                ...history,
+                            ],
                         },
+                        'executor'
+                    );
+                };
+                const attempts = [
+                    { model: executorModel, label: executorModel },
+                    {
+                        model: executorModel,
+                        label: `${executorModel}-retry`,
+                        extra: { reasoning: 'minimal' as const },
                     },
                 ];
 
-                let response: any = null;
+                let response: LLMResponse | null = null;
                 let lastError: any = null;
                 let usedModel = attempts[0].model;
 
-                const isEmptyResponse = (resp: any): boolean => {
+                const isEmptyResponse = (resp: LLMResponse): boolean => {
                     if (!resp) return true;
                     try {
                         const hasText = !!resp.text;
-                        const hasTools = resp.functionCalls && resp.functionCalls.length > 0;
+                        const hasTools = resp.toolCalls && resp.toolCalls.length > 0;
                         if (!hasText && !hasTools) {
-                            const parts = resp.candidates?.[0]?.content?.parts;
+                            const calls = resp.toolCalls;
                             logInfo('LLM', 'empty_response_parts', {
-                                part_count: Array.isArray(parts) ? parts.length : 0,
+                                tool_count: calls?.length ?? 0,
                             });
                             return true;
                         }
@@ -580,12 +530,12 @@ export async function processWithLLM(
 
                 for (const att of attempts) {
                     try {
-                        const candidate: any = await callGemini(att.model, conversationHistory, att.extra);
+                        const candidate: any = await callModel(att.model, conversationHistory, att.extra);
 
                         if (isEmptyResponse(candidate)) {
                             logWarn('LLM', 'empty_response', {
                                 model: att.label,
-                                finish_reason: candidate?.candidates?.[0]?.finishReason || 'N/A',
+                                finish_reason: candidate?.finishReason || 'N/A',
                             });
                             continue;
                         }
@@ -593,12 +543,12 @@ export async function processWithLLM(
                         response = candidate;
                         usedModel = att.model;
                         finalModel = att.model;
-                        addSpanAttributes({ 'app.llm.provider': 'gemini', 'app.llm.model': att.model });
+                        addSpanAttributes({ 'app.llm.provider': executorProvider, 'app.llm.model': att.model });
                         logInfo('LLM', 'response_received', {
                             model: att.label,
                             has_text: Boolean(candidate?.text),
-                            tool_calls: candidate?.functionCalls?.length || 0,
-                            finish_reason: candidate?.candidates?.[0]?.finishReason || 'N/A',
+                            tool_calls: candidate?.toolCalls?.length || 0,
+                            finish_reason: candidate?.finishReason || 'N/A',
                         });
                         break;
                     } catch (err: any) {
@@ -626,10 +576,10 @@ export async function processWithLLM(
                 }
 
                 if (!response) {
-                    logError('LLM', 'all_gemini_attempts_exhausted', summarizeError(lastError));
-                    reportGeminiResult(false);
+                    logError('LLM', 'all_llm_attempts_exhausted', summarizeError(lastError));
+                    reportLLMResult(false);
 
-                    if (isOllamaHealthy()) {
+                    if (!toolsExposed && isOllamaHealthy()) {
                         try {
                             finalProvider = 'ollama';
                             finalModel = OLLAMA_MODEL;
@@ -675,7 +625,7 @@ export async function processWithLLM(
                                     addSpanAttributes({ 'app.llm.provider': 'ollama', 'app.llm.model': OLLAMA_MODEL });
                                     logInfo('LLM', 'ollama_fallback_complete', summarizeText(ollamaText));
                                     logTokenUsage(
-                                        OLLAMA_MODEL,
+                                        `ollama:${OLLAMA_MODEL}`,
                                         ollamaData.prompt_eval_count || 0,
                                         ollamaData.eval_count || 0,
                                         context.spaceId
@@ -690,24 +640,27 @@ export async function processWithLLM(
                     }
 
                     finalStatus = 'upstream_unavailable';
-                    finalProvider = finalProvider === 'ollama' ? 'ollama' : 'gemini';
+                    finalProvider = finalProvider === 'ollama' ? 'ollama' : executorProvider;
+                    reportOperationalFailure('llm', lastError?.message || 'all LLM attempts exhausted');
+                    if (toolsExposed) {
+                        return {
+                            text: `Маршрут инструментов ${executorProvider}/${executorModel} сейчас недоступен. Проверь ${LLM_KEY_ENV[executorProvider]} и настройки маршрута.`,
+                        };
+                    }
                     const offline = tryOfflineFallback(latestUserMessage);
                     if (offline) return { text: offline };
-                    reportOperationalFailure('llm', lastError?.message || 'all Gemini attempts exhausted');
                     return {
-                        text: 'Сейчас не удалось получить ответ от модели. Проверь Gemini/Ollama и попробуй ещё раз.',
+                        text: 'Сейчас не удалось получить ответ от модели. Проверь LLM/Ollama и попробуй ещё раз.',
                     };
                 }
 
-                reportGeminiResult(true);
+                reportLLMResult(true);
                 reportOperationalRecovery('llm');
-                logInfo('LLM', 'gemini_response_ready', {
+                logInfo('LLM', 'response_ready', {
                     has_text: Boolean(response?.text),
-                    tool_calls: response?.functionCalls?.length || 0,
-                    finish_reason: response?.candidates?.[0]?.finishReason || 'N/A',
+                    tool_calls: response?.toolCalls?.length || 0,
+                    finish_reason: response?.finishReason || 'N/A',
                 });
-
-                trackTokens(usedModel, response);
 
                 const handlers = getRegisteredHandlersForContext(context);
                 let advisorCalls = 0;
@@ -741,11 +694,11 @@ export async function processWithLLM(
 
                     addSpanEvent('llm.advisor_consult_start', {
                         advisor_call: advisorCalls,
-                        advisor_model: GEMINI_ADVISOR_MODEL,
+                        advisor_model: LLM_ADVISOR_MODEL,
                     });
                     logInfo('LLM', 'advisor_consult_start', {
                         advisor_call: advisorCalls,
-                        advisor_model: GEMINI_ADVISOR_MODEL,
+                        advisor_model: LLM_ADVISOR_MODEL,
                         ...summarizeText(question),
                     });
 
@@ -764,39 +717,39 @@ export async function processWithLLM(
                         .join('\n\n');
 
                     try {
-                        const advisorResponse: any = await generateGemini({
-                            modelToUse: GEMINI_ADVISOR_MODEL,
-                            contents: [{ role: 'user', parts: [{ text: advisorPrompt }] }],
-                            config: {
-                                systemInstruction: {
-                                    parts: [
-                                        {
-                                            text: 'You are the internal advisor for another model. Give concise strategic guidance only. Do not address the end user, do not call tools, and do not solve the whole task end-to-end. Reply with three short sections: Assessment, Recommended next step, Watch-outs.',
-                                        },
-                                    ],
-                                },
+                        const advisorResponse = await generate(
+                            {
+                                provider: LLM_PROVIDER,
+                                model: LLM_ADVISOR_MODEL,
+                                messages: [
+                                    {
+                                        role: 'system',
+                                        content:
+                                            'You are the internal advisor for another model. Give concise strategic guidance only. Do not address the end user, do not call tools, and do not solve the whole task end-to-end. Reply with three short sections: Assessment, Recommended next step, Watch-outs.',
+                                    },
+                                    { role: 'user', content: advisorPrompt },
+                                ],
                                 temperature: 0.2,
                             },
-                            mode: 'advisor',
-                        });
+                            'advisor'
+                        );
 
-                        trackTokens(GEMINI_ADVISOR_MODEL, advisorResponse);
                         const advisorText = trimAdvisorText(advisorResponse?.text, 2400);
 
                         if (!advisorText) {
                             advisorStatus = 'empty';
-                            logWarn('LLM', 'advisor_consult_empty', { advisor_model: GEMINI_ADVISOR_MODEL });
+                            logWarn('LLM', 'advisor_consult_empty', { advisor_model: LLM_ADVISOR_MODEL });
                             return '[ADVISOR_NOTE] Advisor returned no guidance. Continue with your own reasoning.';
                         }
 
                         addSpanEvent('llm.advisor_consult_complete', {
                             advisor_call: advisorCalls,
-                            advisor_model: GEMINI_ADVISOR_MODEL,
+                            advisor_model: LLM_ADVISOR_MODEL,
                             ...summarizeText(advisorText),
                         });
                         logInfo('LLM', 'advisor_consult_complete', {
                             advisor_call: advisorCalls,
-                            advisor_model: GEMINI_ADVISOR_MODEL,
+                            advisor_model: LLM_ADVISOR_MODEL,
                             ...summarizeText(advisorText),
                         });
                         return advisorText;
@@ -804,19 +757,19 @@ export async function processWithLLM(
                         advisorStatus = 'error';
                         addSpanEvent('llm.advisor_consult_failed', {
                             advisor_call: advisorCalls,
-                            advisor_model: GEMINI_ADVISOR_MODEL,
+                            advisor_model: LLM_ADVISOR_MODEL,
                             ...summarizeError(err),
                         });
                         logWarn('LLM', 'advisor_consult_failed', {
                             advisor_call: advisorCalls,
-                            advisor_model: GEMINI_ADVISOR_MODEL,
+                            advisor_model: LLM_ADVISOR_MODEL,
                             ...summarizeError(err),
                         });
                         return '[ADVISOR_NOTE] Advisor was unavailable. Continue with your own reasoning and available tools.';
                     } finally {
                         recordLlmRequest(Date.now() - advisorStartedMs, {
-                            provider: 'gemini',
-                            model: GEMINI_ADVISOR_MODEL,
+                            provider: LLM_PROVIDER,
+                            model: LLM_ADVISOR_MODEL,
                             status: advisorStatus,
                             mode: 'advisor',
                         });
@@ -861,19 +814,18 @@ export async function processWithLLM(
                     .filter(Boolean)
                     .join('\n\n');
 
-                const finalizeWithoutTools = async (reason: string): Promise<any | null> => {
+                const finalizeWithoutTools = async (reason: string): Promise<LLMResponse | null> => {
                     finalizationAttempted = true;
                     addSpanEvent('llm.finalization_attempt', { reason, tool_rounds: toolRounds });
                     logInfo('LLM', 'finalization_attempt', { reason, tool_rounds: toolRounds });
 
                     try {
-                        const finalized = await callGemini(usedModel, conversationHistory, {
-                            tools: undefined,
+                        const finalized = await callModel(usedModel, conversationHistory, {
+                            toolChoice: 'none',
                             temperature: 0.2,
-                            thinkingConfig: isGemini3Executor ? { thinkingLevel: 'minimal' } : { thinkingBudget: 0 },
-                            systemInstruction: { parts: [{ text: finalizationInstruction }] },
+                            reasoning: 'minimal',
+                            system: finalizationInstruction,
                         });
-                        trackTokens(usedModel, finalized);
 
                         if (finalized?.text) {
                             addSpanEvent('llm.finalization_recovered', { reason });
@@ -886,7 +838,7 @@ export async function processWithLLM(
 
                         logWarn('LLM', 'finalization_empty', {
                             reason,
-                            finish_reason: finalized?.candidates?.[0]?.finishReason || 'N/A',
+                            finish_reason: finalized?.finishReason || 'N/A',
                         });
                         return null;
                     } catch (err: any) {
@@ -899,21 +851,21 @@ export async function processWithLLM(
                 };
 
                 for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-                    if (!response.functionCalls || response.functionCalls.length === 0) break;
+                    if (!response?.toolCalls.length) break;
 
                     toolRounds = round + 1;
                     addSpanEvent('llm.tool_round', {
                         round: toolRounds,
-                        tool_count: response.functionCalls.length,
+                        tool_count: response.toolCalls.length,
                     });
                     logInfo('LLM', 'tool_round', {
                         round: toolRounds,
-                        tools: response.functionCalls.map((c: any) => c.name),
+                        tools: response.toolCalls.map((c: any) => c.name),
                     });
 
-                    const functionResponseParts: any[] = [];
+                    const toolResults: LLMMessage[] = [];
 
-                    const hasLongTool = response.functionCalls.some((c: any) => LONG_RUNNING_TOOLS.has(c.name));
+                    const hasLongTool = response.toolCalls.some((c: any) => LONG_RUNNING_TOOLS.has(c.name));
                     if (hasLongTool) {
                         try {
                             await sendContextProgressSignal(context);
@@ -922,7 +874,7 @@ export async function processWithLLM(
                         }
                     }
 
-                    for (const call of response.functionCalls) {
+                    for (const call of response.toolCalls) {
                         let result: string;
 
                         try {
@@ -957,44 +909,20 @@ export async function processWithLLM(
                             summary: toolSucceeded ? 'Completed successfully.' : normalizedResult.slice(0, 280),
                         });
 
-                        functionResponseParts.push({
-                            functionResponse: {
-                                name: call.name,
-                                response: { content: result },
-                            },
-                        });
+                        toolResults.push({ role: 'tool', toolCallId: call.id, toolName: call.name, content: result });
                     }
 
-                    const rawModelParts = response.candidates?.[0]?.content?.parts;
-                    conversationHistory.push({
-                        role: 'model',
-                        // Gemini 3 attaches a thought_signature to function-call
-                        // parts and requires that exact part on the follow-up
-                        // request. Rebuilding only {name,args} silently drops it
-                        // and makes every multi-round tool call fail with 400.
-                        parts:
-                            Array.isArray(rawModelParts) && rawModelParts.some((part: any) => part?.functionCall)
-                                ? rawModelParts
-                                : response.functionCalls.map((c: any) => ({
-                                      functionCall: { name: c.name, args: c.args },
-                                  })),
-                    });
-
-                    conversationHistory.push({
-                        role: 'user',
-                        parts: functionResponseParts,
-                    });
+                    conversationHistory.push(response.message, ...toolResults);
 
                     try {
                         if (toolRounds === MAX_TOOL_ROUNDS) {
                             response = await finalizeWithoutTools('tool_budget_exhausted');
                         } else {
-                            response = await callGemini(usedModel, conversationHistory);
-                            trackTokens(usedModel, response);
+                            response = await callModel(usedModel, conversationHistory);
                             if (
                                 response &&
                                 !response.text &&
-                                (!response.functionCalls || response.functionCalls.length === 0)
+                                (!response.toolCalls || response.toolCalls.length === 0)
                             ) {
                                 response = await finalizeWithoutTools('empty_follow_up');
                             }
@@ -1012,7 +940,7 @@ export async function processWithLLM(
 
                 if (!response?.text && !finalizationAttempted) {
                     response = await finalizeWithoutTools(
-                        response?.functionCalls?.length ? 'tool_budget_exhausted' : 'empty_follow_up'
+                        response?.toolCalls?.length ? 'tool_budget_exhausted' : 'empty_follow_up'
                     );
                 }
 
@@ -1082,8 +1010,8 @@ export async function processWithLLM(
             } catch (error: any) {
                 finalStatus = 'runtime_error';
                 recordActiveSpanException(error);
-                logError('LLM', 'gemini_runtime_error', summarizeError(error));
-                reportOperationalFailure('llm', error.message || 'unknown Gemini error');
+                logError('LLM', 'runtime_error', summarizeError(error));
+                reportOperationalFailure('llm', error.message || 'unknown LLM error');
                 return {
                     text: 'Произошла ошибка при обработке запроса. Подробности записаны в лог; попробуй ещё раз через минуту.',
                 };
@@ -1108,8 +1036,8 @@ export async function processWithVision(
         'llm.vision.process',
         {
             attributes: {
-                provider: 'gemini',
-                model: 'gemini-2.5-flash',
+                provider: LLM_VISION_PROVIDER,
+                model: LLM_VISION_MODEL,
                 mime_type: mimeType,
                 prompt_chars: userPrompt.length,
                 image_base64_chars: base64Image.length,
@@ -1120,6 +1048,8 @@ export async function processWithVision(
             let status = 'ok';
 
             try {
+                const blocked = guardLLMCall();
+                if (blocked) return { text: `LLM сейчас недоступен: ${blocked}` };
                 logEvent('tool_call', { tool: 'vision_analyze', ok: true });
 
                 const response = await withSpan(
@@ -1127,28 +1057,31 @@ export async function processWithVision(
                     {
                         kind: SpanKind.CLIENT,
                         attributes: {
-                            provider: 'gemini',
-                            model: 'gemini-2.5-flash',
+                            provider: LLM_VISION_PROVIDER,
+                            model: LLM_VISION_MODEL,
                             mime_type: mimeType,
                         },
                     },
                     async () => {
-                        return await getGeminiClient().models.generateContent({
-                            model: 'gemini-2.5-flash',
-                            contents: [
-                                {
-                                    role: 'user',
-                                    parts: [{ inlineData: { data: base64Image, mimeType } }, { text: userPrompt }],
-                                },
+                        return await generateLLM({
+                            provider: LLM_VISION_PROVIDER,
+                            model: LLM_VISION_MODEL,
+                            messages: [
+                                { role: 'system', content: systemPrompt },
+                                { role: 'user', content: userPrompt, images: [{ data: base64Image, mimeType }] },
                             ],
-                            config: {
-                                systemInstruction: { parts: [{ text: systemPrompt }] },
-                                temperature: 0.7,
-                            },
+                            temperature: 0.7,
                         });
                     }
                 );
 
+                logTokenUsage(
+                    LLM_VISION_MODEL,
+                    response.usage.inputTokens,
+                    response.usage.outputTokens,
+                    undefined,
+                    response.usage.costUsd
+                );
                 reportOperationalRecovery('vision');
                 return { text: response.text || 'Не удалось извлечь осмысленный ответ из изображения.' };
             } catch (error: any) {
@@ -1157,11 +1090,13 @@ export async function processWithVision(
                 logError('VISION', 'analysis_failed', summarizeError(error));
                 logEvent('tool_call', { tool: 'vision_analyze', ok: false, error: error.message });
                 reportOperationalFailure('vision', error.message);
-                return { text: 'Не удалось обработать изображение. Попробуй ещё раз чуть позже.' };
+                return {
+                    text: `Маршрут обработки изображений ${LLM_VISION_PROVIDER}/${LLM_VISION_MODEL} сейчас недоступен. Проверь ${LLM_KEY_ENV[LLM_VISION_PROVIDER]} и настройки маршрута.`,
+                };
             } finally {
                 recordLlmRequest(Date.now() - startedMs, {
-                    provider: 'gemini',
-                    model: 'gemini-2.5-flash',
+                    provider: LLM_VISION_PROVIDER,
+                    model: LLM_VISION_MODEL,
                     status,
                     mode: 'vision',
                 });
@@ -1186,8 +1121,8 @@ export async function generateOneShotText(input: {
     temperature?: number;
     timeoutMs?: number;
 }): Promise<{ text: string; model: string; blocked?: string }> {
-    const advisorEnabled = PIPI_ADVISOR_ENABLED && Boolean(GEMINI_ADVISOR_MODEL?.trim());
-    const model = input.mode === 'advisor' && advisorEnabled ? GEMINI_ADVISOR_MODEL : GEMINI_EXECUTOR_MODEL;
+    const advisorEnabled = PIPI_ADVISOR_ENABLED && Boolean(LLM_ADVISOR_MODEL?.trim());
+    const model = input.mode === 'advisor' && advisorEnabled ? LLM_ADVISOR_MODEL : LLM_EXECUTOR_MODEL;
     const blocked = guardLLMCall();
     if (blocked) {
         logWarn('LLM', 'one_shot_blocked', { reason: blocked, mode: input.mode });
@@ -1202,34 +1137,23 @@ export async function generateOneShotText(input: {
             'llm.one_shot',
             {
                 kind: SpanKind.CLIENT,
-                attributes: { provider: 'gemini', model, mode: input.mode, space_id: input.spaceId },
+                attributes: { provider: LLM_PROVIDER, model, mode: input.mode, space_id: input.spaceId },
             },
             async () => {
-                const requestPromise = getGeminiClient().models.generateContent({
+                const response = await generateLLM({
                     model,
-                    contents: [{ role: 'user', parts: [{ text: input.prompt }] }],
-                    config: {
-                        systemInstruction: { parts: [{ text: input.system }] },
-                        temperature: input.temperature ?? 0.2,
-                    },
+                    messages: [
+                        { role: 'system', content: input.system },
+                        { role: 'user', content: input.prompt },
+                    ],
+                    temperature: input.temperature ?? 0.2,
+                    timeoutMs: input.timeoutMs ?? 60000,
                 });
 
-                let timeoutId: ReturnType<typeof setTimeout>;
-                const timeoutPromise = new Promise((_, reject) => {
-                    timeoutId = setTimeout(
-                        () => reject(new Error(`[TIMEOUT] ${model} did not respond in time`)),
-                        input.timeoutMs ?? 60000
-                    );
-                });
-
-                const response: any = await Promise.race([requestPromise, timeoutPromise]);
-                clearTimeout(timeoutId!);
-                requestPromise.catch(() => {});
-
-                const inputTokens = response?.usageMetadata?.promptTokenCount || 0;
-                const outputTokens = response?.usageMetadata?.candidatesTokenCount || 0;
+                const inputTokens = response.usage.inputTokens || 0;
+                const outputTokens = response.usage.outputTokens || 0;
                 if (inputTokens > 0 || outputTokens > 0) {
-                    logTokenUsage(model, inputTokens, outputTokens, input.spaceId);
+                    logTokenUsage(model, inputTokens, outputTokens, input.spaceId, response.usage.costUsd);
                 }
 
                 return { text: (response?.text || '').trim(), model };
@@ -1241,6 +1165,6 @@ export async function generateOneShotText(input: {
         logError('LLM', 'one_shot_failed', summarizeError(error));
         return { text: '', model, blocked: error?.message || 'model call failed' };
     } finally {
-        recordLlmRequest(Date.now() - startedMs, { provider: 'gemini', model, status, mode: input.mode });
+        recordLlmRequest(Date.now() - startedMs, { provider: LLM_PROVIDER, model, status, mode: input.mode });
     }
 }

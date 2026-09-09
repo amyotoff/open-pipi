@@ -14,7 +14,7 @@ function buildInput(overrides: Partial<DoctorInput['env']> = {}): DoctorInput {
         envFileFound: true,
         env: {
             TELEGRAM_BOT_TOKEN: '123456:real-token',
-            GEMINI_API_KEY: 'real-gemini-key',
+            OPENROUTER_API_KEY: 'real-openrouter-key',
             OWNER_TG_IDS: '123456',
             BOOTSTRAP_OWNER_MODE: 'false',
             BOOTSTRAP_PACK: 'jeeves',
@@ -46,19 +46,46 @@ describe('Open PiPi doctor', () => {
     it('reports a minimal configured Telegram installation as ready', () => {
         const checks = inspectDoctor(buildInput(), buildIO());
 
-        expect(checks.every((item) => item.status === 'pass')).toBe(true);
-        expect(formatDoctorReport(checks)).toContain('Ready to start (0 warnings).');
+        expect(checks.some((item) => item.status === 'fail')).toBe(false);
+        expect(checks.filter((item) => item.status === 'warn').map((item) => item.id)).toEqual([
+            'llm-tools-key',
+            'llm-vision-key',
+            'llm-search-key',
+        ]);
+        expect(formatDoctorReport(checks)).toContain('Ready to start (3 warnings).');
         expect(formatDoctorReport(checks)).toContain('Next: pnpm dev');
     });
 
+    it('keeps an OpenRouter-only text install ready while warning about unconfigured native capabilities', () => {
+        const checks = inspectDoctor(buildInput(), buildIO());
+
+        expect(checks.find((item) => item.id === 'llm-key')).toMatchObject({ status: 'pass' });
+        for (const id of ['llm-tools-key', 'llm-vision-key', 'llm-search-key']) {
+            expect(checks.find((item) => item.id === id)).toMatchObject({ status: 'warn' });
+            expect(checks.find((item) => item.id === id)?.message).toContain('GEMINI_API_KEY');
+        }
+    });
+
+    it('clears every optional capability warning once its selected native key is configured', () => {
+        const checks = inspectDoctor(buildInput({ GEMINI_API_KEY: 'real-gemini-key' }), buildIO());
+
+        expect(checks.every((item) => item.status === 'pass')).toBe(true);
+        expect(checks.filter((item) => item.id.startsWith('llm-')).map((item) => item.id)).toEqual([
+            'llm-key',
+            'llm-tools-key',
+            'llm-vision-key',
+            'llm-search-key',
+        ]);
+    });
+
     it('fails safely for missing secrets and never prints their values', () => {
-        const input = buildInput({ TELEGRAM_BOT_TOKEN: '...', GEMINI_API_KEY: '<your-key>', OWNER_TG_IDS: '' });
+        const input = buildInput({ TELEGRAM_BOT_TOKEN: '...', OPENROUTER_API_KEY: '<your-key>', OWNER_TG_IDS: '' });
         const checks = inspectDoctor(input, buildIO());
         const report = formatDoctorReport(checks);
 
         expect(checks.filter((item) => item.status === 'fail').map((item) => item.id)).toEqual([
             'telegram-token',
-            'gemini-key',
+            'llm-key',
             'owner',
         ]);
         expect(report).not.toContain('123456:real-token');

@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'node:crypto';
-import { Schema, Type } from '@google/genai';
+import { Schema, Type } from './llm-types';
 import {
     appendToolExecutionLogData,
     beginToolExecutionLog,
@@ -108,7 +108,7 @@ function summarizeResult(result: string): string {
 }
 
 function hasSchemaType(schema: Schema | undefined, expected: Type): boolean {
-    return typeof schema?.type === 'string' && schema.type.toUpperCase() === expected;
+    return typeof schema?.type === 'string' && schema.type.toLowerCase() === expected;
 }
 
 function normalizeSchemaValue(schema: Schema | undefined, value: unknown): unknown {
