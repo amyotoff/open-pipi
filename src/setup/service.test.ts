@@ -6,7 +6,7 @@ import { RuntimeController, RuntimeStatus } from './runtime';
 import { createSetupService, SetupServiceError } from './service';
 
 const TOKEN = '12345:abcdefghijklmnopqrstuvwxyz';
-const API_KEY = 'sk-or-v1-private-key';
+const API_KEY = 'test-key-11111111111111111111';
 
 function cloneConfig(config: SetupStoredConfig): SetupStoredConfig {
     return { settings: { ...config.settings }, credentials: { ...config.credentials } };
@@ -422,7 +422,7 @@ describe('setup service', () => {
 
     it('lets an explicit rerun replace an invalid stored key when no operator override exists', async () => {
         const oldKey = 'sk-or-v1-invalid-stored';
-        const newKey = 'sk-or-v1-valid-replacement';
+        const newKey = 'test-key-22222222222222222222';
         const config = configMemory({
             ...readyConfig('77'),
             credentials: { OPENROUTER_API_KEY: oldKey, TELEGRAM_BOT_TOKEN: TOKEN },

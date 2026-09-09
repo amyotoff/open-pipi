@@ -121,6 +121,65 @@ describe('setup page', () => {
         expect(html).toContain('Saved. Restart PiPi to apply these changes.');
     });
 
+    it.each([
+        ['stopped', 'foreground', 'en', false, 'PiPi is stopped.', false, true],
+        ['starting', 'foreground', 'en', false, 'PiPi is starting', true, true],
+        ['ready', 'foreground', 'en', false, 'Keep this setup command open', true, true],
+        ['ready', 'foreground', 'en', true, 'Keep this setup command open', true, false],
+        ['ready', 'background', 'en', true, 'You can close this setup', true, true],
+        ['ready', 'background', 'ru', true, 'Настройку можно закрыть', true, true],
+    ] as const)(
+        'renders %s/%s in %s with dialogue proof %s',
+        (runtimeState, mode, language, proof, message, foregroundDisabled, backgroundDisabled) => {
+            const initial = setupStatus();
+            const html = renderSetupPage({
+                csrfToken: 'csrf-test',
+                status: setupStatus({
+                    language,
+                    provider: { ...initial.provider, status: 'ready' },
+                    telegram: { ...initial.telegram, status: 'ready' },
+                    owners: { existing: true, count: 1, status: 'ready' },
+                    runtime: { ...initial.runtime, state: runtimeState, mode, dialogueVerified: proof },
+                }),
+            });
+            const makeElement = () => ({
+                textContent: '',
+                disabled: false,
+                hidden: false,
+                value: '',
+                className: '',
+                classList: { toggle: () => undefined },
+                querySelector: () => makeElement(),
+                querySelectorAll: () => [],
+                setAttribute: () => undefined,
+                addEventListener: () => undefined,
+                replaceChildren: () => undefined,
+            });
+            const elements = new Map<string, ReturnType<typeof makeElement>>();
+            const element = (selector: string) => {
+                if (!elements.has(selector)) elements.set(selector, makeElement());
+                return elements.get(selector)!;
+            };
+            const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+            if (!script) throw new Error('inline setup script is missing');
+            new Script(script).runInNewContext({
+                navigator: { language },
+                setInterval: () => undefined,
+                document: {
+                    documentElement: {},
+                    getElementById: element,
+                    querySelector: element,
+                    querySelectorAll: (selector: string) =>
+                        selector === '.progress span' ? Array.from({ length: 4 }, makeElement) : [],
+                    addEventListener: () => undefined,
+                },
+            });
+            expect(element('runtime-mode-status').textContent).toContain(message);
+            expect(element('[data-action=start-foreground]').disabled).toBe(foregroundDisabled);
+            expect(element('[data-action=start-background]').disabled).toBe(backgroundDisabled);
+        }
+    );
+
     it('escapes embedded state and the CSRF token before placing them in script source', () => {
         const html = renderSetupPage({
             status: setupStatus({
