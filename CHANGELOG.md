@@ -19,6 +19,11 @@ All notable changes to Open PiPi will be documented in this file.
   calls instead of being estimated as Gemini Flash; known-spend totals and limits exclude them.
 - New installations use `config.example`; existing `.env` files are unchanged.
 
+### Security
+
+- Update optional `sharp` to 0.35.4 and `nodemailer` to 9.1.1, fixing
+  the high-severity image-decoding and address-parser advisories reported by CI.
+
 ## [2.7.1] — 2026-08-20
 
 Open PiPi gains a shared, owner-approved wiki for the whole install, plus a complete Brain Layer

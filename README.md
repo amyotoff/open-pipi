@@ -77,10 +77,14 @@ If you only want the simplest working setup, these are the key vars:
 
 ```dotenv
 TELEGRAM_BOT_TOKEN=...
+LLM_PROVIDER=openrouter
 OPENROUTER_API_KEY=...
+GEMINI_API_KEY=...
 OWNER_TG_IDS=123456789
 TZ=UTC
 ```
+
+This is the complete default route: OpenRouter handles text, while direct Gemini handles tool turns, vision, and grounded search. A text-only install can omit `GEMINI_API_KEY`; `pnpm setup:check` will still report it ready to start, with warnings that those three capabilities will fail until their selected provider key is configured.
 
 To give your assistant its own name (used in greetings and group mentions):
 
@@ -639,8 +643,9 @@ Key files:
 
 Model setup:
 
-- `OpenRouter` is the default text inference bus; `LLM_PROVIDER=openai|anthropic|gemini` selects a direct text bypass
+- `OpenRouter` is the default text inference bus; `LLM_PROVIDER=openai|anthropic|gemini` bypasses it with that provider's direct API
 - Turns with tools and image analysis default to direct Gemini alongside OpenRouter text, or follow an explicitly selected direct text provider; native grounding defaults to Gemini independently
+- Tools, vision, and search can each be routed through OpenRouter explicitly for model experiments; search supports only Gemini or OpenRouter
 - The chat runtime now supports an `executor + advisor` pattern:
   the executor handles the full turn, and can consult a stronger advisor model on demand for difficult planning forks
 - Existing local Ollama classification and simple replies remain local; pure cloud text can fall back to Ollama. Native tool turns keep their selected provider through retries and finalization
@@ -651,8 +656,8 @@ Useful env vars:
 - `OPENROUTER_API_KEY` (or the selected direct provider's key)
 - `LLM_EXECUTOR_MODEL`
 - `LLM_ADVISOR_MODEL`
-- `LLM_TOOLS_PROVIDER` and `LLM_TOOLS_MODEL` (direct route for turns exposing tools)
-- `LLM_VISION_PROVIDER` and `LLM_VISION_MODEL` (direct route for image analysis)
+- `LLM_TOOLS_PROVIDER` and `LLM_TOOLS_MODEL` (route for turns exposing tools)
+- `LLM_VISION_PROVIDER` and `LLM_VISION_MODEL` (route for image analysis)
 - `LLM_SEARCH_PROVIDER` and `LLM_SEARCH_MODEL` (Gemini native grounding by default; OpenRouter search is an explicit alternative)
 - `PIPI_ADVISOR_ENABLED`
 - `PIPI_ADVISOR_MAX_CALLS_PER_TURN`
@@ -660,7 +665,7 @@ Useful env vars:
 - `OLLAMA_MODEL`
 - `PIPI_LOCAL_ROUTING_ENABLED` (defaults to `true`; safe fallback routes uncertain messages to the selected cloud provider)
 
-Existing Gemini-only installs must explicitly set `LLM_PROVIDER=gemini` to keep direct inference, or add an OpenRouter key for text while retaining Gemini for native capabilities. Gemini model aliases remain supported on Gemini routes; corresponding `LLM_*_MODEL` settings take precedence. Merely finding a Gemini key never changes the text route. Startup requires the text key; the doctor warns separately about missing tools, vision and grounding credentials.
+Existing Gemini-only installs must explicitly set `LLM_PROVIDER=gemini` to keep direct inference, or add an OpenRouter key for text while retaining Gemini for native capabilities. Tools and vision inherit `LLM_EXECUTOR_MODEL` when they use the text provider; a capability moved to another provider gets that provider's default unless its own model is set. Gemini model aliases remain supported on Gemini routes, with corresponding `LLM_*_MODEL` settings taking precedence. Merely finding a Gemini key never changes the text route. Startup requires the selected text key; the doctor warns separately about missing tools, vision, and grounding credentials.
 
 See [LLM Gateway configuration and migration](docs/llm-gateway.md) for provider keys, model examples, search and cost-accounting limits.
 
@@ -815,11 +820,11 @@ The OAuth callback is intentionally public so Google can redirect to it, but it 
 | `TELEGRAM_BOT_TOKEN` | Primary Telegram bot token |
 | `LLM_PROVIDER` | Text provider: `openrouter` (default), `openai`, `anthropic`, or `gemini` |
 | `OPENROUTER_API_KEY` | Default text inference bus key |
-| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` | Key for the selected direct bypass |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` | Keys for direct text or capability routes; Gemini powers the default tools, vision, and grounding routes |
 | `LLM_EXECUTOR_MODEL` | Text executor; also the default for tools/vision when they use the same provider (OpenRouter default: `google/gemini-2.5-flash`) |
 | `LLM_ADVISOR_MODEL` | Internal advisor (OpenRouter default: `anthropic/claude-sonnet-4.6`) |
-| `LLM_TOOLS_PROVIDER` / `LLM_TOOLS_MODEL` | Turns with tools: Gemini direct alongside OpenRouter text, otherwise the direct text provider |
-| `LLM_VISION_PROVIDER` / `LLM_VISION_MODEL` | Image analysis: same default provider rule as tools; choose an image-capable model |
+| `LLM_TOOLS_PROVIDER` / `LLM_TOOLS_MODEL` | Turns with tools: Gemini direct alongside OpenRouter text, otherwise the text provider; OpenRouter is an explicit option |
+| `LLM_VISION_PROVIDER` / `LLM_VISION_MODEL` | Image analysis: same default provider rule as tools; OpenRouter is an explicit option; choose an image-capable model |
 | `LLM_SEARCH_PROVIDER` / `LLM_SEARCH_MODEL` | Gemini native grounding by default, or explicit OpenRouter web search |
 | `PIPI_ADVISOR_ENABLED` | Enables the internal advisor consultation tool for the executor |
 | `PIPI_ADVISOR_MAX_CALLS_PER_TURN` | Hard cap on advisor consultations during one user turn |
