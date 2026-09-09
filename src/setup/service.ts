@@ -868,7 +868,12 @@ class SetupServiceImpl implements SetupService {
 
             this.confirmedOwnerCandidate = candidate;
             this.cancelPairingInternal();
-            this.updateStored({ settings: { OWNER_TG_IDS: candidate.id } });
+            this.updateStored({
+                settings: {
+                    OWNER_TG_IDS: candidate.id,
+                    ...(!trimmed(effective.BOOTSTRAP_GROUNDING) ? { BOOTSTRAP_GROUNDING: 'jeeves_starter' } : {}),
+                },
+            });
             this.ownerError = undefined;
             return this.status({ includeEphemeral: true });
         });

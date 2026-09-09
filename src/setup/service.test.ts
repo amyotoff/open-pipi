@@ -302,45 +302,54 @@ describe('setup service', () => {
         ).rejects.toMatchObject({ code: 'profile_storage_unavailable' });
     });
 
-    it('pairs only the correlated private account and makes confirmation single-use', async () => {
-        const random = (size: number) => new Uint8Array(size).fill(9);
-        const nonce = createTelegramPairingNonce(random);
-        const updates = [
-            {
-                update_id: 1,
-                message: {
-                    text: `/start ${nonce}`,
-                    chat: { id: 88, type: 'private' },
-                    from: { id: 88, username: 'owner', first_name: 'Owner', language_code: 'en' },
+    it.each(['fresh', 'stored', 'environment'] as const)(
+        'pairs once and preserves grounding selection (%s)',
+        async (configuration) => {
+            const random = (size: number) => new Uint8Array(size).fill(9);
+            const nonce = createTelegramPairingNonce(random);
+            const updates = [
+                {
+                    update_id: 1,
+                    message: {
+                        text: `/start ${nonce}`,
+                        chat: { id: 88, type: 'private' },
+                        from: { id: 88, username: 'owner', first_name: 'Owner', language_code: 'en' },
+                    },
                 },
-            },
-        ];
-        const config = configMemory(readyConfig());
-        const service = await createSetupService({
-            dataDir: '/test/data',
-            runtime: runtimeController(),
-            operatorEnv: {},
-            readConfig: config.read,
-            updateConfig: config.update,
-            acquireLock: lockFactory().acquire,
-            fetch: successFetch(updates),
-            randomBytes: random,
-        });
+            ];
+            const initial = readyConfig();
+            if (configuration === 'stored') initial.settings.BOOTSTRAP_GROUNDING = 'custom_grounding';
+            const operatorEnv = configuration === 'environment' ? { BOOTSTRAP_GROUNDING: 'custom_grounding' } : {};
+            const config = configMemory(initial);
+            const service = await createSetupService({
+                dataDir: '/test/data',
+                runtime: runtimeController(),
+                operatorEnv,
+                readConfig: config.read,
+                updateConfig: config.update,
+                acquireLock: lockFactory().acquire,
+                fetch: successFetch(updates),
+                randomBytes: random,
+            });
 
-        const pairing = await service.beginOwnerPairing();
-        expect(pairing.pairing.link).toContain(nonce);
-        await vi.waitFor(async () => {
-            expect((await service.status({ includeEphemeral: true })).pairing.candidate?.id).toBe('88');
-        });
-        const safe = await service.status();
-        expect(safe.pairing.link).toBeUndefined();
-        expect(safe.pairing.candidate).toBeUndefined();
+            const pairing = await service.beginOwnerPairing();
+            expect(pairing.pairing.link).toContain(nonce);
+            await vi.waitFor(async () => {
+                expect((await service.status({ includeEphemeral: true })).pairing.candidate?.id).toBe('88');
+            });
+            const safe = await service.status();
+            expect(safe.pairing.link).toBeUndefined();
+            expect(safe.pairing.candidate).toBeUndefined();
 
-        await expect(service.confirmOwner('99')).rejects.toMatchObject({ code: 'owner_candidate_mismatch' });
-        await service.confirmOwner('88');
-        expect(config.current().settings.OWNER_TG_IDS).toBe('88');
-        await expect(service.confirmOwner('88')).rejects.toMatchObject({ code: 'owner_already_configured' });
-    });
+            await expect(service.confirmOwner('99')).rejects.toMatchObject({ code: 'owner_candidate_mismatch' });
+            await service.confirmOwner('88');
+            expect(config.current().settings.OWNER_TG_IDS).toBe('88');
+            expect({ ...config.current().settings, ...operatorEnv }.BOOTSTRAP_GROUNDING).toBe(
+                configuration === 'fresh' ? 'jeeves_starter' : 'custom_grounding'
+            );
+            await expect(service.confirmOwner('88')).rejects.toMatchObject({ code: 'owner_already_configured' });
+        }
+    );
 
     it('expires and cancels pending Telegram polling without saving an owner', async () => {
         let now = 1_000;
