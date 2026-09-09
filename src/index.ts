@@ -1,4 +1,12 @@
 import { initializeOpenTelemetry, shutdownOpenTelemetry } from './observability';
+import path from 'node:path';
+import type { ProcessLock } from './setup/process-lock';
+
+const dataDirArgument = process.argv
+    .find((argument) => argument.startsWith('--data-dir='))
+    ?.slice('--data-dir='.length);
+if (dataDirArgument) process.env.DATA_DIR = path.resolve(dataDirArgument);
+const runtimeMode = process.argv.includes('--runtime-mode=background') ? 'background' : 'foreground';
 
 const APP_VERSION = process.env.npm_package_version || '2.9.0';
 
@@ -7,8 +15,9 @@ let closeDatabaseRef: (() => void) | null = null;
 let closeApiServerRef: (() => Promise<void>) | null = null;
 let closeTransportsRef: (() => Promise<void>) | null = null;
 let closeDeliveryWorkerRef: (() => void) | null = null;
+let processLockRef: ProcessLock | null = null;
 
-async function shutdown(signal: string) {
+async function shutdown(signal: string, exitCode = 0) {
     if (shuttingDown) return;
     shuttingDown = true;
 
@@ -45,7 +54,13 @@ async function shutdown(signal: string) {
     } catch (error) {
         console.error('[BOOT] Failed to flush OpenTelemetry cleanly:', error);
     } finally {
-        process.exit(0);
+        try {
+            processLockRef?.release();
+            processLockRef = null;
+        } catch (error) {
+            console.error('[BOOT] Failed to release runtime ownership cleanly:', error);
+        }
+        process.exit(exitCode);
     }
 }
 
@@ -60,6 +75,14 @@ async function bootstrap() {
     const config = await import('./config');
     config.assertSafeStartupConfig();
     config.validateCriticalConfig();
+    const { acquireProcessLock } = await import('./setup/process-lock');
+    processLockRef = acquireProcessLock(config.DATA_DIR, 'runtime', { mode: runtimeMode });
+    try {
+        const dialogueEvidence = await import('./setup/dialogue-evidence');
+        dialogueEvidence.initializeDialogueEvidence(config.DATA_DIR, processLockRef.runId);
+    } catch (error) {
+        console.warn('[BOOT] Dialogue verification evidence is unavailable for this run:', error);
+    }
 
     const channelLoader = await import('./channels/_loader');
     await channelLoader.loadOptionalChannels();
@@ -78,6 +101,7 @@ async function bootstrap() {
         scheduler,
         memoryBackfill,
         runtimeBackup,
+        setupOwnerContext,
         api,
     ] = await Promise.all([
         import('./db'),
@@ -93,6 +117,7 @@ async function bootstrap() {
         import('./task-scheduler'),
         import('./core/memory-backfill'),
         import('./core/runtime-backup'),
+        import('./core/setup-owner-context'),
         import('./api'),
     ]);
 
@@ -100,6 +125,24 @@ async function bootstrap() {
 
     db.initDatabase();
     console.log('Database initialized.');
+
+    const setupOwnerIds = [
+        ...config.OWNER_TG_IDS,
+        ...[...config.OWNER_IDENTITIES]
+            .filter((identity) => identity.toLowerCase().startsWith('telegram:'))
+            .map((identity) => identity.slice('telegram:'.length)),
+    ];
+    try {
+        const ownerContextResult = setupOwnerContext.applyPendingOwnerContext({
+            dataDir: config.DATA_DIR,
+            ownerTelegramIds: setupOwnerIds,
+        });
+        if (ownerContextResult.status === 'applied') {
+            console.log('[BOOT] Applied pending owner context to the confirmed private space.');
+        }
+    } catch (error) {
+        console.warn('[BOOT] Pending owner context could not be applied; runtime startup will continue:', error);
+    }
 
     const webAuth = await import('./web/auth');
     const googleOAuth = await import('./core/google-oauth');
@@ -150,7 +193,12 @@ async function bootstrap() {
 
     // Telegram is required: without it there is no assistant to run, so a
     // failure here should stop the boot rather than leave a silent runtime.
-    transportRegistry.registerTransport(new telegramAdapter.TelegramTransportAdapter(), { required: true });
+    transportRegistry.registerTransport(
+        new telegramAdapter.TelegramTransportAdapter({
+            onTerminalFailure: () => shutdown('Telegram polling failure', 1),
+        }),
+        { required: true }
+    );
     if (config.PIPI_WEB_ENABLED) {
         // Registered so the delivery worker can reach a space's web binding.
         // Inbound arrives over HTTP, which the API server already handles.
@@ -158,6 +206,7 @@ async function bootstrap() {
     }
     closeTransportsRef = () => transportRegistry.stopAllTransports();
     await transportRegistry.startAllTransports({ messageGateway: { handleIncoming: gateway.handleIncoming } });
+    processLockRef.markReady();
 
     // Started after the transports, so the first drain has somewhere to send.
     // Anything queued before the last shutdown goes out now.
@@ -189,6 +238,10 @@ bootstrap().catch(async (error) => {
     try {
         await shutdownOpenTelemetry();
     } finally {
+        try {
+            processLockRef?.release();
+            processLockRef = null;
+        } catch {}
         process.exit(1);
     }
 });

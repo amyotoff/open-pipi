@@ -27,7 +27,7 @@ import { getHealthState, getSystemMetrics } from './healthcheck';
 import { buildChannelPersonId } from '../channels/runtime';
 import { getRegisteredHandlers } from '../skills/_registry';
 import { runWorkLensForSpace, WorkLens } from './work-lenses';
-import { resolveSpaceOperationalSettings } from './space-preferences';
+import { resolveSpaceOperationalSettings, resolveSpacePreferences } from './space-preferences';
 
 export type SupportedChannelCommand =
     | 'start'
@@ -90,10 +90,23 @@ const SUPPORTED_COMMANDS = new Set<SupportedChannelCommand>([
 ]);
 
 function buildStartMessage(spaceId: string): string {
-    const settings = resolveSpaceOperationalSettings(getSpace(spaceId)?.policy_json);
+    const space = getSpace(spaceId);
+    const settings = resolveSpaceOperationalSettings(space?.policy_json);
 
     if (settings.onboarding_state === 'new') {
-        return `Hi. I'm ${BOT_DISPLAY_NAME}. Tell me what this chat is for and what you would like help with.\nWrite naturally, use /help for examples, or /setup for guided settings.`;
+        const preferences = resolveSpacePreferences(spaceId);
+        const isRussian = preferences.language.startsWith('ru');
+        const packId = space?.assistant_pack_id || 'jeeves';
+
+        if (packId === 'jeeves') {
+            return isRussian
+                ? `Привет. Я ${BOT_DISPLAY_NAME}, начинаю как Дживс — ваш личный ассистент. Это отправная точка: скажите, какой тон, постоянные правила и роль вам нужны.\nПишите как обычно; /help покажет примеры, а /pack — специализации и команду /pack mutate <id>.`
+                : `Hi. I'm ${BOT_DISPLAY_NAME}, starting as Jeeves — your personal assistant. This is a starting point: tell me the tone, standing rules, and role you want.\nWrite naturally; /help has examples, and /pack shows specializations and /pack mutate <id>.`;
+        }
+
+        return isRussian
+            ? `Привет. Я ${BOT_DISPLAY_NAME}. Сейчас выбрана специализация «${packId}»; я сохраню этот выбор. Скажите, какой тон, постоянные правила и роль вам нужны.\nПишите как обычно; /help покажет примеры, а /pack — специализации и команду /pack mutate <id>.`
+            : `Hi. I'm ${BOT_DISPLAY_NAME}. The ${packId} specialization is already selected, and I'll preserve it. Tell me the tone, standing rules, and role you want.\nWrite naturally; /help has examples, and /pack shows specializations and /pack mutate <id>.`;
     }
 
     const grounding = materializeGroundingForSpace(spaceId);

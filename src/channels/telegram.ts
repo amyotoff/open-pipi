@@ -18,6 +18,7 @@ export {
     bot,
     isTelegramBotLaunched,
     markTelegramBotStopped,
+    onTelegramBotTerminalFailure,
     registerTelegramFallbackHandlers,
     startTelegramBot,
 } from './telegram-bot';

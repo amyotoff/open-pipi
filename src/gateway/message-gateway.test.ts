@@ -21,6 +21,7 @@ type LoadOptions = {
     duplicate?: boolean;
     resolvedImage?: { base64: string; mimeType: string } | null;
     unknownEndpoint?: boolean;
+    dialogueEvidenceThrows?: boolean;
 };
 
 async function loadGateway(options: LoadOptions = {}) {
@@ -54,6 +55,11 @@ async function loadGateway(options: LoadOptions = {}) {
     const executeApprovedToolContinuations = vi.fn(async () => [
         { actionClass: 'home_assistant_control_test', toolName: 'home_assistant_control', result: 'executed' },
     ]);
+    const markDialogueAccepted = options.dialogueEvidenceThrows
+        ? vi.fn(() => {
+              throw new Error('evidence disk unavailable');
+          })
+        : vi.fn();
 
     vi.doMock('../db', () => ({ storeMessage, getSpace, getParticipantIdentity, logEvent }));
     vi.doMock('../agents/butler', () => ({ handleButlerMessage, handleButlerPhoto }));
@@ -99,6 +105,7 @@ async function loadGateway(options: LoadOptions = {}) {
     vi.doMock('../transports/registry', () => ({
         getTransport: vi.fn(() => ({ resolveAttachment })),
     }));
+    vi.doMock('../setup/dialogue-evidence', () => ({ markDialogueAccepted }));
 
     const gateway = await import('./message-gateway');
     const participation = await import('./participation');
@@ -123,6 +130,7 @@ async function loadGateway(options: LoadOptions = {}) {
             recordApprovalResponse,
             executeApprovedToolContinuations,
             logEvent,
+            markDialogueAccepted,
         },
     };
 }
@@ -170,6 +178,61 @@ describe('gateway: direct chats', () => {
         expect(mocks.handleButlerMessage).toHaveBeenCalledWith(
             expect.objectContaining({ channel: 'telegram', channelRef: '123', senderId: '111', text: 'Привет' })
         );
+        expect(mocks.markDialogueAccepted).not.toHaveBeenCalled();
+    });
+
+    it('records proof when a normal owner DM reaches Butler', async () => {
+        const { handleIncoming, normalizeTelegramMessage, mocks } = await loadGateway();
+
+        await handleIncoming(
+            normalizeTelegramMessage(
+                telegramUpdate({
+                    message: { message_id: 4, date: 1_760_000_000, text: 'Help me plan' },
+                    chat: { id: 111, type: 'private' },
+                })
+            )!
+        );
+
+        expect(mocks.markDialogueAccepted).toHaveBeenCalledWith(
+            expect.objectContaining({
+                transport: 'telegram',
+                endpointType: 'direct',
+                endpointId: '111',
+                ownerTelegramId: '111',
+            })
+        );
+    });
+
+    it('does not count commands as a conversation turn', async () => {
+        const { handleIncoming, normalizeTelegramMessage, mocks } = await loadGateway();
+
+        await handleIncoming(
+            normalizeTelegramMessage(
+                telegramUpdate({
+                    message: { message_id: 5, date: 1_760_000_000, text: '/help' },
+                    chat: { id: 111, type: 'private' },
+                })
+            )!
+        );
+
+        expect(mocks.markDialogueAccepted).not.toHaveBeenCalled();
+    });
+
+    it('still routes the owner message when evidence storage fails', async () => {
+        const { handleIncoming, normalizeTelegramMessage, mocks } = await loadGateway({ dialogueEvidenceThrows: true });
+
+        await expect(
+            handleIncoming(
+                normalizeTelegramMessage(
+                    telegramUpdate({
+                        message: { message_id: 6, date: 1_760_000_000, text: 'Help me plan' },
+                        chat: { id: 111, type: 'private' },
+                    })
+                )!
+            )
+        ).resolves.toBeUndefined();
+
+        expect(mocks.handleButlerMessage).toHaveBeenCalledTimes(1);
     });
 
     it('stores the message against the space it resolved to', async () => {
@@ -271,6 +334,7 @@ describe('gateway: direct chats', () => {
             '123',
             'Approved Home Assistant action executed.'
         );
+        expect(mocks.markDialogueAccepted).not.toHaveBeenCalled();
     });
 });
 
@@ -296,6 +360,7 @@ describe('gateway: space creation', () => {
         expect(mocks.resolveTransportBinding).toHaveBeenCalledWith(expect.anything(), { allowBootstrap: false });
         expect(mocks.storeMessage).not.toHaveBeenCalled();
         expect(mocks.handleButlerMessage).not.toHaveBeenCalled();
+        expect(mocks.markDialogueAccepted).not.toHaveBeenCalled();
     });
 
     it('connects an unknown group when an owner speaks in it', async () => {

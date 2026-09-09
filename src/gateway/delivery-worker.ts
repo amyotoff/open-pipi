@@ -19,6 +19,7 @@ import {
 } from './outbox';
 import type { TransportSender } from '../transports/legacy-channel';
 import type { TransportDestination } from '../transports/types';
+import { markDialogueDelivered } from '../setup/dialogue-evidence';
 
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 
@@ -63,6 +64,14 @@ export async function processNextDelivery(): Promise<boolean> {
 
         if (result.status === 'sent') {
             markDeliverySent(entry.id, result.transportMessageId);
+            try {
+                markDialogueDelivered({
+                    transport: entry.transport,
+                    endpointType: entry.endpoint_type,
+                    endpointId: entry.endpoint_id,
+                    correlationId: entry.correlation_id,
+                });
+            } catch {}
             logInfo('DELIVERY', 'sent', {
                 outbox_id: entry.id,
                 transport: entry.transport,

@@ -4,6 +4,7 @@ async function loadChannelCommands(options?: {
     isOwner?: boolean;
     recentMessages?: any[];
     spacePolicyJson?: string | null;
+    assistantPackId?: string;
 }) {
     vi.resetModules();
 
@@ -12,6 +13,7 @@ async function loadChannelCommands(options?: {
     const getSpace = vi.fn((spaceId: string) => ({
         id: spaceId,
         policy_json: options?.spacePolicyJson ?? null,
+        assistant_pack_id: options?.assistantPackId || 'jeeves',
     }));
     const getSpaceGroundingLevel = vi.fn(() => 1);
     const getResident = vi.fn(() => undefined);
@@ -159,7 +161,7 @@ describe('core/channel-commands', () => {
 
     it('runs /brief against the generic Jeeves action path', async () => {
         const { executeChannelCommand, mocks } = await loadChannelCommands();
-        const reply = vi.fn(async () => undefined);
+        const reply = vi.fn(async (_text: string) => undefined);
         const sendTyping = vi.fn(async () => undefined);
 
         const handled = await executeChannelCommand({
@@ -295,7 +297,7 @@ describe('core/channel-commands', () => {
         expect(reply).toHaveBeenCalledWith('Journal today');
     });
 
-    it('shows the setup prompt on /start for new spaces', async () => {
+    it('introduces adaptable Jeeves on /start for a new English space', async () => {
         const { executeChannelCommand } = await loadChannelCommands({
             spacePolicyJson: JSON.stringify({ onboarding_state: 'new' }),
         });
@@ -311,9 +313,52 @@ describe('core/channel-commands', () => {
         });
 
         expect(handled).toBe(true);
-        expect(reply).toHaveBeenCalledWith(expect.stringContaining('/setup'));
         expect(reply).toHaveBeenCalledWith(expect.stringContaining('/help'));
-        expect(reply).toHaveBeenCalledWith(expect.stringContaining('Tell me what this chat is for'));
+        expect(reply).toHaveBeenCalledWith(expect.stringContaining('starting as Jeeves'));
+        expect(reply).toHaveBeenCalledWith(expect.stringContaining('tone, standing rules, and role'));
+        expect(reply).toHaveBeenCalledWith(expect.stringContaining('/pack mutate <id>'));
+    });
+
+    it('introduces adaptable Jeeves in Russian from the resolved space language', async () => {
+        const { executeChannelCommand } = await loadChannelCommands({
+            spacePolicyJson: JSON.stringify({ onboarding_state: 'new', default_language: 'ru' }),
+        });
+        const reply = vi.fn(async () => undefined);
+
+        await executeChannelCommand({
+            channel: 'telegram',
+            channelRef: 'chat-1',
+            senderId: 'user-1',
+            isDirect: true,
+            rawText: '/start',
+            reply,
+        });
+
+        expect(reply).toHaveBeenCalledWith(expect.stringContaining('начинаю как Дживс'));
+        expect(reply).toHaveBeenCalledWith(expect.stringContaining('тон, постоянные правила и роль'));
+        expect(reply).toHaveBeenCalledWith(expect.stringContaining('/pack mutate <id>'));
+    });
+
+    it('preserves and names a custom pack without calling it Jeeves', async () => {
+        const { executeChannelCommand } = await loadChannelCommands({
+            spacePolicyJson: JSON.stringify({ onboarding_state: 'new' }),
+            assistantPackId: 'tutor',
+        });
+        const reply = vi.fn(async (_text: string) => undefined);
+
+        await executeChannelCommand({
+            channel: 'telegram',
+            channelRef: 'chat-1',
+            senderId: 'user-1',
+            isDirect: true,
+            rawText: '/start',
+            reply,
+        });
+
+        const message = reply.mock.calls[0][0];
+        expect(message).toContain('tutor specialization is already selected');
+        expect(message).toContain("I'll preserve it");
+        expect(message).not.toContain('Jeeves');
     });
 
     it('treats /jeeves setup as a backward-compatible setup alias', async () => {

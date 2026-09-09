@@ -2,7 +2,7 @@
 
 ## Teach one. Share the pack.
 
-**Small, open-source agents for real teams.**
+**Your Telegram assistant. Starts as Jeeves. Make it your own.**
 
 Private memory. Shared know-how. Your hardware.
 
@@ -26,24 +26,39 @@ Private memory. Shared know-how. Your hardware.
 - A `pack` changes the assistant's voice, enabled skills, default policies, seeded tasks, and optional pack-local tools.
 - A `grounding` holds stable facts and operating rules. Memory handles the changing stuff.
 - There is a local web client and, for owners, a dashboard showing health, spaces, stuck deliveries, the wiki, and memory. Off by default, loopback-only.
-- The happy path is simple: copy `config.example`, fill a few vars, run `pnpm setup:check`, bootstrap, then `pnpm dev`.
+- The guided local path is one command: `pnpm setup`. It opens a private browser page for OpenRouter, Telegram, owner pairing, and the first runtime check.
 - `DATA_DIR` is the assistant's suitcase: database, auth state, restore points, and pinned per-space behavior all live there.
 - Safe updates are meant to preserve both memory and behavior. Existing spaces keep their current pack + grounding snapshot until you intentionally switch them.
 - If you want something hackable rather than a hosted SaaS or a no-code agent builder, this repo is aimed at that.
 
 ## Quickstart
 
-This repo is `pnpm`-first.
+The guided path runs locally on macOS or Linux. You need a Telegram account and an OpenRouter
+connection with available credit. PiPi helps you connect both in a private browser page.
 
-Using a coding agent? Give it the [non-destructive, machine-checkable installation runbook](CODING_AGENT_INSTALLATION.md).
+### Let your coding agent set it up
+
+Paste this into Codex or Claude Code:
+
+> Install and configure Open PiPi from https://github.com/amyotoff/open-pipi. Use my existing checkout
+> if there is one. Follow `CODING_AGENT_INSTALLATION.md`, verify the install, then start `pnpm setup`
+> and open its local page for me. I will enter credentials privately on that page. Do not ask me
+> to paste them into chat, and enable background startup only if I choose it on the page.
+
+The agent handles the installation; you complete the connection steps below. PiPi starts as
+**Jeeves**, a calm personal assistant. You can change its tone, rules, and specialization later.
+Existing installations keep their current personality and owner context when setup is reopened.
+
+The [coding-agent runbook](CODING_AGENT_INSTALLATION.md) also supports an install-only request,
+which stops before configuration and startup. To install it yourself, follow steps 1–3.
 
 ### 1. Requirements
 
 - Node.js 24+
 - `pnpm` 10 (the repo pins `10.26.2`; Corepack is optional and is not bundled with every Node release)
-- a Telegram bot token
-- an OpenRouter API key for text (or an explicitly selected direct provider); the default tools, vision and grounding routes also use a Gemini API key
-- at least one owner ID
+
+The guided page helps you connect OpenRouter and create or connect a Telegram bot. It links your
+Telegram account without asking you to find a numeric owner ID.
 
 Optional:
 
@@ -55,8 +70,8 @@ Optional:
 ```bash
 git clone https://github.com/amyotoff/open-pipi.git
 cd open-pipi
-cp config.example .env
-pnpm install
+pnpm install --frozen-lockfile
+pnpm build
 ```
 
 If `pnpm` is missing and your Node distribution includes Corepack, run `corepack enable` before the install block. Otherwise install pnpm 10 using your normal toolchain manager.
@@ -64,16 +79,62 @@ If `pnpm` is missing and your Node distribution includes Corepack, run `corepack
 Lean Telegram-only install:
 
 ```bash
-pnpm install --no-optional
+pnpm install --frozen-lockfile --no-optional
 ```
 
 That skips optional support for `Discord`, `WhatsApp`, `Gmail`, and browser automation. Use the full install if you want those features.
 
 If you later enable `Discord`, `WhatsApp`, or `Gmail` in `.env` without reinstalling the optional packages, PiPi will fail fast with a clear startup error instead of partially booting. Browser automation is loaded on demand, so missing browser packages fail when a browser-based skill is invoked.
 
-### 3. Fill the minimum `.env`
+### 3. Guided local setup
 
-If you only want the simplest working setup, these are the key vars:
+```bash
+pnpm setup
+```
+
+The command opens a page available only on your computer. Run it again to resume an incomplete
+setup or manage the current installation.
+
+1. **Connect AI.** Sign in through OpenRouter or enter an existing key in the private field. PiPi
+   checks text and tool calls using that connection; the guided setup does not require a second
+   Gemini key. OpenRouter bills model usage separately from ChatGPT or Claude subscriptions.
+2. **Connect Telegram.** Follow the short BotFather guide to create a bot, or enter an existing
+   bot token privately. Open the one-time link, press Start in Telegram, then confirm **This is me**
+   on the setup page. You do not need to find your numeric Telegram ID.
+3. **Try PiPi.** Choose **Try now** and send your bot a normal message. A delivered reply completes
+   the conversation check. Keep the setup command running during this temporary trial.
+4. **Keep it running, if you want.** After the reply, choose **Keep running in background**. The
+   page confirms when setup can close. On supported macOS/Linux systems, the user service starts
+   after you sign in; PiPi is unavailable while the computer is asleep or off. Use **Stop PiPi**
+   on the setup page to stop the runtime.
+
+Image analysis and web search may need additional [provider configuration](docs/llm-gateway.md).
+
+Language, time zone, a few facts about you, and a current task are optional. Private context is
+saved only when you choose to save it; changes made while PiPi is running apply after restart.
+Tell PiPi how to change its tone and standing rules in conversation. Use `/pack` to see installed
+specializations and `/pack mutate <id>` to switch to one. Reopening setup does not reset it to Jeeves.
+
+Setup stores settings and credentials locally under `DATA_DIR` (default: `data/`), with credentials
+in a private file. It does not edit `.env`; existing `.env` values and exported environment settings
+take precedence. Credentials belong in the local page, never in the coding-agent chat.
+
+If the browser does not open, run `pnpm setup -- --show-link` in your own terminal and open the
+short-lived local link privately. `pnpm setup -- --json` gives an agent a read-only status snapshot
+without opening a page or making connection checks.
+
+Once the guided setup works, continue with [Telegram flow](#telegram-flow). The sections below
+are optional operator paths.
+
+## Manual setup (optional)
+
+Skip this section when using the guided page. For manual setup, copy the public template first:
+
+```bash
+cp config.example .env
+```
+
+Then edit `.env`. These are the key vars:
 
 ```dotenv
 TELEGRAM_BOT_TOKEN=...
@@ -109,22 +170,27 @@ pnpm setup:check
 
 The command reports missing required values, unsafe owner access, invalid pack/grounding IDs, data-directory permissions, and missing dependencies for optional channels you enabled. `pnpm setup:check -- --json` returns the same read-only result for scripts.
 
-### 4. Bootstrap your assistant
+### Optional grounding bootstrap
+
+The guided setup already supplies a neutral Jeeves starter. Use this separate, LLM-backed command
+only when you want to generate grounding files from a description:
 
 ```bash
 pnpm bootstrap
 ```
 
-This is the fastest way to make PiPi feel like your assistant instead of a generic demo. The bootstrap script:
+The bootstrap script:
 
 - asks for a short description of the assistant
 - creates `src/groundings/<slug>/`
 - tells you which `BOOTSTRAP_PACK` and `BOOTSTRAP_GROUNDING` values to add to `.env`
 - gives you smoke-test prompts for the first run
 
-`config.example` starts with the built-in Jeeves pack and grounding. The bootstrap script prints replacement values when you generate your own grounding.
+The manual defaults use the built-in Jeeves pack and `jeeves_personal` grounding; guided setup uses
+the neutral `jeeves_starter` grounding. Review generated files before using them: bootstrap can
+overwrite a grounding with the same slug. It prints the values to use for your new grounding.
 
-### 5. Run it
+### Run a manually configured installation
 
 ```bash
 pnpm dev
@@ -141,7 +207,7 @@ What happens next:
 - `/setup` is the explicit onboarding surface for a fresh space
 - `/channel mode ...` controls whether that space is fully conversational, inbox-only, notify-only, or quiet
 
-### Telegram flow
+## Telegram flow
 
 You normally do not need commands: write what you want in a regular message. The visible Telegram menu keeps only everyday outcomes:
 
@@ -153,7 +219,7 @@ You normally do not need commands: write what you want in a regular message. The
 Advanced setup and operator commands remain available for compatibility:
 
 - `/setup` opens a simple settings screen with one-tap recommended setup
-- `/setup apply` marks the space active and applies the current default setup flow
+- `/setup apply` reapplies the recommended Jeeves defaults for that space; it is not required after `pnpm setup` and can replace a different pack choice
 - `/setup smoke` runs the setup smoke handler
 - `/setup reset` returns onboarding to `new` without changing pack or grounding
 - `/channel status` shows the current transport and channel mode for this space
@@ -164,7 +230,7 @@ Advanced setup and operator commands remain available for compatibility:
 - `/backup status` shows the latest backup info and a pre-upgrade reminder
 - `/approve [browse_web|deep_research]` and `/deny [browse_web|deep_research]` resolve pending risky actions explicitly
 
-### 6. Optional: run the full local stack
+## Optional: run the full local stack
 
 If you want local fallback models, safer tool execution, and browser automation, use Docker Compose.
 
@@ -972,6 +1038,7 @@ Useful scripts:
 | `pnpm bootstrap` | Description to grounding bootstrap flow |
 | `pnpm content:check` | Validate installable packs and groundings |
 | `pnpm content:new` | Scaffold a pack or grounding without overwriting content |
+| `pnpm setup` | Guided local AI, Telegram, and owner setup |
 | `pnpm setup:check` | Read-only first-run and configuration diagnostics |
 | `pnpm backup:restore` | Restore a runtime backup by id, path, `latest`, or `latest-healthy` |
 

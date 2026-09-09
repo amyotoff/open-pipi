@@ -31,6 +31,7 @@
         "test:evaluator": "vitest run src/core/evaluator.test.ts",
         "backup:restore": "ts-node src/scripts/restore-runtime-backup.ts",
         "bootstrap": "ts-node src/scripts/bootstrap.ts",
+        "setup": "ts-node src/scripts/setup.ts",
         "content:check": "ts-node src/scripts/content-check.ts",
         "content:new": "ts-node src/scripts/content-new.ts",
         "setup:check": "ts-node src/scripts/doctor.ts",

@@ -1,6 +1,16 @@
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { formatDoctorReport, inspectDoctor, isDoctorCli, type DoctorIO, type DoctorInput } from './doctor';
+import { updateSetupConfig } from '../setup/config-store';
+import {
+    formatDoctorReport,
+    inspectDoctor,
+    isDoctorCli,
+    loadDoctorInput,
+    type DoctorIO,
+    type DoctorInput,
+} from './doctor';
 
 const cwd = path.resolve('/repo');
 const packPath = path.join(cwd, 'src', 'packs', 'jeeves', 'agent.md');
@@ -63,6 +73,45 @@ describe('Open PiPi doctor', () => {
         for (const id of ['llm-tools-key', 'llm-vision-key', 'llm-search-key']) {
             expect(checks.find((item) => item.id === id)).toMatchObject({ status: 'warn' });
             expect(checks.find((item) => item.id === id)?.message).toContain('GEMINI_API_KEY');
+        }
+    });
+
+    it('loads the same local setup configuration as runtime without exposing credentials', () => {
+        const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'open-pipi-doctor-'));
+        const dataDir = path.join(testRoot, 'private-data');
+        const previousDataDir = process.env.DATA_DIR;
+        const previousToolsProvider = process.env.LLM_TOOLS_PROVIDER;
+        const previousOpenRouterKey = process.env.OPENROUTER_API_KEY;
+        try {
+            updateSetupConfig(dataDir, {
+                settings: { LLM_TOOLS_PROVIDER: 'openrouter' },
+                credentials: { OPENROUTER_API_KEY: 'stored-private-key' },
+            });
+            process.env.DATA_DIR = dataDir;
+            delete process.env.LLM_TOOLS_PROVIDER;
+            delete process.env.OPENROUTER_API_KEY;
+
+            const input = loadDoctorInput(testRoot);
+            expect(input.localConfigFound).toBe(true);
+            expect(input.localConfigError).toBe(false);
+            expect(input.env).toMatchObject({
+                LLM_TOOLS_PROVIDER: 'openrouter',
+                OPENROUTER_API_KEY: 'stored-private-key',
+            });
+            const localCheck = inspectDoctor(input, buildIO()).find((item) => item.id === 'local-config');
+            expect(JSON.stringify(localCheck)).not.toContain('stored-private-key');
+            expect(inspectDoctor(input, buildIO()).find((item) => item.id === 'env-file')).toMatchObject({
+                status: 'pass',
+                message: 'Using local setup configuration and exported overrides.',
+            });
+        } finally {
+            if (previousDataDir === undefined) delete process.env.DATA_DIR;
+            else process.env.DATA_DIR = previousDataDir;
+            if (previousToolsProvider === undefined) delete process.env.LLM_TOOLS_PROVIDER;
+            else process.env.LLM_TOOLS_PROVIDER = previousToolsProvider;
+            if (previousOpenRouterKey === undefined) delete process.env.OPENROUTER_API_KEY;
+            else process.env.OPENROUTER_API_KEY = previousOpenRouterKey;
+            fs.rmSync(testRoot, { recursive: true, force: true });
         }
     });
 

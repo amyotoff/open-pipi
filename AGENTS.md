@@ -13,12 +13,14 @@ Open PiPi — a Telegram-first, owner-operated assistant runtime with memory, pl
 - pnpm lint
 - pnpm test
 - pnpm build
+- pnpm setup
 - pnpm setup:check -- --json
 - pnpm verify
 
 ## Installation requests
 - Follow [CODING_AGENT_INSTALLATION.md](CODING_AGENT_INSTALLATION.md) for the safe, deterministic coding-agent workflow.
 - Default to a native full dependency install. Secrets, Docker, deployment, personalization, and persistent startup remain explicit opt-ins.
+- Run `pnpm setup` only when interactive configuration is explicitly requested. The operator enters secrets in its local page; do not ask for or transcribe them.
 
 ## Rules
 - Plan before editing.

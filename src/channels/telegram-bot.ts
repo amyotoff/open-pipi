@@ -36,6 +36,12 @@ export const bot = new Telegraf(TELEGRAM_BOT_TOKEN || 'dummy_token');
 
 let fallbackHandlersRegistered = false;
 let launched = false;
+let starting: Promise<void> | null = null;
+let terminalFailureHandler: (() => void | Promise<void>) | null = null;
+
+export function onTelegramBotTerminalFailure(handler: () => void | Promise<void>): void {
+    terminalFailureHandler = handler;
+}
 
 /**
  * Register the catch-all handlers. Telegraf middleware runs in registration
@@ -77,20 +83,70 @@ export function registerTelegramFallbackHandlers(handlers?: TelegramFallbackHand
     });
 }
 
-export function startTelegramBot() {
+export async function startTelegramBot(): Promise<void> {
     if (!TELEGRAM_BOT_TOKEN) {
         console.log('Skipping Telegram bot (missing token).');
         return;
     }
+    if (launched) return;
+    if (starting) return starting;
 
-    // Register hamburger menu commands
-    bot.telegram
-        .setMyCommands([...TELEGRAM_MENU_COMMANDS])
-        .catch((err) => console.error('[BOT] Failed to set commands:', err.message));
+    starting = (async () => {
+        // Menu setup is useful but does not decide whether polling is ready.
+        void bot.telegram
+            .setMyCommands([...TELEGRAM_MENU_COMMANDS])
+            .catch(() => console.error('[BOT] Failed to set Telegram commands.'));
 
-    bot.launch();
-    launched = true;
-    console.log('Telegram bot started.');
+        const webhook = await bot.telegram.getWebhookInfo().catch(() => {
+            throw new Error('Telegram connection could not be checked.');
+        });
+        if (webhook.url) {
+            throw new Error('Telegram is connected to an active webhook; it was left unchanged.');
+        }
+
+        let ready = false;
+        let markReady: (() => void) | undefined;
+        let rejectReady: ((error: unknown) => void) | undefined;
+        const readyPromise = new Promise<void>((resolve, reject) => {
+            markReady = resolve;
+            rejectReady = reject;
+        });
+        const telegram = bot.telegram as typeof bot.telegram & {
+            callApi: (method: string, payload?: Record<string, unknown>, signal?: unknown) => Promise<unknown>;
+        };
+        const originalCallApi = telegram.callApi.bind(telegram);
+        telegram.callApi = (async (method: string, payload?: Record<string, unknown>, signal?: unknown) => {
+            const firstGetUpdates = method === 'getUpdates' && !ready;
+            const response = await originalCallApi(
+                method,
+                firstGetUpdates ? { ...(payload || {}), timeout: 0 } : payload,
+                signal
+            );
+            if (firstGetUpdates) {
+                ready = true;
+                launched = true;
+                console.log('Telegram bot started.');
+                markReady?.();
+            }
+            return response;
+        }) as typeof telegram.callApi;
+
+        const polling = bot.launch();
+        void polling.catch(() => {
+            launched = false;
+            telegram.callApi = originalCallApi as typeof telegram.callApi;
+            if (!ready) rejectReady?.(new Error('Telegram polling could not be started.'));
+            else void terminalFailureHandler?.();
+        });
+        await readyPromise;
+        telegram.callApi = originalCallApi as typeof telegram.callApi;
+    })();
+
+    try {
+        await starting;
+    } finally {
+        starting = null;
+    }
     // Shutdown belongs to the transport registry, which the bootstrap drives on
     // SIGINT/SIGTERM. Registering signal handlers here too would stop the bot
     // twice and make telegraf throw on the second call.

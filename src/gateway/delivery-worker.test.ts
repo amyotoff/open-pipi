@@ -41,8 +41,9 @@ function createFakeTransport(results: DeliveryResult[] = []): FakeTransport {
     };
 }
 
-async function loadWorker(transport?: TransportAdapter) {
+async function loadWorker(transport?: TransportAdapter, dialogueMarker = vi.fn()) {
     vi.resetModules();
+    vi.doMock('../setup/dialogue-evidence', () => ({ markDialogueDelivered: dialogueMarker }));
     const db = await import('../db');
     db.initDatabase();
 
@@ -52,7 +53,7 @@ async function loadWorker(transport?: TransportAdapter) {
 
     const outbox = await import('./outbox');
     const worker = await import('./delivery-worker');
-    return { db, outbox, worker };
+    return { db, outbox, worker, dialogueMarker };
 }
 
 beforeEach(() => {
@@ -91,6 +92,40 @@ describe('delivery worker', () => {
         expect(stored.message_id).toBe('tg-1');
     });
 
+    it('marks dialogue only after a matching response is sent', async () => {
+        const transport = createFakeTransport();
+        const { outbox, worker, dialogueMarker } = await loadWorker(transport);
+        outbox.enqueueDelivery({
+            transport: 'telegram',
+            destination: { endpointId: '111', endpointType: 'direct' },
+            payload,
+            correlationId: 'turn-1',
+        });
+
+        await worker.processNextDelivery();
+
+        expect(dialogueMarker).toHaveBeenCalledWith({
+            transport: 'telegram',
+            endpointType: 'direct',
+            endpointId: '111',
+            correlationId: 'turn-1',
+        });
+    });
+
+    it('keeps a successful delivery sent when evidence storage fails', async () => {
+        const transport = createFakeTransport();
+        const dialogueMarker = vi.fn(() => {
+            throw new Error('evidence disk unavailable');
+        });
+        const { outbox, worker } = await loadWorker(transport, dialogueMarker);
+        const entry = outbox.enqueueDelivery({ transport: 'telegram', destination, payload });
+
+        await expect(worker.processNextDelivery()).resolves.toBe(true);
+
+        expect(outbox.getOutboxEntry(entry.id)?.status).toBe('sent');
+        expect(transport.sent).toHaveLength(1);
+    });
+
     it('reports nothing to do on an empty queue', async () => {
         const { worker } = await loadWorker(createFakeTransport());
 
@@ -122,13 +157,14 @@ describe('delivery worker', () => {
 
     it('stops retrying a permanent rejection', async () => {
         const transport = createFakeTransport([{ status: 'permanent_error', error: 'chat not found' }]);
-        const { outbox, worker } = await loadWorker(transport);
+        const { outbox, worker, dialogueMarker } = await loadWorker(transport);
         const entry = outbox.enqueueDelivery({ transport: 'telegram', destination, payload });
 
         await worker.processNextDelivery();
 
         expect(outbox.getOutboxEntry(entry.id)!.status).toBe('failed');
         expect(outbox.getOutboxEntry(entry.id)!.attempts).toBe(1);
+        expect(dialogueMarker).not.toHaveBeenCalled();
     });
 
     it('treats an adapter that throws as a transient fault instead of dying', async () => {
