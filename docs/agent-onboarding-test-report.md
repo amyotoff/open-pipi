@@ -1,5 +1,32 @@
 # Agent onboarding experiment — validation
 
+## Public MVP extension
+
+`pnpm verify` passed for the extension: 129 test files / 1108 tests, 20 feature smoke tests,
+format, typecheck, lint, content validation, coverage thresholds, and build. Coverage: 82.67%
+statements, 70.65% branches, 90.29% functions, 85.25% lines. Cloudflare Wrangler dry-run passed
+with the explicit public assets directory and no runtime/data bindings.
+
+The v0.2 extension adds a full CLI-first journey, an exact release commit for fresh installs,
+optional MCP personalization, a bounded read-only progress command, and an isolated Cloudflare
+static artifact. Focused checks cover missing/configured/running/dialogue states, safe failures,
+public artifact contents, MIME/security headers, source pin validation, and relative document links.
+The actual status pipeline is tested with synthetic credentials, a live process lock, and generated
+dialogue evidence: a matching run verifies, a changed run rejects stale evidence, and a stopped run
+is not ready. Reads make no network calls and leave every data file unchanged.
+
+The landing uses the user's Helvetica/light gray/large centered header reference and functional
+Russian/English, fresh/existing, and copy controls. The public deployment and rendered browser QA
+are recorded with the final PR validation. Live Telegram/provider actions remain a real tester step;
+synthetic evidence tests do not claim an actual account conversation occurred in this build task.
+
+Terra's extension review found two P2 issues, both fixed and approved on re-review: saved
+credentials now report `configuration_present` / `validate_in_setup`, without implying live
+validation; and the release builder verifies the exact clean HEAD is advertised by the official
+remote before producing any upload artifact. Unpublished commits fail closed.
+
+## Original v0.1 baseline
+
 Validated locally on 2026-09-09 with Node 25.2.1 and pnpm 10.26.2. The repository requires Node
 24 or newer; GitHub CI uses Node 24. Fixtures contain synthetic context, disposable directories
 under `.tmp`, and no real provider, Telegram, or user client configuration changes.

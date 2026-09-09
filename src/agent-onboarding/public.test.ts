@@ -56,7 +56,7 @@ describe('agent onboarding public documents', () => {
         const etag = first.headers.get('etag');
 
         expect(first.headers.get('content-type')).toBe('text/markdown; charset=utf-8');
-        expect(first.headers.get('cache-control')).toBe('public, max-age=300');
+        expect(first.headers.get('cache-control')).toBe('public, max-age=0, must-revalidate');
         expect(body).toContain('name: open-pipi-onboarding');
         expect(etag).toBeTruthy();
 
@@ -70,7 +70,8 @@ describe('agent onboarding public documents', () => {
 
     it('fails closed outside the exact allowlist', async () => {
         const base = await start();
-        expect((await fetch(`${base}/agent-onboarding/`)).status).toBe(404);
+        expect((await fetch(`${base}/agent-onboarding/`)).status).toBe(200);
+        expect((await fetch(`${base}/agent-onboarding/toString`)).status).toBe(404);
         expect((await fetch(`${base}/agent-onboarding/%2e%2e/private`)).status).toBe(404);
         const post = await fetch(`${base}/agent-onboarding/SKILL.md`, { method: 'POST' });
         expect(post.status).toBe(405);

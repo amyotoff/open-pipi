@@ -16,7 +16,7 @@
         "dev": "nodemon --exec ts-node src/index.ts",
         "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
         "prebuild": "pnpm clean",
-        "build": "tsc -p tsconfig.build.json && cp -r src/packs dist/packs && cp -r src/groundings dist/groundings && cp -r src/brain dist/brain && cp -r src/web/public dist/web/public && cp -r src/agent-onboarding/skills dist/agent-onboarding/skills",
+        "build": "tsc -p tsconfig.build.json && cp -r src/packs dist/packs && cp -r src/groundings dist/groundings && cp -r src/brain dist/brain && cp -r src/web/public dist/web/public && cp -r src/agent-onboarding/skills dist/agent-onboarding/skills && cp -r src/agent-onboarding/assets dist/agent-onboarding/assets",
         "typecheck": "tsc --noEmit",
         "lint": "eslint src/",
         "lint:fix": "eslint src/ --fix",
@@ -38,7 +38,9 @@
         "prepare": "husky",
         "web:account": "ts-node src/scripts/web-account.ts",
         "onboarding:serve": "ts-node src/scripts/agent-onboarding.ts serve",
-        "test:onboarding": "vitest run src/agent-onboarding src/scripts/agent-onboarding.test.ts src/scripts/setup.test.ts src/setup/server.test.ts src/setup/owner-context.test.ts"
+        "test:onboarding": "vitest run src/agent-onboarding src/scripts/agent-onboarding.test.ts src/scripts/setup.test.ts src/setup/server.test.ts src/setup/owner-context.test.ts src/scripts/onboarding-status.test.ts src/scripts/build-onboarding-site.test.ts",
+        "onboarding:status": "ts-node src/scripts/onboarding-status.ts",
+        "onboarding:build": "ts-node src/scripts/build-onboarding-site.ts"
     },
     "keywords": [
         "telegram-bot",

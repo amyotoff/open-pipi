@@ -1,5 +1,74 @@
 # Experimental agent onboarding for Open PiPi
 
+## Public MVP: link to a working conversation
+
+The current entry point guides a coding agent through a fresh or existing local installation,
+private setup, and verification of an actual Telegram reply. MCP personalization is optional;
+neither unsupported MCP clients nor a reload should block the main setup journey.
+
+The page uses Helvetica, a light gray background, a large centered heading, and a prompt handoff.
+It supports Russian/English, fresh/existing installation choices, clipboard confirmation, and
+manual selection if clipboard permission is unavailable.
+
+Implementation ownership for this extension:
+
+1. Sol: a one-shot, read-only status CLI over existing setup, doctor, and dialogue evidence.
+2. Sol: installation, setup continuation, recovery, and optional MCP instructions.
+3. Parent: landing page, an allowlisted static build, Cloudflare deployment, and complete checks.
+4. Terra: independent review of the integrated changes and any corrections.
+
+### Journey and completion
+
+The agent reads `SKILL.md` and the same-origin `/agent-onboarding/release.json`. A fresh install
+uses the official Git repository and the exact 40-character commit in the manifest. Existing
+checkouts retain their branch, operator configuration, and uncommitted work.
+
+After a verified source install, the agent keeps the private `pnpm setup` process open. The owner
+connects AI and Telegram, pairs their account, and chooses **Try now**. The agent reads:
+
+```sh
+node dist/scripts/onboarding-status.js --data-dir /absolute/path/to/the/same/data
+```
+
+This command performs local reads only. It never starts a runtime, probes a provider, changes
+configuration, prints credentials, or creates a missing data directory. Its top-level `ready`
+means `progress: "dialogue_verified"`: a ready runtime with delivered dialogue evidence for its
+current run and configured owner. `doctor.ready` separately means startup prerequisites pass.
+An old reply from an earlier run, installed dependencies, or saved owner context is not completion.
+
+The runtime remains local. Temporary mode requires setup to stay open; background mode remains
+the owner's explicit choice in the private page. AI usage is billed by the configured provider.
+
+### Publish the public instructions to Cloudflare
+
+`cloudflare/onboarding/wrangler.jsonc` defines an isolated static Worker named
+`open-pipi-onboarding-mvp` on `workers.dev`. It has no custom domain routes, private API, remote MCP,
+runtime process, database, credentials, or user-data binding. The static artifact is generated from
+an explicit file allowlist; no repository or runtime directory is copied into the upload.
+
+From a reviewed, committed, clean checkout that has been pushed to the official repository:
+
+```sh
+pnpm verify
+pnpm onboarding:build
+wrangler whoami
+wrangler deploy --config cloudflare/onboarding/wrangler.jsonc --assets /absolute/outputDir/from/build
+```
+
+The build prints a new output directory and the pinned source commit. It refuses a dirty checkout
+or a commit not advertised by the official remote (checked online with a 30-second timeout),
+and never reuses a directory containing other files. Set `CLOUDFLARE_ACCOUNT_ID` to the intended
+account returned by `wrangler whoami` if Wrangler reports multiple accounts. Confirm the public `release.json` matches the
+pushed commit, all five Markdown files return `text/markdown`, relative references resolve, and
+private routes return 404. The deployment uses no SPA fallback. `_headers` applies CSP, noindex,
+correct content types, and revalidation. Inspect the rendered desktop/mobile page, language and
+path switches, clipboard behavior, and browser errors after publication.
+
+To roll back the public release, deploy a previously verified static artifact. This does not change
+installed user runtimes. Do not expose the private setup service through a tunnel or public Worker.
+
+## Original context-preview experiment
+
 This experiment tests one local journey: give a coding agent an instruction link, connect a
 local MCP server, preview personal context, review it in PiPi's private setup page, and read back
 the saved result. The public instructions and private setup are separate surfaces; the MCP
@@ -106,8 +175,8 @@ OAuth server, multi-tenant authorization, or public apply endpoint.
 
 Closing the documentation server and MCP client disables those surfaces. Start ordinary
 `pnpm setup` without `--agent-onboarding` to disable experimental review routes. Saved context
-remains valid PiPi context and can be changed through normal private setup. No deployment,
-background service installation, or domain change is part of this experiment.
+remains valid PiPi context and can be changed through normal private setup. The original context-preview experiment did not deploy or install background services.
+The public Cloudflare MVP above adds instruction hosting only.
 
 Preview validity is 30 minutes. The private ledger retains at most 100 previews, 100 successful
 application records, and 100 incomplete attempts, with a 1 MB file limit. Unexpired pending

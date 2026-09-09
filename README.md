@@ -157,8 +157,9 @@ are optional operator paths.
 
 ## Manual setup (optional)
 
-For the optional local **agent-onboarding experiment** — instruction link, MCP preview, and
-private confirmation of owner context — see [the experiment guide](docs/agent-onboarding.md).
+For the **agent-onboarding MVP** — give a coding agent one link, install locally, connect privately,
+and verify the first Telegram reply — see [the experiment guide](docs/agent-onboarding.md).
+MCP personalization is optional; the public Cloudflare page serves instructions for the local runtime.
 
 
 Skip this section when using the guided page. For manual setup, copy the public template first:
