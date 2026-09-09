@@ -133,6 +133,10 @@ async function fallbackToLLM(prompt: string, systemPrompt?: string): Promise<{ t
     }
     messages.push({ role: 'user', content: prompt });
 
-    const result = await processWithLLM(messages, { chatId: 'ollama_fallback', userId: 'ollama_fallback' });
+    const result = await processWithLLM(messages, {
+        chatId: 'ollama_fallback',
+        userId: 'ollama_fallback',
+        allowedTools: [],
+    });
     return { text: result.text, fromOllama: false };
 }

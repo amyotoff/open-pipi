@@ -100,7 +100,7 @@ cp config.example .env
 chmod 600 .env
 ```
 
-Minimum values (OpenRouter is the default; see [direct provider bypass](docs/llm-gateway.md) for existing Gemini installs):
+Minimum values for text startup (OpenRouter is the default; see [capability routes and direct provider bypass](docs/llm-gateway.md) for existing Gemini installs):
 
 ```dotenv
 TELEGRAM_BOT_TOKEN=...
@@ -108,6 +108,8 @@ OPENROUTER_API_KEY=...
 OWNER_TG_IDS=123456789
 TZ=UTC
 ```
+
+The default tools, vision and native grounding routes also need `GEMINI_API_KEY` when used. The operator can select another direct tools/vision provider, or explicitly route those capabilities through OpenRouter. The doctor reports missing capability keys as warnings; `ready: true` confirms startup requirements, not that every optional capability has credentials.
 
 After the operator confirms that configuration is ready, the agent may run the read-only, secret-safe doctor without inspecting `.env`:
 

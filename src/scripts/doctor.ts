@@ -274,6 +274,23 @@ export function inspectDoctor(input: DoctorInput, io: DoctorIO = defaultIO): Doc
                       `${keyName} is missing or still contains a placeholder (${llm.provider}).`
                   )
         );
+        for (const [id, label, provider] of [
+            ['llm-tools-key', 'LLM tools API key', llm.toolsProvider],
+            ['llm-vision-key', 'LLM vision API key', llm.visionProvider],
+            ['llm-search-key', 'LLM search API key', llm.searchProvider],
+        ] as const) {
+            const routeKeyName = LLM_KEY_ENV[provider];
+            checks.push(
+                hasConfiguredValue(input.env[routeKeyName])
+                    ? check(id, label, 'pass', `${routeKeyName} is configured (${provider}).`)
+                    : check(
+                          id,
+                          label,
+                          'warn',
+                          `${routeKeyName} is missing or still contains a placeholder (${provider}); this capability will fail until configured.`
+                      )
+            );
+        }
     } catch (error: any) {
         checks.push(check('llm-key', 'LLM provider', 'fail', error.message));
     }

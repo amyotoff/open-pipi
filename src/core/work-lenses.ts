@@ -135,6 +135,7 @@ export async function runWorkLensForSpace(input: RunWorkLensInput): Promise<stri
             spaceId: input.spaceId,
             channel: input.channel,
             channelRef: input.channelRef,
+            allowedTools: [],
         });
     } catch (err) {
         console.error(`[work-lenses] LLM call failed for lens=${input.lens}:`, err);

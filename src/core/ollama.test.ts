@@ -96,7 +96,7 @@ describe('core/ollama', () => {
                 { role: 'system', content: 'System prompt' },
                 { role: 'user', content: 'Hello' },
             ],
-            { chatId: 'ollama_fallback', userId: 'ollama_fallback' }
+            { chatId: 'ollama_fallback', userId: 'ollama_fallback', allowedTools: [] }
         );
     });
 

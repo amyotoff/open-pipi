@@ -262,6 +262,7 @@ Output exactly:
                                 spaceId: space.id,
                                 channel: space.channel || 'telegram',
                                 channelRef: space.external_ref,
+                                allowedTools: [],
                             }
                         );
 

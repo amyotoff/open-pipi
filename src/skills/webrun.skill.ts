@@ -6,7 +6,7 @@ import { logTokenUsage } from '../db';
 import { SkillManifest } from './_types';
 import { searchAndSummarize } from '../utils/search';
 import { assertSafeBrowserUrl, withBrowserContext } from '../utils/browser';
-import { LLM_EXECUTOR_MODEL } from '../config';
+import { LLM_TOOLS_MODEL, LLM_TOOLS_PROVIDER } from '../config';
 import { logInfo, summarizeText } from '../utils/logging';
 
 const MAX_LOOPS = 15;
@@ -106,13 +106,14 @@ RULES:
                     const blocked = guardLLMCall();
                     if (blocked) return `[WEBRUN_RESULT] ${blocked}`;
                     const response = await generateLLM({
-                        model: LLM_EXECUTOR_MODEL,
+                        provider: LLM_TOOLS_PROVIDER,
+                        model: LLM_TOOLS_MODEL,
                         messages: [{ role: 'system', content: systemPrompt }, ...history],
                         tools: internalTools,
                         temperature: 0.5,
                     });
                     logTokenUsage(
-                        LLM_EXECUTOR_MODEL,
+                        LLM_TOOLS_MODEL,
                         response.usage.inputTokens,
                         response.usage.outputTokens,
                         context?.spaceId,

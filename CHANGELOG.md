@@ -6,9 +6,12 @@ All notable changes to Open PiPi will be documented in this file.
 
 ### Changed
 
-- OpenRouter is now the default inference bus behind a small, provider-neutral LLM Gateway.
-  Chat, advisor, vision, Brain, research and bootstrap use the same message/tool contract.
-  Select `LLM_PROVIDER=openai|anthropic|gemini` for a direct bypass. Existing Gemini-only
+- OpenRouter is now the default text inference bus behind a small, provider-neutral LLM Gateway.
+  Vision, grounding and turns with tools default to direct APIs (Gemini alongside OpenRouter text).
+  Each capability has independent provider/model settings, with OpenRouter available explicitly
+  for experiments. Native tool turns keep their route through retries and finalization without
+  silently falling back to another provider. Select `LLM_PROVIDER=openai|anthropic|gemini`
+  for a direct text bypass. Existing Gemini-only
   installs must explicitly select `gemini`; see [migration notes](docs/llm-gateway.md).
 - Tool schemas no longer depend on the Google SDK. Tool-call IDs and signed continuation
   state survive multi-step execution across all four routes.

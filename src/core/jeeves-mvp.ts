@@ -186,6 +186,7 @@ export async function runJeevesMvpActionForSpace(args: {
         spaceId,
         channel,
         channelRef,
+        allowedTools: [],
     });
 
     const text = response.text?.trim();

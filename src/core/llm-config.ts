@@ -32,19 +32,28 @@ export function resolveLlmConfig(env: NodeJS.ProcessEnv) {
         env.LLM_ADVISOR_MODEL?.trim() ||
         (provider === 'gemini' && env.GEMINI_ADVISOR_MODEL?.trim()) ||
         defaults[provider][1];
-    const searchProvider = resolveLlmProvider(
-        env.LLM_SEARCH_PROVIDER || (provider === 'gemini' ? 'gemini' : 'openrouter')
-    );
+    const defaultNativeProvider = provider === 'openrouter' ? 'gemini' : provider;
+    const toolsProvider = resolveLlmProvider(env.LLM_TOOLS_PROVIDER || defaultNativeProvider);
+    const visionProvider = resolveLlmProvider(env.LLM_VISION_PROVIDER || defaultNativeProvider);
+    const searchProvider = resolveLlmProvider(env.LLM_SEARCH_PROVIDER || 'gemini');
     if (searchProvider !== 'openrouter' && searchProvider !== 'gemini') {
         throw new Error('LLM_SEARCH_PROVIDER must be openrouter or gemini.');
     }
+    const defaultModel = (selectedProvider: LLMProvider) =>
+        (selectedProvider === 'gemini' && env.GEMINI_EXECUTOR_MODEL?.trim()) || defaults[selectedProvider][0];
     return {
         provider,
         apiKey: env[LLM_KEY_ENV[provider]]?.trim() || '',
         executorModel,
         advisorModel,
-        visionModel: env.LLM_VISION_MODEL?.trim() || executorModel,
+        toolsProvider,
+        toolsModel:
+            env.LLM_TOOLS_MODEL?.trim() || (toolsProvider === provider ? executorModel : defaultModel(toolsProvider)),
+        visionProvider,
+        visionModel:
+            env.LLM_VISION_MODEL?.trim() ||
+            (visionProvider === provider ? executorModel : defaultModel(visionProvider)),
         searchProvider,
-        searchModel: env.LLM_SEARCH_MODEL?.trim() || defaults[searchProvider][0],
+        searchModel: env.LLM_SEARCH_MODEL?.trim() || defaultModel(searchProvider),
     };
 }

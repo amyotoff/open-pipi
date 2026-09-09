@@ -4,6 +4,9 @@ async function loadLlm(options?: {
     advisorEnabled?: boolean;
     maxAdvisorCalls?: number;
     executorModel?: string;
+    toolsProvider?: string;
+    toolsModel?: string;
+    ollamaHealthy?: boolean;
     generateLLM?: ReturnType<typeof vi.fn<(...args: any[]) => any>>;
     registeredTools?: Array<{ name: string }>;
     coreTools?: Array<{ name: string }>;
@@ -29,6 +32,9 @@ async function loadLlm(options?: {
 
     vi.doMock('../config', () => ({
         LLM_PROVIDER: 'openrouter',
+        LLM_TOOLS_PROVIDER: options?.toolsProvider || 'gemini',
+        LLM_TOOLS_MODEL: options?.toolsModel || 'tools-test',
+        LLM_VISION_PROVIDER: 'gemini',
         LLM_VISION_MODEL: 'vision-test',
         LLM_EXECUTOR_MODEL: options?.executorModel || 'executor-test',
         LLM_ADVISOR_MODEL: 'advisor-test',
@@ -50,7 +56,7 @@ async function loadLlm(options?: {
     vi.doMock('./healthcheck', () => ({
         guardLLMCall: vi.fn(() => null),
         reportLLMResult: vi.fn(),
-        isOllamaHealthy: vi.fn(() => false),
+        isOllamaHealthy: vi.fn(() => options?.ollamaHealthy ?? false),
     }));
     vi.doMock('../utils/failure-monitor', () => ({
         reportOperationalFailure: vi.fn(),
@@ -144,6 +150,9 @@ describe('core/llm advisor strategy', () => {
         expect(result.text).toBe('Не выполнил: в этом ходе не было успешного инструмента, изменяющего данные.');
         expect(result.text).not.toMatch(/удалил|теперь пуст/i);
         expect(generateLLM.mock.calls[0][0].tools).toBeUndefined();
+        expect(generateLLM.mock.calls[0][0]).toEqual(
+            expect.objectContaining({ provider: 'openrouter', model: 'executor-test' })
+        );
         expect(generateLLM.mock.calls[0][0].messages[0].content).toContain('No functions or tools are available');
     });
 
@@ -331,7 +340,7 @@ describe('core/llm advisor strategy', () => {
     });
 
     it('preserves opaque continuation state and separate IDs for same-name tool calls', async () => {
-        const providerState = { provider: 'openrouter', model: 'executor-test', value: { signed: 'opaque-state' } };
+        const providerState = { provider: 'gemini', model: 'tools-test', value: { signed: 'opaque-state' } };
         const generateLLM = vi
             .fn()
             .mockResolvedValueOnce({
@@ -393,10 +402,13 @@ describe('core/llm advisor strategy', () => {
 
         expect(result).toEqual({ text: 'Final executor answer' });
         expect(generateLLM.mock.calls.map((call) => call[0].model)).toEqual([
-            'executor-test',
+            'tools-test',
             'advisor-test',
-            'executor-test',
+            'tools-test',
         ]);
+        expect(generateLLM.mock.calls[0][0].provider).toBe('gemini');
+        expect(generateLLM.mock.calls[1][0].provider).toBe('openrouter');
+        expect(generateLLM.mock.calls[2][0].provider).toBe('gemini');
         expect(generateLLM.mock.calls[0][0].tools.map((tool: any) => tool.name)).toContain('consult_advisor');
         expect(generateLLM.mock.calls[1][0].tools).toBeUndefined();
         expect(generateLLM.mock.calls[1][0].messages[1].content).toContain('Focused question:');
@@ -552,6 +564,9 @@ describe('core/llm tool-loop completion', () => {
 
         expect(result).toEqual({ text: 'Recovered from the actual tool result.' });
         expect(generateLLM).toHaveBeenCalledTimes(3);
+        for (const [request] of generateLLM.mock.calls) {
+            expect(request).toEqual(expect.objectContaining({ provider: 'gemini', model: 'tools-test' }));
+        }
         expect(generateLLM.mock.calls[2][0].toolChoice).toBe('none');
     });
 
@@ -575,6 +590,57 @@ describe('core/llm tool-loop completion', () => {
 
         expect(result).toEqual({ text: '' });
         expect(result.text).not.toContain('Модель завершила работу');
+    });
+
+    it('does not fall back to Ollama after a tool-enabled native route fails', async () => {
+        const generateLLM = vi.fn().mockRejectedValue(new Error('native capability route unavailable'));
+        const fetchMock = vi.fn();
+        vi.stubGlobal('fetch', fetchMock);
+        try {
+            const mod = await loadLlm({
+                advisorEnabled: false,
+                generateLLM,
+                ollamaHealthy: true,
+                registeredTools: [{ name: 'workspace_status' }],
+            });
+
+            const result = await mod.processWithLLM([{ role: 'user', content: 'Check workspace.' }], {
+                userId: '111',
+                allowedTools: ['workspace_status'],
+            });
+
+            expect(result.text).toContain('Маршрут инструментов gemini/tools-test сейчас недоступен');
+            expect(generateLLM).toHaveBeenCalledTimes(2);
+            expect(fetchMock).not.toHaveBeenCalled();
+            for (const [request] of generateLLM.mock.calls) {
+                expect(request).toEqual(expect.objectContaining({ provider: 'gemini', model: 'tools-test' }));
+            }
+        } finally {
+            vi.unstubAllGlobals();
+        }
+    });
+
+    it.each([
+        ['openrouter', 'openrouter-tools-model'],
+        ['openai', 'openai-tools-model'],
+    ])('uses an explicit %s tool route for a tool-enabled turn', async (toolsProvider, toolsModel) => {
+        const generateLLM = vi.fn().mockResolvedValue({ text: 'Tool-capable answer.', toolCalls: [] });
+        const mod = await loadLlm({
+            advisorEnabled: false,
+            generateLLM,
+            toolsProvider,
+            toolsModel,
+            registeredTools: [{ name: 'workspace_status' }],
+        });
+
+        await mod.processWithLLM([{ role: 'user', content: 'Check workspace.' }], {
+            userId: '111',
+            allowedTools: ['workspace_status'],
+        });
+
+        expect(generateLLM).toHaveBeenCalledWith(
+            expect.objectContaining({ provider: toolsProvider, model: toolsModel })
+        );
     });
 
     it('recovers a failed post-tool API call without leaking raw tool output', async () => {
@@ -692,6 +758,7 @@ describe('LLM gateway auxiliary paths', () => {
         });
         expect(generateLLM).toHaveBeenCalledWith(
             expect.objectContaining({
+                provider: 'gemini',
                 model: 'vision-test',
                 messages: [
                     { role: 'system', content: 'Read.' },
@@ -700,6 +767,16 @@ describe('LLM gateway auxiliary paths', () => {
             })
         );
         expect(mod.logTokenUsage).toHaveBeenCalledWith('vision-test', 12, 3, undefined, 0.01);
+    });
+    it('does not retry vision through the text or tools route when its native route fails', async () => {
+        const generateLLM = vi.fn().mockRejectedValue(new Error('vision route unavailable'));
+        const mod = await loadLlm({ generateLLM });
+
+        await expect(mod.processWithVision('Read.', 'Describe.', 'image-base64', 'image/png')).resolves.toEqual({
+            text: 'Маршрут обработки изображений gemini/vision-test сейчас недоступен. Проверь GEMINI_API_KEY и настройки маршрута.',
+        });
+        expect(generateLLM).toHaveBeenCalledTimes(1);
+        expect(generateLLM).toHaveBeenCalledWith(expect.objectContaining({ provider: 'gemini', model: 'vision-test' }));
     });
     it('records paid empty attempts once each before retrying', async () => {
         const generateLLM = vi

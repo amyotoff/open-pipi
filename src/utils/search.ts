@@ -10,7 +10,7 @@ export interface SearchResult {
     snippet: string;
 }
 
-/** Search is a separate capability: OpenRouter web search or optional Gemini grounding. */
+/** Search is a separate capability: native Gemini grounding by default, or explicit OpenRouter web search. */
 async function search(query: string) {
     const blocked = guardLLMCall();
     if (blocked) throw new Error(blocked);

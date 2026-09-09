@@ -4,6 +4,9 @@ export type { LLMMessage } from './llm-types';
 import { SpanKind } from '@opentelemetry/api';
 import {
     LLM_PROVIDER,
+    LLM_TOOLS_PROVIDER,
+    LLM_TOOLS_MODEL,
+    LLM_VISION_PROVIDER,
     LLM_VISION_MODEL,
     LLM_EXECUTOR_MODEL,
     LLM_ADVISOR_MODEL,
@@ -17,6 +20,7 @@ import { guardLLMCall, reportLLMResult, isOllamaHealthy } from './healthcheck';
 import { reportOperationalFailure, reportOperationalRecovery } from '../utils/failure-monitor';
 import { logError, logInfo, logWarn, summarizeError, summarizeText } from '../utils/logging';
 import { RuntimeExecutionContext } from './runtime-context';
+import { LLM_KEY_ENV } from './llm-config';
 import { CORE_TOOLBOX_TOOL_DECLARATIONS, handleCoreToolboxTool, isCorePrimitiveBackingTool } from './coretoolbox';
 import { executeToolCall } from './tool-executor';
 import {
@@ -413,6 +417,16 @@ export async function processWithLLM(
                     ? defaultTools.filter((tool) => !!tool.name && context.allowedTools!.includes(tool.name))
                     : defaultTools;
                 const allTools = [...skillTools, ...additionalTools];
+                const toolsExposed = allTools.length > 0;
+                const executorProvider = toolsExposed ? LLM_TOOLS_PROVIDER : LLM_PROVIDER;
+                const executorModel = toolsExposed ? LLM_TOOLS_MODEL : LLM_EXECUTOR_MODEL;
+                finalProvider = executorProvider;
+                finalModel = executorModel;
+                addSpanAttributes({
+                    'app.llm.provider': executorProvider,
+                    'app.llm.model': executorModel,
+                    'app.llm.executor_model': executorModel,
+                });
                 addSpanAttributes({ 'app.llm.tool_declarations': allTools.length });
                 addSpanAttributes({
                     'app.llm.backing_tool_declarations_hidden': registeredSkillTools.length - skillTools.length,
@@ -445,7 +459,7 @@ export async function processWithLLM(
                         {
                             kind: SpanKind.CLIENT,
                             attributes: {
-                                provider: LLM_PROVIDER,
+                                provider: request.provider ?? LLM_PROVIDER,
                                 model: request.model,
                                 mode,
                                 history_turns: request.messages.length,
@@ -473,6 +487,7 @@ export async function processWithLLM(
                     return await generate(
                         {
                             ...config,
+                            provider: executorProvider,
                             model,
                             messages: [
                                 ...(config.system ? [{ role: 'system' as const, content: config.system }] : []),
@@ -483,10 +498,10 @@ export async function processWithLLM(
                     );
                 };
                 const attempts = [
-                    { model: LLM_EXECUTOR_MODEL, label: LLM_EXECUTOR_MODEL },
+                    { model: executorModel, label: executorModel },
                     {
-                        model: LLM_EXECUTOR_MODEL,
-                        label: `${LLM_EXECUTOR_MODEL}-retry`,
+                        model: executorModel,
+                        label: `${executorModel}-retry`,
                         extra: { reasoning: 'minimal' as const },
                     },
                 ];
@@ -528,7 +543,7 @@ export async function processWithLLM(
                         response = candidate;
                         usedModel = att.model;
                         finalModel = att.model;
-                        addSpanAttributes({ 'app.llm.provider': LLM_PROVIDER, 'app.llm.model': att.model });
+                        addSpanAttributes({ 'app.llm.provider': executorProvider, 'app.llm.model': att.model });
                         logInfo('LLM', 'response_received', {
                             model: att.label,
                             has_text: Boolean(candidate?.text),
@@ -564,7 +579,7 @@ export async function processWithLLM(
                     logError('LLM', 'all_llm_attempts_exhausted', summarizeError(lastError));
                     reportLLMResult(false);
 
-                    if (isOllamaHealthy()) {
+                    if (!toolsExposed && isOllamaHealthy()) {
                         try {
                             finalProvider = 'ollama';
                             finalModel = OLLAMA_MODEL;
@@ -625,10 +640,15 @@ export async function processWithLLM(
                     }
 
                     finalStatus = 'upstream_unavailable';
-                    finalProvider = finalProvider === 'ollama' ? 'ollama' : LLM_PROVIDER;
+                    finalProvider = finalProvider === 'ollama' ? 'ollama' : executorProvider;
+                    reportOperationalFailure('llm', lastError?.message || 'all LLM attempts exhausted');
+                    if (toolsExposed) {
+                        return {
+                            text: `Маршрут инструментов ${executorProvider}/${executorModel} сейчас недоступен. Проверь ${LLM_KEY_ENV[executorProvider]} и настройки маршрута.`,
+                        };
+                    }
                     const offline = tryOfflineFallback(latestUserMessage);
                     if (offline) return { text: offline };
-                    reportOperationalFailure('llm', lastError?.message || 'all LLM attempts exhausted');
                     return {
                         text: 'Сейчас не удалось получить ответ от модели. Проверь LLM/Ollama и попробуй ещё раз.',
                     };
@@ -699,6 +719,7 @@ export async function processWithLLM(
                     try {
                         const advisorResponse = await generate(
                             {
+                                provider: LLM_PROVIDER,
                                 model: LLM_ADVISOR_MODEL,
                                 messages: [
                                     {
@@ -1015,7 +1036,7 @@ export async function processWithVision(
         'llm.vision.process',
         {
             attributes: {
-                provider: LLM_PROVIDER,
+                provider: LLM_VISION_PROVIDER,
                 model: LLM_VISION_MODEL,
                 mime_type: mimeType,
                 prompt_chars: userPrompt.length,
@@ -1036,13 +1057,14 @@ export async function processWithVision(
                     {
                         kind: SpanKind.CLIENT,
                         attributes: {
-                            provider: LLM_PROVIDER,
+                            provider: LLM_VISION_PROVIDER,
                             model: LLM_VISION_MODEL,
                             mime_type: mimeType,
                         },
                     },
                     async () => {
                         return await generateLLM({
+                            provider: LLM_VISION_PROVIDER,
                             model: LLM_VISION_MODEL,
                             messages: [
                                 { role: 'system', content: systemPrompt },
@@ -1068,10 +1090,12 @@ export async function processWithVision(
                 logError('VISION', 'analysis_failed', summarizeError(error));
                 logEvent('tool_call', { tool: 'vision_analyze', ok: false, error: error.message });
                 reportOperationalFailure('vision', error.message);
-                return { text: 'Не удалось обработать изображение. Попробуй ещё раз чуть позже.' };
+                return {
+                    text: `Маршрут обработки изображений ${LLM_VISION_PROVIDER}/${LLM_VISION_MODEL} сейчас недоступен. Проверь ${LLM_KEY_ENV[LLM_VISION_PROVIDER]} и настройки маршрута.`,
+                };
             } finally {
                 recordLlmRequest(Date.now() - startedMs, {
-                    provider: LLM_PROVIDER,
+                    provider: LLM_VISION_PROVIDER,
                     model: LLM_VISION_MODEL,
                     status,
                     mode: 'vision',

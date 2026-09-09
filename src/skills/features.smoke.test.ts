@@ -112,7 +112,8 @@ describe('feature smokes', () => {
                 const actual = await importOriginal<typeof import('../config')>();
                 return {
                     ...actual,
-                    LLM_EXECUTOR_MODEL: 'test-model',
+                    LLM_TOOLS_PROVIDER: 'gemini',
+                    LLM_TOOLS_MODEL: 'test-model',
                 };
             });
             vi.doMock('../core/healthcheck', () => ({ guardLLMCall: vi.fn(() => null) }));
