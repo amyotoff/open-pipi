@@ -1,5 +1,35 @@
 # Agent onboarding experiment — validation
 
+## Scenario-based installation lab — 2026-09-10
+
+The page now identifies itself as an automatic-installation MVP test bench, with the official
+repository URL, three local coding-agent clients and six installation/update scenarios.
+
+Local `pnpm verify` passed: format, typecheck, lint, content checks, 130 test files / 1124 tests,
+20 feature smoke tests, coverage thresholds and build. Coverage: 82.69% statements, 70.66% branches,
+90.33% functions, 85.27% lines. An earlier run was interrupted by host ENOSPC; the complete rerun
+passed after free disk space increased. No product workaround or dependency removal was needed.
+
+`pnpm test:onboarding:e2e` passed all 44 checks with real isolated headless Chrome and a
+test-lifetime loopback server. It covers all 36 bilingual client/scenario instructions, including
+install/configure/start through a verified Telegram reply and separate fresh/update intent. Exact
+clipboard readback, denied-clipboard selection, locale retention, no-JavaScript guidance, desktop
+and Russian phone widths 390/320, public documents, identical Markdown/plain-text content and
+private-path 404 responses passed. The browser and server closed afterward. CI runs the same suite
+with Chromium and stores screenshots.
+
+E2E caught Russian mobile heading overflow; a smaller phone heading fixed it and the full rerun
+passed. Terra's UI/E2E review caught missing assertions for the verified-reply objective; those
+assertions are now present. Both independent Terra reviews approved the integrated changes after
+correction. The other review covered target/update runbooks, loopback port selection and public
+plain-text fallback. Port tests include invalid arguments and occupied-port failure.
+
+This validates the browser handoff and local code, not real installations on every platform,
+autonomous sessions in each client, provider connections or an actual Telegram reply. Windows uses
+WSL2; Raspberry Pi/VPS require their target preflight. Source updates preserve local state and stop
+for dirty checkouts, active runtimes, divergence or migrations. Published-release verification is
+recorded in PR #48 after deployment to the existing test domain.
+
 ## Public MVP extension
 
 Test site: <https://open-pipi-onboarding-mvp.amyote.workers.dev/>. The deployed `release.json`

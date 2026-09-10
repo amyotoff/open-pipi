@@ -40,7 +40,8 @@
         "onboarding:serve": "ts-node src/scripts/agent-onboarding.ts serve",
         "test:onboarding": "vitest run src/agent-onboarding src/scripts/agent-onboarding.test.ts src/scripts/setup.test.ts src/setup/server.test.ts src/setup/owner-context.test.ts src/scripts/onboarding-status.test.ts src/scripts/build-onboarding-site.test.ts",
         "onboarding:status": "ts-node src/scripts/onboarding-status.ts",
-        "onboarding:build": "ts-node src/scripts/build-onboarding-site.ts"
+        "onboarding:build": "ts-node src/scripts/build-onboarding-site.ts",
+        "test:onboarding:e2e": "node --require ts-node/register e2e/onboarding.cjs"
     },
     "keywords": [
         "telegram-bot",

@@ -20,7 +20,7 @@ describe('public onboarding release artifact', () => {
     it('exports only the explicit public files and pins the source checkout', () => {
         const outputDir = root();
         const files = buildOnboardingStaticSite({ outputDir, sourceCommit: commit });
-        expect(files).toHaveLength(12);
+        expect(files).toHaveLength(13);
         const manifest = JSON.parse(fs.readFileSync(path.join(outputDir, 'agent-onboarding/release.json'), 'utf8'));
         expect(manifest).toEqual({
             schemaVersion: 1,
@@ -38,6 +38,7 @@ describe('public onboarding release artifact', () => {
         );
         const headers = fs.readFileSync(path.join(outputDir, '_headers'), 'utf8');
         expect(headers).toContain('/agent-onboarding/SKILL.md\n  Content-Type: text/markdown; charset=utf-8');
+        expect(headers).toContain('/agent-onboarding/SKILL.txt\n  Content-Type: text/plain; charset=utf-8');
         expect(headers).toContain("frame-ancestors 'none'");
         expect(headers).toContain('X-Robots-Tag: noindex');
         expect(fs.readFileSync(path.join(outputDir, 'robots.txt'), 'utf8')).toBe('User-agent: *\nAllow: /\n');

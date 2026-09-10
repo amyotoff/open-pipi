@@ -68,6 +68,21 @@ afterEach(async () => {
 });
 
 describe('local setup HTTP server', () => {
+    it('keeps an explicit forwarding port on loopback and fails when that port is occupied', async () => {
+        const first = await startSetupServer({ service: fakeService(), renderSetupPage: () => 'private' });
+        running.push(first);
+        const port = Number(new URL(first.origin).port);
+        await expect(
+            startSetupServer({ service: fakeService(), renderSetupPage: () => '', port })
+        ).rejects.toMatchObject({ code: 'EADDRINUSE' });
+        await first.close();
+        running.pop();
+        const reopened = await startSetupServer({ service: fakeService(), renderSetupPage: () => 'private', port });
+        running.push(reopened);
+        expect(reopened.origin).toBe(`http://127.0.0.1:${port}`);
+        expect((await fetch(`${reopened.origin}/api/status`)).status).toBe(401);
+    });
+
     it('uses a one-use bootstrap and requires the session for safe status', async () => {
         const service = fakeService();
         const server = await startSetupServer({

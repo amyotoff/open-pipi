@@ -32,7 +32,7 @@ describe('agent onboarding public documents', () => {
 
         expect(response.status).toBe(200);
         expect(response.headers.get('content-type')).toBe('text/html; charset=utf-8');
-        expect(html).toContain('Open PiPi agent onboarding');
+        expect(html).toContain('MVP');
         expect(html).toContain('/agent-onboarding/SKILL.md');
         expect(html).not.toContain('attacker.invalid');
         expect(html).not.toMatch(/(?:api[_-]?key|bearer|token)\s*[:=]/i);
@@ -76,5 +76,18 @@ describe('agent onboarding public documents', () => {
         const post = await fetch(`${base}/agent-onboarding/SKILL.md`, { method: 'POST' });
         expect(post.status).toBe(405);
         expect(post.headers.get('allow')).toBe('GET, HEAD');
+    });
+
+    it('offers identical plain text when an agent viewer cannot read Markdown', async () => {
+        const base = await start();
+        const markdown = await fetch(`${base}/agent-onboarding/SKILL.md`);
+        const plain = await fetch(`${base}/agent-onboarding/SKILL.txt`);
+        expect(plain.status).toBe(200);
+        expect(plain.headers.get('content-type')).toBe('text/plain; charset=utf-8');
+        expect(await plain.text()).toBe(await markdown.text());
+        const head = await fetch(`${base}/agent-onboarding/SKILL.txt`, { method: 'HEAD' });
+        expect(head.status).toBe(200);
+        expect(await head.text()).toBe('');
+        expect((await fetch(`${base}/agent-onboarding/SKILL.txt`, { method: 'POST' })).status).toBe(405);
     });
 });

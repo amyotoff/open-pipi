@@ -6,6 +6,7 @@ import { renderOnboardingLanding } from './public-page';
 
 export const ONBOARDING_DOCUMENT_FILES = {
     '/agent-onboarding/SKILL.md': 'SKILL.md',
+    '/agent-onboarding/SKILL.txt': 'SKILL.md',
     '/agent-onboarding/references/install.md': 'references/install.md',
     '/agent-onboarding/references/connect.md': 'references/connect.md',
     '/agent-onboarding/references/workflow.md': 'references/workflow.md',
@@ -49,7 +50,7 @@ export function getOnboardingPublicDocument(
     if (Object.hasOwn(ONBOARDING_DOCUMENT_FILES, route)) {
         const file = ONBOARDING_DOCUMENT_FILES[route as keyof typeof ONBOARDING_DOCUMENT_FILES];
         return {
-            contentType: 'text/markdown; charset=utf-8',
+            contentType: route.endsWith('.txt') ? 'text/plain; charset=utf-8' : 'text/markdown; charset=utf-8',
             body: readFileSync(join(__dirname, 'skills/open-pipi-onboarding', file), 'utf8'),
         };
     }

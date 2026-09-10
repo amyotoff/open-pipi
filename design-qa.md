@@ -2,6 +2,24 @@
 
 final result: passed
 
+## Installation lab update — 2026-09-10
+
+The current page follows the light gray/Helvetica/large centered heading reference, with
+“Automatic setup” / “Автоматическая установка” and an experimental test-bench subtitle. The
+GitHub URL is visible beside the handoff. Labeled native selectors choose client and scenario,
+and the ordinary-chat limitation appears before the controls. The hero no longer markets PiPi.
+
+Real Chrome screenshots were inspected at desktop 1440×1000 and phone 390×844. E2E also checked
+Russian layout at 320px. The first run found overflow from the long Russian heading; reducing the
+phone font size fixed it. All 44 browser checks passed on rerun. No observed layout or interaction
+blockers remain. Screenshots are generated under `output/playwright/` and attached to CI as
+`onboarding-browser`.
+
+The current E2E confirms exact clipboard contents and the denied-clipboard manual path,
+all 36 client/scenario/language prompts, language retention, no-JavaScript guidance and readable
+instruction links. This supersedes the older limited clipboard evidence below. It does not claim
+that an actual coding agent installed software or sent a Telegram message.
+
 ## Target and evidence
 
 - Source visual: `/var/folders/3p/pk2z70f14375nfgqndnf8_680000gq/T/codex-clipboard-250c91d8-f35e-43d2-bdb7-e0e365acc1b5.png` (2460 × 580 pixels).

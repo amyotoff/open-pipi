@@ -30,6 +30,12 @@ After a human action, poll every two seconds in windows of at most 60 seconds wh
 | Runtime started, `dialogueVerified: false` | Ask the owner to send PiPi a Telegram message; keep waiting for the observed reply.                          |
 | MCP registration failed or tools absent    | Skip personalization and continue installation/setup; explain that a reload may enable it later.             |
 | Background unsupported                     | Leave the verified foreground trial running or let the human choose another supported host.                  |
+| No terminal access to intended target      | Stop and hand off to Codex, Claude Code, or Antigravity running on that target; do not install in a sandbox. |
+| Native Windows shell                       | Move the task to WSL2; do not patch the build ad hoc or claim native Windows support.                        |
+| Raspberry Pi resource/toolchain failure    | Report architecture, Node version, and failed prerequisite; do not claim this scenario is fully tested.      |
+| VPS setup page cannot be reached           | Have the human use matching loopback ports for setup and their private SSH tunnel; never open a public port. |
+| Update sees dirty tree or active runtime   | Stop with the checkout, old SHA, status, and safe next action; do not reset, overwrite, or interrupt it.     |
+| Published revision requires migration      | Stop before migration and request explicit owner direction; source update authorization does not include it. |
 
 Use `pnpm setup:check -- --json` for the broader read-only configuration doctor. Its `ready: true` covers local startup prerequisites; it does not validate remote credentials or prove a Telegram dialogue. Report only safe check IDs from failures and warnings.
 

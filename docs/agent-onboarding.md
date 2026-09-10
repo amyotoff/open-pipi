@@ -7,8 +7,55 @@ private setup, and verification of an actual Telegram reply. MCP personalization
 neither unsupported MCP clients nor a reload should block the main setup journey.
 
 The page uses Helvetica, a light gray background, a large centered heading, and a prompt handoff.
-It supports Russian/English, fresh/existing installation choices, clipboard confirmation, and
-manual selection if clipboard permission is unavailable.
+It presents an experimental automatic-installation test bench in Russian/English, with an explicit
+repository link, local coding-agent selection, six scenarios, clipboard confirmation, and manual
+selection if clipboard permission is unavailable. Every handoff requires access to the actual target.
+Ordinary web chat and an unrelated cloud sandbox are not installation targets.
+
+### Scenario update plan and ownership
+
+1. Sol: landing copy, Codex / Claude Code / Antigravity selector and scenario-specific prompts.
+2. Sol: target preflight, platform distinctions, safe source update and private headless runbooks.
+3. Parent: identical plain-text skill fallback, validated `setup --port`, browser E2E and CI.
+4. Two Terra reviews: installation/update correctness and the UI/E2E/PR. Publish the reviewed
+   public artifact on the existing Cloudflare test domain.
+
+| Scenario | Target and boundary |
+| --- | --- |
+| macOS | Native local installation |
+| Linux | Native installation on the selected Linux machine |
+| Windows | WSL2 Linux shell/filesystem; native PowerShell build is not supported |
+| Raspberry Pi | 64-bit Linux and compatible Node 24; resource/dependency preflight required |
+| VPS | Explicit Linux SSH host; no implicit provisioning or public setup listener |
+| Update | Exact clean, stopped checkout and established DATA_DIR; pinned source update |
+
+An update records the old commit, preserves the branch reference and checks out the published
+commit detached. Dirty state, uncertain runtime ownership, divergence and migrations stop automatic
+source changes. Interruption and background startup remain separate choices.
+
+For a headless target, `pnpm setup -- --show-link --port 8788` is run only by the owner in a private
+terminal. A matching private SSH local forward keeps setup on loopback and preserves Host/Origin
+checks. The agent must not capture the session-bearing link.
+
+### Browser E2E
+
+Run `pnpm test:onboarding:e2e`. It uses `playwright-core`, an isolated browser context and a loopback
+HTTP server that closes on completion. On macOS it can use installed Chrome; elsewhere provision
+Chromium with `pnpm exec playwright-core install --with-deps chromium`. An existing executable may
+be selected with `ONBOARDING_E2E_BROWSER`. The test never downloads a browser implicitly and fails
+if one is missing. CI installs Chromium and runs the same suite.
+
+The suite covers all 36 client/scenario/language prompts, visible GitHub/local-agent guidance,
+exact clipboard contents, denied-clipboard selection, locale retention, mobile overflow,
+no-JavaScript guidance, readable public documents and absent private routes. Screenshots go to
+`output/playwright/`. Set `ONBOARDING_E2E_BASE_URL` to the deployed test origin to run against it
+without a local server. These are browser handoff tests, not real installations on six environments.
+
+Client guidance uses the official [Codex local CLI guide](https://learn.chatgpt.com/docs/codex/cli),
+[Claude Code execution guide](https://code.claude.com/docs/en/how-claude-code-works),
+[Antigravity agent settings](https://www.antigravity.google/docs/agent-settings) and
+[Microsoft WSL guide](https://learn.microsoft.com/en-us/windows/wsl/install). Target support is
+limited by this repository's runbook/build, not a client's advertised platforms.
 
 Implementation ownership for this extension:
 
@@ -59,13 +106,15 @@ The build prints a new output directory and the pinned source commit. It refuses
 or a commit not advertised by the official remote (checked online with a 30-second timeout),
 and never reuses a directory containing other files. Set `CLOUDFLARE_ACCOUNT_ID` to the intended
 account returned by `wrangler whoami` if Wrangler reports multiple accounts. Confirm the public `release.json` matches the
-pushed commit, all five Markdown files return `text/markdown`, relative references resolve, and
+pushed commit, all five Markdown files return `text/markdown`, the identical `SKILL.txt` returns
+`text/plain`, relative references resolve, and
 private routes return 404. The deployment uses no SPA fallback. `_headers` applies CSP, noindex,
 correct content types, and revalidation. Inspect the rendered desktop/mobile page, language and
 path switches, clipboard behavior, and browser errors after publication.
 
 To roll back the public release, deploy a previously verified static artifact. This does not change
-installed user runtimes. Do not expose the private setup service through a tunnel or public Worker.
+installed user runtimes. Do not expose the private setup service through a public tunnel or Worker;
+an owner-operated SSH local forward is described above for private headless setup.
 
 ## Original context-preview experiment
 

@@ -86,4 +86,37 @@ describe('setup CLI', () => {
         expect(test.output.join('')).toContain('Short-lived local setup link (keep private)');
         expect(test.output.join('')).toContain('private-bootstrap-token');
     });
+
+    it('passes an explicit port for private SSH forwarding without changing the default', async () => {
+        const test = harness();
+        expect(await runSetupCli(['--', '--port', '8788', '--agent-onboarding'], test.dependencies)).toBe(0);
+        expect(test.dependencies.startServer).toHaveBeenCalledWith(test.service, { agentOnboarding: true, port: 8788 });
+        expect(test.output.join('')).not.toContain('private-bootstrap-token');
+
+        const headless = harness();
+        expect(await runSetupCli(['--show-link', '--port', '8788'], headless.dependencies)).toBe(0);
+        expect(headless.dependencies.startServer).toHaveBeenCalledWith(headless.service, {
+            agentOnboarding: false,
+            port: 8788,
+        });
+        expect(headless.dependencies.openUrl).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ['--port'],
+        ['--port', '0'],
+        ['--port', '1023'],
+        ['--port', '65536'],
+        ['--port', '8788.5'],
+        ['--port', '8e3'],
+        ['--port', 'NaN'],
+        ['--port', '--show-link'],
+        ['--port', '8788', '--port', '8789'],
+        ['--json', '--port', '8788'],
+        ['--port', '8788', '--host', '0.0.0.0'],
+    ])('rejects invalid or unsafe port arguments before touching state: %j', async (...argv) => {
+        const test = harness();
+        expect(await runSetupCli(argv, test.dependencies)).toBe(2);
+        expect(test.dependencies.createService).not.toHaveBeenCalled();
+    });
 });
