@@ -2,6 +2,8 @@ import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { randomBytes as nodeRandomBytes, timingSafeEqual } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { SetupSafeError, SetupSafeStatus, SetupService, SetupServiceError } from './service';
+import { AgentOnboardingError, type AgentOnboardingService } from '../agent-onboarding/service';
+import { renderAgentOnboardingReviewPage } from '../agent-onboarding/review-page';
 
 export type SetupPageRenderer = (input: { status: SetupSafeStatus; csrfToken: string }) => string;
 
@@ -11,6 +13,7 @@ export type SetupServerOptions = {
     host?: '127.0.0.1';
     port?: number;
     randomBytes?: (size: number) => Uint8Array;
+    onboarding?: AgentOnboardingService;
 };
 
 export type SetupServer = {
@@ -166,6 +169,47 @@ function publicError(error: unknown): { status: number; error: SetupSafeError } 
     };
 }
 
+function onboardingError(error: unknown): { status: number; error: Record<string, unknown> } {
+    if (error instanceof HttpSetupError) return { status: error.status, error: error.safe };
+    if (error instanceof AgentOnboardingError) {
+        const status =
+            error.code === 'PREVIEW_NOT_FOUND'
+                ? 404
+                : ['PREVIEW_EXPIRED', 'PREVIEW_HASH_MISMATCH', 'VERSION_CONFLICT', 'IDEMPOTENCY_KEY_REUSED'].includes(
+                        error.code
+                    )
+                  ? 409
+                  : error.code === 'LEDGER_UNAVAILABLE'
+                    ? 503
+                    : 400;
+        const messages: Record<string, string> = {
+            VALIDATION_FAILED: 'The confirmation request is invalid.',
+            PREVIEW_NOT_FOUND: 'The onboarding preview was not found.',
+            PREVIEW_EXPIRED: 'The onboarding preview has expired.',
+            PREVIEW_HASH_MISMATCH: 'The onboarding preview no longer matches this confirmation.',
+            VERSION_CONFLICT: 'The saved owner context changed after this preview was created.',
+            IDEMPOTENCY_KEY_REUSED: 'This confirmation key was already used for a different request.',
+            LEDGER_UNAVAILABLE: 'The local onboarding ledger is unavailable.',
+        };
+        return {
+            status,
+            error: {
+                code: error.code,
+                message: messages[error.code] || 'The onboarding request could not be completed.',
+                retryable: error.code === 'LEDGER_UNAVAILABLE',
+            },
+        };
+    }
+    return {
+        status: 500,
+        error: {
+            code: 'INTERNAL_ERROR',
+            message: 'The local onboarding service could not complete this step.',
+            retryable: true,
+        },
+    };
+}
+
 function requireString(body: Record<string, unknown>, key: string): string {
     const value = body[key];
     if (typeof value !== 'string') {
@@ -258,6 +302,36 @@ export async function startSetupServer(options: SetupServerOptions): Promise<Set
                 sendJson(response, 200, await options.service.status({ includeEphemeral: true }));
                 return;
             }
+            if (options.onboarding && request.method === 'GET' && requestUrl.pathname === '/agent-onboarding/review') {
+                try {
+                    const state = options.onboarding.readState(requestUrl.searchParams.get('previewId') || undefined);
+                    setSecurityHeaders(response);
+                    response.statusCode = 200;
+                    response.setHeader('content-type', 'text/html; charset=utf-8');
+                    response.end(renderAgentOnboardingReviewPage({ state, csrfToken }));
+                } catch (error) {
+                    const problem = onboardingError(error);
+                    sendJson(response, problem.status, { error: problem.error });
+                }
+                return;
+            }
+            if (
+                options.onboarding &&
+                request.method === 'GET' &&
+                requestUrl.pathname === '/api/agent-onboarding/state'
+            ) {
+                try {
+                    sendJson(
+                        response,
+                        200,
+                        options.onboarding.readState(requestUrl.searchParams.get('previewId') || undefined)
+                    );
+                } catch (error) {
+                    const problem = onboardingError(error);
+                    sendJson(response, problem.status, { error: problem.error });
+                }
+                return;
+            }
 
             if (request.method === 'GET' && requestUrl.pathname.startsWith('/api/setup/openrouter/callback/')) {
                 const state = requestUrl.pathname.slice('/api/setup/openrouter/callback/'.length);
@@ -309,6 +383,29 @@ export async function startSetupServer(options: SetupServerOptions): Promise<Set
             }
 
             const body = await readJsonBody(request);
+            if (requestUrl.pathname === '/api/agent-onboarding/confirm') {
+                if (!options.onboarding) {
+                    throw new HttpSetupError(404, {
+                        code: 'not_found',
+                        message: 'This setup route does not exist.',
+                        action: 'Refresh the setup page.',
+                        retryable: false,
+                        target: 'setup',
+                    });
+                }
+                try {
+                    const result = options.onboarding.confirmAndApply({
+                        previewId: requireString(body, 'previewId'),
+                        previewHash: requireString(body, 'previewHash'),
+                        idempotencyKey: requireString(body, 'idempotencyKey'),
+                    });
+                    sendJson(response, 200, { result });
+                } catch (error) {
+                    const problem = onboardingError(error);
+                    sendJson(response, problem.status, { error: problem.error });
+                }
+                return;
+            }
             let state: SetupSafeStatus;
             let extra: Record<string, unknown> = {};
             switch (requestUrl.pathname) {

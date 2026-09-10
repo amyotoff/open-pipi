@@ -5,6 +5,7 @@ export type SetupPageState = SetupSafeStatus;
 export type SetupPageOptions = {
     status: SetupPageState;
     csrfToken: string;
+    agentOnboarding?: boolean;
 };
 
 function safeJson(value: unknown): string {
@@ -94,6 +95,7 @@ export function renderSetupPage(options: SetupPageOptions): string {
 </head>
 <body>
 <main>
+  ${options.agentOnboarding ? '<section class="card"><h2>Agent onboarding · эксперимент</h2><p>Проверьте предложенные агентом язык, часовой пояс и личный контекст перед сохранением.</p><a class="button secondary" href="/agent-onboarding/review">Просмотреть предложение / Review proposal</a></section>' : ''}
   <noscript><p class="issue">JavaScript is required for private setup. No credentials can be submitted while it is disabled.</p></noscript>
   <header class="top">
     <div class="brand"><span class="mark">P</span><span>Open PiPi</span></div>
