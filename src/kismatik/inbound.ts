@@ -140,6 +140,10 @@ function stripBotMention(text: string, username?: string): string {
         .trim();
 }
 
+function chatLink(username: string | undefined, messageId: number | undefined): string | null {
+    return username && messageId ? `https://t.me/${username}/${messageId}` : null;
+}
+
 /** True when the update belonged to a KISMATIK group and has been dealt with. */
 export async function handleKismatikUpdate(ctx: KismatikContext): Promise<boolean> {
     const chat = ctx.chat;
@@ -154,15 +158,46 @@ export async function handleKismatikUpdate(ctx: KismatikContext): Promise<boolea
             return true;
         }
 
+        // A listed channel: remember its posts, never answer in it.
+        const post = ctx.update?.channel_post;
+        if (post) {
+            const postText: string = post.text ?? post.caption ?? '';
+            upsertCommunity(chatId, { title: chat.title, username: chat.username });
+            if (!isPaused(chatId) && postText.trim()) {
+                addMessage(
+                    chatId,
+                    {
+                        message_id: post.message_id,
+                        user_id: chatId,
+                        user_name: chat.title || 'Канал',
+                        username: chat.username ?? null,
+                        text: postText,
+                        ts: (post.date ?? Math.floor(Date.now() / 1000)) * 1000,
+                        author_kind: 'chat',
+                        link: chatLink(chat.username, post.message_id),
+                        thread_root: post.message_id,
+                    },
+                    { gapMs: kismatikConfig().chunkGapMs, maxChars: kismatikConfig().chunkMaxChars }
+                );
+            }
+            return true;
+        }
+
         const message = ctx.update?.message;
         if (!message) return !ctx.update?.callback_query;
-        if (!ctx.from || ctx.from.is_bot) return true;
+        // Anonymous admins and "as channel" senders arrive as bots with a sender_chat.
+        if (!ctx.from || (ctx.from.is_bot && !message.sender_chat)) return true;
 
         const text: string = message.text ?? message.caption ?? '';
         const userId = String(ctx.from.id);
         upsertCommunity(chatId, { title: chat.title, username: chat.username });
 
-        const command = text.startsWith('/') ? parseCommand(text) : null;
+        // A channel post mirrored into the discussion group; comments hang under it.
+        const origin =
+            message.is_automatic_forward && message.forward_origin?.type === 'channel' ? message.forward_origin : null;
+        const authorChat = message.sender_chat ?? origin?.chat;
+
+        const command = !message.is_automatic_forward && text.startsWith('/') ? parseCommand(text) : null;
         if (command) {
             const botName = ctx.botInfo?.username;
             if (command.target && botName && command.target.toLowerCase() !== botName.toLowerCase()) return true;
@@ -180,13 +215,16 @@ export async function handleKismatikUpdate(ctx: KismatikContext): Promise<boolea
             chatId,
             {
                 message_id: message.message_id,
-                user_id: userId,
-                user_name: displayName(ctx.from),
-                username: ctx.from.username ?? null,
+                user_id: authorChat ? String(authorChat.id) : userId,
+                user_name: authorChat ? authorChat.title || 'Канал' : displayName(ctx.from),
+                username: (authorChat ? authorChat.username : ctx.from.username) ?? null,
                 text,
                 reply_to: message.reply_to_message?.message_id ?? null,
                 thread_id: message.message_thread_id ?? null,
                 ts: (message.date ?? Math.floor(Date.now() / 1000)) * 1000,
+                author_kind: authorChat ? 'chat' : 'user',
+                link: origin ? chatLink(origin.chat?.username, origin.message_id) : null,
+                thread_root: origin ? message.message_id : null,
             },
             { gapMs: kismatikConfig().chunkGapMs, maxChars: kismatikConfig().chunkMaxChars }
         );
@@ -197,7 +235,7 @@ export async function handleKismatikUpdate(ctx: KismatikContext): Promise<boolea
             from: ctx.from as any,
             bot: ctx.botInfo ? { id: ctx.botInfo.id, username: ctx.botInfo.username } : undefined,
         });
-        if (addressed) {
+        if (addressed && !authorChat) {
             logInfo('KISMATIK', 'question', { chat_id: chatId, message_id: message.message_id });
             await ask(ctx, chatId, stripBotMention(text, ctx.botInfo?.username));
         }

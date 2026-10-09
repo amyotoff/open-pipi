@@ -7,7 +7,7 @@
 import { logWarn } from '../utils/logging';
 import { kismatikLlm } from './llm';
 import { retrieve, type Evidence } from './retrieve';
-import { getCommunity } from './store';
+import { getCommunity, getMessage } from './store';
 import { escapeHtml } from './text';
 
 export const NOTHING_FOUND = 'В чате об этом пока ничего не нашёл.';
@@ -28,6 +28,11 @@ export function messageLink(chatId: string, messageId: number, username?: string
     if (username) return `https://t.me/${username}/${messageId}`;
     const internal = chatId.startsWith('-100') ? chatId.slice(4) : chatId.replace(/^-/, '');
     return `https://t.me/c/${internal}/${messageId}`;
+}
+
+/** The stored permalink (e.g. the original channel post) wins over the chat one. */
+export function storedLink(chatId: string, messageId: number, username?: string | null): string {
+    return getMessage(chatId, messageId)?.link || messageLink(chatId, messageId, username);
 }
 
 function renderEvidence(evidence: Evidence[]): { text: string; wikiIndex: Map<number, Evidence> } {
@@ -54,7 +59,7 @@ export function renderCitations(
         const n = Number(id);
         if (kind === 'msg' && knownMessages.has(n)) {
             cited += 1;
-            return `<a href="${messageLink(chatId, n, username)}">↗</a>`;
+            return `<a href="${storedLink(chatId, n, username)}">↗</a>`;
         }
         if (kind === 'wiki' && n >= 1 && n <= wikiCount) {
             cited += 1;
@@ -82,7 +87,7 @@ export async function answerQuestion(chatId: string, question: string): Promise<
             .filter((item) => item.kind === 'chat')
             .slice(0, 3)
             .map((item) => (item.kind === 'chat' ? item.chunk.msg_ids[0] : 0))
-            .map((id) => `<a href="${messageLink(chatId, id, getCommunity(chatId)?.username)}">↗</a>`);
+            .map((id) => `<a href="${storedLink(chatId, id, getCommunity(chatId)?.username)}">↗</a>`);
         return links.length
             ? `Не могу сейчас сформулировать ответ, но это обсуждали здесь: ${links.join(' ')}`
             : NOTHING_FOUND;

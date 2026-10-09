@@ -383,7 +383,7 @@ describe('needs and offers', () => {
 });
 
 describe('import', () => {
-    it('loads a Telegram Desktop export once, skipping service and channel messages', async () => {
+    it('loads a Telegram Desktop export once, skipping service and authorless messages', async () => {
         const { store } = await load();
         const { importTelegramExport, exportChatId } = await import('./import');
         const data = {
@@ -412,9 +412,8 @@ describe('import', () => {
                     id: 4,
                     type: 'message',
                     date_unixtime: '1759320200',
-                    from: 'Канал',
-                    from_id: 'channel55',
-                    text: 'пост',
+                    from: 'Аноним',
+                    text: 'без автора',
                 },
             ],
         };
@@ -423,5 +422,284 @@ describe('import', () => {
         expect(importTelegramExport(data as any, A)).toEqual({ imported: 0, skipped: 2, duplicates: 2 });
         expect(store.getMessage(A, 2)?.text).toBe('Могу одолжить дрель');
         expect(store.getMessage(A, 1)?.user_id).toBe('101');
+    });
+});
+
+const CH = { id: -1009999999999, title: 'Food Connections', username: 'foodconnections', type: 'channel' };
+
+/** A channel post as it lands in the linked discussion group. */
+function autoForward(id: number, text: string, originId: number, date = 1_790_000_000) {
+    return {
+        message_id: id,
+        text,
+        date,
+        is_automatic_forward: true,
+        sender_chat: CH,
+        forward_origin: { type: 'channel', chat: CH, message_id: originId },
+    };
+}
+
+function asUser(chatId: string, fromId: string, message: any) {
+    return fakeCtx(chatId, fromId, message);
+}
+
+describe('channel with discussion group', () => {
+    it('stores an automatic forward as a post by the channel with its t.me link', async () => {
+        const { inbound, store } = await load();
+        const { ctx, replies } = asUser(A, '777000', autoForward(50, 'Новый пост про ферму', 12));
+        expect(await inbound.handleKismatikUpdate(ctx as any)).toBe(true);
+        const stored = store.getMessage(A, 50)!;
+        expect(stored).toMatchObject({
+            user_id: String(CH.id),
+            user_name: 'Food Connections',
+            author_kind: 'chat',
+            link: 'https://t.me/foodconnections/12',
+            thread_root: 50,
+        });
+        expect(replies).toHaveLength(0);
+    });
+
+    it('keeps a late comment in the post chunk, and a long thread continues under a context line', async () => {
+        const { inbound, store } = await load();
+        const post = autoForward(50, 'Новый пост про ферму', 12);
+        await inbound.handleKismatikUpdate(asUser(A, '777000', post).ctx as any);
+        const comment = (id: number, text: string, date: number, extra: any = {}) =>
+            asUser(A, '101', { message_id: id, text, date, message_thread_id: 50, ...extra }).ctx as any;
+        await inbound.handleKismatikUpdate(comment(51, 'Классно!', post.date + 3 * 3600));
+        // Unrelated chatter in between does not break the thread's chunk.
+        await inbound.handleKismatikUpdate(
+            asUser(A, '102', { message_id: 60, text: 'про погоду', date: post.date + 3 * 3600 + 5 }).ctx as any
+        );
+        await inbound.handleKismatikUpdate(
+            comment(52, 'Согласна', post.date + 3 * 3600 + 10, { reply_to_message: { message_id: 51 } })
+        );
+        const first = store.getMessage(A, 50)!.chunk_id!;
+        expect(store.getMessage(A, 51)!.chunk_id).toBe(first);
+        expect(store.getMessage(A, 52)!.chunk_id).toBe(first);
+        expect(store.getMessage(A, 60)!.chunk_id).not.toBe(first);
+        expect(store.getChunks(A, [first])[0].closed).toBe(0);
+
+        // A comment too big for the chunk starts the next one with the post as context.
+        const big = 'очень длинный комментарий '.repeat(60);
+        await inbound.handleKismatikUpdate(comment(53, big, post.date + 3 * 3600 + 20));
+        const next = store.getMessage(A, 53)!.chunk_id!;
+        expect(next).not.toBe(first);
+        const chunk = store.getChunks(A, [next])[0];
+        expect(chunk.thread_root).toBe(50);
+        expect(chunk.text.startsWith('↳ к посту [msg:50]: Новый пост про ферму\n[msg:53]')).toBe(true);
+        expect(store.getChunks(A, [first])[0].closed).toBe(1);
+        // The unrelated chunk stays open.
+        expect(store.getChunks(A, [store.getMessage(A, 60)!.chunk_id!])[0].closed).toBe(0);
+    });
+
+    it('resolves thread roots through topic id, reply chain, or not at all', async () => {
+        const { store } = await load();
+        store.addMessage(A, { ...msg(50, '1', 'пост'), thread_root: 50 }, OPTS);
+        store.addMessage(A, { ...msg(51, '2', 'коммент'), thread_id: 50 }, OPTS);
+        store.addMessage(A, { ...msg(52, '3', 'ответ'), reply_to: 51 }, OPTS);
+        store.addMessage(A, { ...msg(53, '4', 'мимо'), thread_id: 51, reply_to: 7 }, OPTS);
+        expect(store.getMessage(A, 51)!.thread_root).toBe(50);
+        expect(store.getMessage(A, 52)!.thread_root).toBe(50);
+        expect(store.getMessage(A, 53)!.thread_root).toBeNull();
+    });
+
+    it('keeps thread chunks inside their community', async () => {
+        const { store, text } = await load();
+        store.addMessage(A, { ...msg(50, '1', 'пост про проектор'), thread_root: 50 }, OPTS);
+        store.addMessage(B, { ...msg(50, '1', 'пост про борщ'), thread_root: 50 }, OPTS);
+        store.addMessage(B, { ...msg(51, '2', 'борщ вкусный'), thread_id: 50 }, OPTS);
+        expect(store.getMessage(A, 51)).toBeUndefined();
+        expect(store.getChunks(A, [store.getMessage(B, 51)!.chunk_id!])).toHaveLength(0);
+        expect(store.searchChunksFts(A, text.toStemQuery('борщ'), 10)).toHaveLength(0);
+    });
+
+    it('stores anonymous-admin and as-channel messages under the sender chat, but drops real bots', async () => {
+        const { inbound, store } = await load();
+        const group = { id: Number(A), title: 'Food Chat', type: 'supergroup' };
+        const anon = asUser(A, '1087968824', { message_id: 1, text: 'От админов', date: 1, sender_chat: group });
+        (anon.ctx.from as any).is_bot = true;
+        await inbound.handleKismatikUpdate(anon.ctx as any);
+        expect(store.getMessage(A, 1)).toMatchObject({ user_id: A, user_name: 'Food Chat', author_kind: 'chat' });
+
+        const asChannel = asUser(A, '136817688', { message_id: 2, text: 'От канала', date: 2, sender_chat: CH });
+        (asChannel.ctx.from as any).is_bot = true;
+        await inbound.handleKismatikUpdate(asChannel.ctx as any);
+        expect(store.getMessage(A, 2)).toMatchObject({ user_id: String(CH.id), author_kind: 'chat' });
+        expect(asChannel.replies).toHaveLength(0);
+
+        const bot = asUser(A, '5000', { message_id: 3, text: 'я бот', date: 3 });
+        (bot.ctx.from as any).is_bot = true;
+        expect(await inbound.handleKismatikUpdate(bot.ctx as any)).toBe(true);
+        expect(store.getMessage(A, 3)).toBeUndefined();
+    });
+
+    it('stores a listed channel post and never replies to it', async () => {
+        process.env.KISMATIK_CHAT_IDS = `${A},${B},${CH.id}`;
+        vi.resetModules();
+        const mods = await load();
+        const replies: string[] = [];
+        const ctx = {
+            update: { channel_post: { message_id: 7, text: '@km_bot расскажи?', date: 1_790_000_000, chat: CH } },
+            chat: CH,
+            botInfo: { id: 5000, username: 'km_bot' },
+            reply: async (t: string) => void replies.push(t),
+        };
+        expect(await mods.inbound.handleKismatikUpdate(ctx as any)).toBe(true);
+        expect(mods.store.getMessage(String(CH.id), 7)).toMatchObject({
+            author_kind: 'chat',
+            link: 'https://t.me/foodconnections/7',
+            thread_root: 7,
+        });
+        expect(replies).toHaveLength(0);
+        // An edited post is consumed but not stored again.
+        const edited = { ...ctx, update: { edited_channel_post: { message_id: 7, text: 'иначе', date: 1, chat: CH } } };
+        expect(await mods.inbound.handleKismatikUpdate(edited as any)).toBe(true);
+        expect(mods.store.getMessage(String(CH.id), 7)?.text).toContain('@km_bot');
+    });
+
+    it('cites a channel post with its original link', async () => {
+        const { inbound, llm, answer } = await load();
+        await inbound.handleKismatikUpdate(
+            asUser(A, '777000', autoForward(50, 'Ферма принимает волонтёров', 12)).ctx as any
+        );
+        llm.setKismatikLlmForTest(scriptedLlm(() => 'Ферма ищет волонтёров [msg:50]').fn);
+        expect(await answer.answerQuestion(A, 'волонтёры ферма')).toContain('href="https://t.me/foodconnections/12"');
+        llm.setKismatikLlmForTest(async () => {
+            throw new Error('down');
+        });
+        expect(await answer.answerQuestion(A, 'волонтёры ферма')).toContain('https://t.me/foodconnections/12');
+    });
+
+    it('does not tag a channel as a person in a suggestion', async () => {
+        const { store, digest } = await load();
+        const now = T0;
+        store.addMessage(A, msg(1, '101', 'Ищу волонтёров'), OPTS);
+        store.addMessage(
+            A,
+            {
+                ...msg(50, String(CH.id), 'Нужны волонтёры'),
+                user_name: 'Food Connections',
+                author_kind: 'chat',
+                link: 'https://t.me/foodconnections/12',
+                thread_root: 50,
+            },
+            OPTS
+        );
+        const need = store.getSignal(
+            A,
+            store.addSignal(A, {
+                kind: 'need',
+                message_id: 1,
+                user_id: '101',
+                user_name: 'Аня',
+                summary: 'волонтёры',
+                expires_at: now + 1e9,
+            })!
+        )!;
+        const offer = store.getSignal(
+            A,
+            store.addSignal(A, {
+                kind: 'offer',
+                message_id: 50,
+                user_id: String(CH.id),
+                user_name: 'Food Connections',
+                summary: 'волонтёры на ферме',
+                expires_at: now + 1e9,
+            })!
+        )!;
+        const html = digest.renderSuggestion(A, need, offer);
+        expect(html).toContain('tg://user?id=101');
+        expect(html).not.toContain(`tg://user?id=${CH.id}`);
+        expect(html).toContain('Food Connections');
+        expect(html).toContain('https://t.me/foodconnections/12');
+    });
+});
+
+describe('import with channels', () => {
+    it('imports a channel export with channel authors and t.me links', async () => {
+        const { store } = await load();
+        const { importTelegramExport, exportChatId } = await import('./import');
+        const data = {
+            name: 'Food Connections',
+            type: 'public_channel',
+            id: 9999999999,
+            messages: [
+                {
+                    id: 3,
+                    type: 'message',
+                    date_unixtime: '1759320000',
+                    from: 'Food Connections',
+                    from_id: 'channel9999999999',
+                    text: 'Пост',
+                },
+                {
+                    id: 4,
+                    type: 'message',
+                    date_unixtime: '1759320100',
+                    from: 'Food Connections',
+                    from_id: 'channel9999999999',
+                    text: 'Ещё пост',
+                },
+            ],
+        };
+        expect(exportChatId(data)).toBe('-1009999999999');
+        const opts = { username: 'foodconnections' };
+        expect(importTelegramExport(data as any, '-1009999999999', opts).imported).toBe(2);
+        expect(importTelegramExport(data as any, '-1009999999999', opts).duplicates).toBe(2);
+        expect(store.getMessage('-1009999999999', 3)).toMatchObject({
+            user_id: '-1009999999999',
+            author_kind: 'chat',
+            link: 'https://t.me/foodconnections/3',
+            thread_root: 3,
+        });
+        // Each post is its own thread, so they do not share a chunk.
+        expect(store.getMessage('-1009999999999', 3)!.chunk_id).not.toBe(
+            store.getMessage('-1009999999999', 4)!.chunk_id
+        );
+    });
+
+    it('threads a group export through the forwarded post and its reply chain', async () => {
+        const { store } = await load();
+        const { importTelegramExport } = await import('./import');
+        const data = {
+            name: 'Chat',
+            type: 'private_supergroup',
+            id: 1111111111,
+            messages: [
+                {
+                    id: 50,
+                    type: 'message',
+                    date_unixtime: '1759320000',
+                    from: 'Food Connections',
+                    from_id: 'channel9999999999',
+                    forwarded_from: 'Food Connections',
+                    text: 'Пост',
+                },
+                {
+                    id: 51,
+                    type: 'message',
+                    date_unixtime: '1759330000',
+                    from: 'Аня',
+                    from_id: 'user101',
+                    reply_to_message_id: 50,
+                    text: 'Коммент через три часа',
+                },
+                {
+                    id: 52,
+                    type: 'message',
+                    date_unixtime: '1759330100',
+                    from: 'Боря',
+                    from_id: 'user102',
+                    reply_to_message_id: 51,
+                    text: 'Ответ на коммент',
+                },
+            ],
+        };
+        expect(importTelegramExport(data as any, A).imported).toBe(3);
+        const chunk = store.getMessage(A, 50)!.chunk_id;
+        expect(store.getMessage(A, 51)!.chunk_id).toBe(chunk);
+        expect(store.getMessage(A, 52)!.chunk_id).toBe(chunk);
+        expect(store.getMessage(A, 52)!.thread_root).toBe(50);
+        expect(store.getMessage(A, 50)).toMatchObject({ user_id: '-1009999999999', author_kind: 'chat', link: null });
     });
 });

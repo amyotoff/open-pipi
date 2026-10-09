@@ -22,6 +22,11 @@ export interface StoredMessage {
     thread_id: number | null;
     ts: number;
     chunk_id: number | null;
+    /** 'chat' when the author is a channel or the group itself, not a person. */
+    author_kind: 'user' | 'chat';
+    /** Permalink that beats the default one, e.g. the original channel post. */
+    link: string | null;
+    thread_root: number | null;
 }
 
 export interface Chunk {
@@ -35,6 +40,7 @@ export interface Chunk {
     closed: number;
     embedded: number;
     digested: number;
+    thread_root: number | null;
 }
 
 export type SignalKind = 'need' | 'offer';
@@ -78,6 +84,9 @@ CREATE TABLE IF NOT EXISTS messages (
     thread_id INTEGER,
     ts INTEGER NOT NULL,
     chunk_id INTEGER,
+    author_kind TEXT NOT NULL DEFAULT 'user',
+    link TEXT,
+    thread_root INTEGER,
     PRIMARY KEY (chat_id, message_id)
 );
 CREATE INDEX IF NOT EXISTS messages_chat_ts ON messages(chat_id, ts);
@@ -89,6 +98,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     msg_ids TEXT NOT NULL,
     text TEXT NOT NULL,
     chars INTEGER NOT NULL,
+    thread_root INTEGER,
     closed INTEGER NOT NULL DEFAULT 0,
     embedded INTEGER NOT NULL DEFAULT 0,
     digested INTEGER NOT NULL DEFAULT 0
@@ -194,6 +204,10 @@ export interface NewMessage {
     reply_to?: number | null;
     thread_id?: number | null;
     ts: number;
+    author_kind?: 'user' | 'chat';
+    link?: string | null;
+    /** Set when the message is itself the root of a thread (a channel post). */
+    thread_root?: number | null;
 }
 
 function formatLine(message: NewMessage): string {
@@ -212,18 +226,46 @@ function writeChunkFts(chatId: string, chunkId: number, text: string): void {
 }
 
 /**
- * Store one message and fold it into the community's open chunk — a run of
- * messages without a long silence. Single chat messages are too short to
- * search or embed well on their own. Returns false for a duplicate.
+ * The post a message belongs to: an explicit root, else the topic id if that
+ * message is a stored root, else whatever the replied-to message belongs to.
+ */
+export function resolveThreadRoot(
+    chatId: string,
+    ref: { thread_root?: number | null; thread_id?: number | null; reply_to?: number | null }
+): number | null {
+    if (ref.thread_root != null) return ref.thread_root;
+    const conn = getKismatikDb();
+    if (ref.thread_id != null) {
+        const root = conn
+            .prepare(`SELECT 1 FROM messages WHERE chat_id = ? AND message_id = ? AND thread_root = message_id`)
+            .get(chatId, ref.thread_id);
+        if (root) return ref.thread_id;
+    }
+    if (ref.reply_to != null) return getMessage(chatId, ref.reply_to)?.thread_root ?? null;
+    return null;
+}
+
+/**
+ * Store one message and fold it into an open chunk. Plain messages join the
+ * community's latest run without a long silence; single chat messages are too
+ * short to search or embed well on their own. Comments under a channel post
+ * join that post's chunk whatever the gap, and a thread that outgrows a chunk
+ * continues in a new one that starts with a line naming the post. Returns
+ * false for a duplicate.
  */
 export function addMessage(chatId: string, message: NewMessage, options: { gapMs: number; maxChars: number }): boolean {
     const conn = getKismatikDb();
     return conn.transaction(() => {
+        const root = resolveThreadRoot(chatId, {
+            thread_root: message.thread_root,
+            thread_id: message.thread_id,
+            reply_to: message.reply_to,
+        });
         const inserted = conn
             .prepare(
                 `INSERT OR IGNORE INTO messages
-                 (chat_id, message_id, user_id, user_name, username, text, reply_to, thread_id, ts)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                 (chat_id, message_id, user_id, user_name, username, text, reply_to, thread_id, ts, author_kind, link, thread_root)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             )
             .run(
                 chatId,
@@ -234,19 +276,31 @@ export function addMessage(chatId: string, message: NewMessage, options: { gapMs
                 message.text,
                 message.reply_to ?? null,
                 message.thread_id ?? null,
-                message.ts
+                message.ts,
+                message.author_kind ?? 'user',
+                message.link ?? null,
+                root
             );
         if (inserted.changes === 0) return false;
 
         const line = formatLine(message);
-        const open = conn
-            .prepare(`SELECT * FROM chunks WHERE chat_id = ? AND closed = 0 ORDER BY id DESC LIMIT 1`)
-            .get(chatId) as any;
+        const open = (
+            root === null
+                ? conn
+                      .prepare(
+                          `SELECT * FROM chunks WHERE chat_id = ? AND closed = 0 AND thread_root IS NULL ORDER BY id DESC LIMIT 1`
+                      )
+                      .get(chatId)
+                : conn
+                      .prepare(
+                          `SELECT * FROM chunks WHERE chat_id = ? AND closed = 0 AND thread_root = ? ORDER BY id DESC LIMIT 1`
+                      )
+                      .get(chatId, root)
+        ) as any;
 
         const fits =
             open &&
-            message.ts - open.last_ts <= options.gapMs &&
-            message.ts >= open.first_ts &&
+            (root !== null || (message.ts - open.last_ts <= options.gapMs && message.ts >= open.first_ts)) &&
             open.chars + line.length <= options.maxChars;
 
         let chunkId: number;
@@ -255,18 +309,24 @@ export function addMessage(chatId: string, message: NewMessage, options: { gapMs
             const text = `${open.text}\n${line}`;
             conn.prepare(
                 `UPDATE chunks SET last_ts = ?, msg_ids = ?, text = ?, chars = ?, embedded = 0 WHERE id = ?`
-            ).run(message.ts, JSON.stringify(ids), text, text.length, open.id);
+            ).run(Math.max(message.ts, open.last_ts), JSON.stringify(ids), text, text.length, open.id);
             chunkId = open.id;
             writeChunkFts(chatId, chunkId, text);
         } else {
             if (open) conn.prepare(`UPDATE chunks SET closed = 1 WHERE id = ?`).run(open.id);
+            const post = root !== null && root !== message.message_id ? getMessage(chatId, root) : undefined;
+            const context = post
+                ? `↳ к посту [msg:${root}]: ${post.text.replace(/\s+/g, ' ').trim().slice(0, 200)}\n`
+                : '';
+            const text = context + line;
             const created = conn
                 .prepare(
-                    `INSERT INTO chunks (chat_id, first_ts, last_ts, msg_ids, text, chars) VALUES (?, ?, ?, ?, ?, ?)`
+                    `INSERT INTO chunks (chat_id, first_ts, last_ts, msg_ids, text, chars, thread_root)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)`
                 )
-                .run(chatId, message.ts, message.ts, JSON.stringify([message.message_id]), line, line.length);
+                .run(chatId, message.ts, message.ts, JSON.stringify([message.message_id]), text, text.length, root);
             chunkId = Number(created.lastInsertRowid);
-            writeChunkFts(chatId, chunkId, line);
+            writeChunkFts(chatId, chunkId, text);
         }
         conn.prepare(`UPDATE messages SET chunk_id = ? WHERE chat_id = ? AND message_id = ?`).run(
             chunkId,
