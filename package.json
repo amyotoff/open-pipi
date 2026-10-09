@@ -41,7 +41,8 @@
         "test:onboarding": "vitest run src/agent-onboarding src/scripts/agent-onboarding.test.ts src/scripts/setup.test.ts src/setup/server.test.ts src/setup/owner-context.test.ts src/scripts/onboarding-status.test.ts src/scripts/build-onboarding-site.test.ts",
         "onboarding:status": "ts-node src/scripts/onboarding-status.ts",
         "onboarding:build": "ts-node src/scripts/build-onboarding-site.ts",
-        "test:onboarding:e2e": "node --require ts-node/register e2e/onboarding.cjs"
+        "test:onboarding:e2e": "node --require ts-node/register e2e/onboarding.cjs",
+        "kismatik:import": "ts-node src/scripts/kismatik-import.ts"
     },
     "keywords": [
         "telegram-bot",
@@ -63,12 +64,13 @@
     },
     "type": "commonjs",
     "dependencies": {
+        "@huggingface/transformers": "4.3.1",
         "@modelcontextprotocol/sdk": "1.30.0",
         "@opentelemetry/api": "^1.9.1",
-        "@opentelemetry/instrumentation-express": "^0.68.0",
-        "@opentelemetry/instrumentation-http": "^0.220.0",
         "@opentelemetry/exporter-metrics-otlp-proto": "^0.220.0",
         "@opentelemetry/exporter-trace-otlp-proto": "^0.220.0",
+        "@opentelemetry/instrumentation-express": "^0.68.0",
+        "@opentelemetry/instrumentation-http": "^0.220.0",
         "@opentelemetry/resources": "^2.9.0",
         "@opentelemetry/sdk-metrics": "^2.9.0",
         "@opentelemetry/sdk-node": "^0.220.0",
@@ -76,6 +78,7 @@
         "dotenv": "^17.3.1",
         "express": "^5.2.1",
         "node-cron": "^4.2.1",
+        "snowball-stemmers": "0.6.0",
         "telegraf": "^4.16.3"
     },
     "optionalDependencies": {
@@ -120,6 +123,9 @@
             "better-sqlite3",
             "protobufjs",
             "sharp"
+        ],
+        "ignoredBuiltDependencies": [
+            "onnxruntime-node"
         ]
     }
 }

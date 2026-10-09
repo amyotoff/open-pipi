@@ -35,6 +35,8 @@ import {
     stripToolResultPrefix,
 } from './operator-commands';
 import { bot } from './telegram-bot';
+import { setGroupSender } from '../kismatik/digest';
+import { handleKismatikUpdate } from '../kismatik/inbound';
 import {
     buildTelegramHelpMessage,
     TELEGRAM_DAILY_ACTIONS,
@@ -149,6 +151,25 @@ const sharedTelegramCommand = async (ctx: any): Promise<void> => {
 // ==========================================
 // Command handlers (the hamburger menu exposes only a curated subset)
 // ==========================================
+
+// KISMATIK groups are answered by KISMATIK alone. Registered first so no
+// command or fallback below ever sees their messages.
+bot.use(async (ctx, next) => {
+    if (await handleKismatikUpdate(ctx as any)) return;
+    return next();
+});
+
+setGroupSender({
+    async sendHtml(chatId, html, replyToMessageId) {
+        await bot.telegram.sendMessage(chatId, html, {
+            parse_mode: 'HTML',
+            link_preview_options: { is_disabled: true },
+            reply_parameters: replyToMessageId
+                ? { message_id: replyToMessageId, allow_sending_without_reply: true }
+                : undefined,
+        });
+    },
+});
 
 // /start — greet residents
 bot.command('start', async (ctx) => {
