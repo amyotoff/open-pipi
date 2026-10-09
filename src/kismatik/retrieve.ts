@@ -4,6 +4,8 @@
  * fused with reciprocal rank fusion, which needs no score calibration.
  */
 
+// Registers the brain index rebuilder; without it a fresh wiki index opens empty.
+import '../core/brain';
 import { readWikiPage, searchWikiRows } from '../core/brain-wiki';
 import { logWarn } from '../utils/logging';
 import { communitySpaceId } from './config';

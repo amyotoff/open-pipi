@@ -37,6 +37,7 @@ OPENROUTER_API_KEY=...
 # Embeddings: local (EmbeddingGemma in-process, default), gemini, or none.
 # KISMATIK_EMBEDDER=local
 # KISMATIK_LOCAL_MODEL=onnx-community/embeddinggemma-2-ONNX
+# KISMATIK_LOCAL_DTYPE=fp32
 # KISMATIK_GEMINI_EMBED_MODEL=gemini-embedding-001
 # KISMATIK_EMBEDDING_DIM=256
 # KISMATIK_DIGEST_INTERVAL_MIN=120

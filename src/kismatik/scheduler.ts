@@ -4,6 +4,7 @@ import { digestCommunity, embedPending } from './digest';
 import { closeKismatikDb, isPaused } from './store';
 
 const TICK_MS = 60_000;
+const EMBED_BUDGET_MS = 45_000;
 /** While an imported history is being worked through, digest every few minutes. */
 const BACKLOG_INTERVAL_MS = 5 * 60_000;
 
@@ -19,8 +20,10 @@ async function tick(): Promise<void> {
         for (const chatId of config.chatIds) {
             if (isPaused(chatId)) continue;
             try {
-                // Drain the embedding backlog a batch at a time; a backfill can be thousands of chunks.
-                for (let i = 0; i < 20; i++) {
+                // Drain the embedding backlog within a time box; a backfill can be thousands of chunks,
+                // and the digest below still has to get its turn.
+                const deadline = Date.now() + EMBED_BUDGET_MS / config.chatIds.size;
+                while (Date.now() < deadline) {
                     if ((await embedPending(chatId)) === 0) break;
                 }
             } catch (error: any) {

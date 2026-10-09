@@ -33,7 +33,9 @@ export function truncateAndNormalize(values: ArrayLike<number>, dim: number): Fl
 
 // EmbeddingGemma was trained with these task prefixes; leaving them out costs quality.
 const queryPrompt = (text: string) => `task: search result | query: ${text}`;
-const documentPrompt = (text: string) => `title: none | text: ${text}`;
+// Cost grows with length squared; the opening of a long post carries its topic.
+const MAX_DOCUMENT_CHARS = 2000;
+const documentPrompt = (text: string) => `title: none | text: ${text.slice(0, MAX_DOCUMENT_CHARS)}`;
 
 class LocalGemmaEmbedder implements Embedder {
     readonly id: string;
@@ -41,9 +43,10 @@ class LocalGemmaEmbedder implements Embedder {
 
     constructor(
         private readonly model: string,
-        private readonly dim: number
+        private readonly dim: number,
+        private readonly dtype: string
     ) {
-        this.id = `${model}@${dim}`;
+        this.id = `${model}:${dtype}@${dim}`;
     }
 
     private load(): Promise<any> {
@@ -54,7 +57,9 @@ class LocalGemmaEmbedder implements Embedder {
                 // Kept with the data so a container rebuild does not download the model again.
                 transformers.env.cacheDir = path.join(DATA_DIR, 'models');
                 const started = Date.now();
-                const pipe = await transformers.pipeline('feature-extraction', this.model, { dtype: 'q8' });
+                const pipe = await transformers.pipeline('feature-extraction', this.model, {
+                    dtype: this.dtype as any,
+                });
                 logInfo('KISMATIK', 'embedder_loaded', { model: this.model, ms: Date.now() - started });
                 return pipe;
             })();
@@ -136,7 +141,7 @@ export function getEmbedder(): Embedder | null {
     const config = kismatikConfig();
     if (config.embedder === 'none') current = null;
     else if (config.embedder === 'gemini') current = new GeminiEmbedder(config.geminiModel, config.embeddingDim);
-    else current = new LocalGemmaEmbedder(config.localModel, config.embeddingDim);
+    else current = new LocalGemmaEmbedder(config.localModel, config.embeddingDim, config.localDtype);
     return current;
 }
 

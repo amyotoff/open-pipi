@@ -24,6 +24,8 @@ export interface KismatikConfig {
     chatIds: Set<string>;
     embedder: EmbedderKind;
     localModel: string;
+    /** fp32 beats q8 on ARM CPUs, where int8 kernels are slow; q4 is smaller and faster still. */
+    localDtype: 'fp32' | 'q8' | 'q4';
     geminiModel: string;
     embeddingDim: number;
     /** A new chunk starts after this much silence. */
@@ -40,6 +42,8 @@ export function loadKismatikConfig(env: NodeJS.ProcessEnv = process.env): Kismat
         chatIds: new Set(readList(env.KISMATIK_CHAT_IDS)),
         embedder: embedder === 'gemini' || embedder === 'none' ? embedder : 'local',
         localModel: env.KISMATIK_LOCAL_MODEL || 'onnx-community/embeddinggemma-2-ONNX',
+        localDtype:
+            env.KISMATIK_LOCAL_DTYPE === 'q8' || env.KISMATIK_LOCAL_DTYPE === 'q4' ? env.KISMATIK_LOCAL_DTYPE : 'fp32',
         geminiModel: env.KISMATIK_GEMINI_EMBED_MODEL || 'gemini-embedding-001',
         embeddingDim: readInt(env.KISMATIK_EMBEDDING_DIM, 256),
         chunkGapMs: readInt(env.KISMATIK_CHUNK_GAP_MIN, 10) * 60_000,

@@ -67,11 +67,21 @@ KISMATIK превращает публичную Telegram-группу в пам
 
 | `KISMATIK_EMBEDDER` | Что | Когда |
 |---|---|---|
-| `local` (по умолчанию) | EmbeddingGemma 2 в процессе (onnxruntime, q8), ~270 МБ RAM, ~0.3 с на сообщение на CPU | VPS от 2 ГБ RAM |
+| `local` (по умолчанию) | EmbeddingGemma 2 в процессе (onnxruntime, `KISMATIK_LOCAL_DTYPE=fp32`), до ~1.1 ГБ RAM, ~0.5 с на пост | VPS от 4 ГБ RAM |
 | `gemini` | Gemini API (`KISMATIK_GEMINI_EMBED_MODEL`), нужен `GEMINI_API_KEY` | слабое железо |
 | `none` | только полнотекстовый поиск | отладка |
 
-Первый запуск скачивает модель (~300 МБ) в `DATA_DIR/models`. Смена модели или размерности → векторы пересчитываются заново (старые игнорируются).
+Тексты эмбеддятся по одному и обрезаются до 2000 символов. Замер на 1050 постах @foodconnections (Apple Silicon): 8.6 мин, RSS 1.1 ГБ; q8 на ARM в разы медленнее fp32, q4 — чуть быстрее, качество не проверено.
+
+Первый запуск скачивает модель (~850 МБ: pipeline тянет и неиспользуемые аудио/видео-энкодеры) в `DATA_DIR/models`. Смена модели или размерности → векторы пересчитываются заново (старые игнорируются).
+
+## Проверка качества поиска
+
+```bash
+KISMATIK_EMBEDDER=local pnpm kismatik:eval questions.json -100…
+```
+
+Набор `{id, type, question, gold_post_ids}`; печатает recall@8 по типам вопросов и латентность. На 40 вопросах по @foodconnections: только FTS — 73%, гибрид с EmbeddingGemma 2 — 87% (p95 63 мс).
 
 ## Хостинг
 

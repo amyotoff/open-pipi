@@ -42,7 +42,8 @@
         "onboarding:status": "ts-node src/scripts/onboarding-status.ts",
         "onboarding:build": "ts-node src/scripts/build-onboarding-site.ts",
         "test:onboarding:e2e": "node --require ts-node/register e2e/onboarding.cjs",
-        "kismatik:import": "ts-node src/scripts/kismatik-import.ts"
+        "kismatik:import": "ts-node src/scripts/kismatik-import.ts",
+        "kismatik:eval": "ts-node src/scripts/kismatik-eval.ts"
     },
     "keywords": [
         "telegram-bot",

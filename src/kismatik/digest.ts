@@ -50,7 +50,9 @@ export function setGroupSender(next: GroupSender | null): void {
 
 /* -------------------------------------------------------------- embeddings */
 
-export async function embedPending(chatId: string, batch = 16): Promise<number> {
+// One at a time: on CPU a batch buys nothing, and padding every text to the
+// longest one multiplies time and memory.
+export async function embedPending(chatId: string, batch = 1): Promise<number> {
     const embedder = getEmbedder();
     if (!embedder) return 0;
     closeStaleChunks(chatId, Date.now(), kismatikConfig().chunkGapMs);
