@@ -255,11 +255,14 @@ export async function digestCommunity(chatId: string, now = Date.now()): Promise
         logWarn('KISMATIK', 'wiki_compile_failed', { chat_id: chatId, message: error?.message });
     }
 
-    let signals: Signal[] = [];
+    let signals: Signal[];
     try {
         signals = await extractSignals(chatId, batch, now);
     } catch (error: any) {
+        // Leave the batch undigested so the next pass tries again; a model outage must not
+        // silently drop everyone's needs and offers. A repeated wiki capture is deduplicated.
         logWarn('KISMATIK', 'signals_failed', { chat_id: chatId, message: error?.message });
+        return result;
     }
 
     markDigested(

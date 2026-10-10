@@ -730,3 +730,20 @@ describe('match parsing', () => {
         expect(await digest.matchSignals(A, [store.getSignal(A, need)!], now)).toBe(1);
     });
 });
+
+describe('digest retries', () => {
+    it('keeps a batch for the next pass when signal extraction fails', async () => {
+        const { store, llm, digest } = await load();
+        store.addMessage(A, msg(1, '101', 'Ищу проектор'), OPTS);
+        const later = T0 + 10 * 60 * 60_000;
+        llm.setKismatikLlmForTest(async () => {
+            throw new Error('HTTP 503');
+        });
+        expect((await digest.digestCommunity(A, later)).chunks).toBe(0);
+        expect(store.listChunksToDigest(A, 10)).toHaveLength(1);
+
+        llm.setKismatikLlmForTest(async () => '{"items":[]}');
+        expect((await digest.digestCommunity(A, later)).chunks).toBe(1);
+        expect(store.listChunksToDigest(A, 10)).toHaveLength(0);
+    });
+});
