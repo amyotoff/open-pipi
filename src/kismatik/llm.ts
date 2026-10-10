@@ -1,0 +1,61 @@
+import { LLM_CONFIG } from '../config';
+import { guardLLMCall } from '../core/healthcheck';
+import { generateLLM } from '../core/llm-gateway';
+import { logTokenUsage } from '../db';
+import { logWarn } from '../utils/logging';
+import { kismatikConfig } from './config';
+
+export type KismatikLlm = (input: { system: string; user: string; maxTokens?: number }) => Promise<string>;
+
+const defaultLlm: KismatikLlm = async ({ system, user, maxTokens }) => {
+    const blocked = guardLLMCall();
+    if (blocked) throw new Error(blocked);
+    // KISMATIK may run on its own model (KISMATIK_LLM_MODEL) without moving the rest of PiPi.
+    const model = kismatikConfig().llmModel || LLM_CONFIG.executorModel;
+    const response = await generateLLM({
+        provider: LLM_CONFIG.provider,
+        model,
+        messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: user },
+        ],
+        temperature: 0.2,
+        // Minimal reasoning and room to spare: claude-haiku-5.5 spent a 1200-token budget
+        // thinking and returned nothing on list questions.
+        reasoning: 'minimal',
+        maxTokens: maxTokens ?? 3500,
+        timeoutMs: 45_000,
+    });
+    if (!response.text.trim() && response.finishReason) {
+        // An empty answer reads as "nothing found"; make the cause visible.
+        logWarn('KISMATIK', 'llm_empty', { model, finish_reason: response.finishReason });
+    }
+    logTokenUsage(model, response.usage.inputTokens, response.usage.outputTokens, undefined, response.usage.costUsd);
+    return response.text;
+};
+
+let current: KismatikLlm = defaultLlm;
+
+export function kismatikLlm(): KismatikLlm {
+    return current;
+}
+
+export function setKismatikLlmForTest(llm: KismatikLlm | null): void {
+    current = llm ?? defaultLlm;
+}
+
+/** Models wrap JSON in fences or prose; take the first balanced object or array. */
+export function parseJsonLoose<T>(text: string): T | null {
+    const cleaned = text.replace(/```(?:json)?/gi, '').trim();
+    const start = cleaned.search(/[[{]/);
+    if (start < 0) return null;
+    const open = cleaned[start];
+    const close = open === '{' ? '}' : ']';
+    const end = cleaned.lastIndexOf(close);
+    if (end <= start) return null;
+    try {
+        return JSON.parse(cleaned.slice(start, end + 1)) as T;
+    } catch {
+        return null;
+    }
+}

@@ -34,6 +34,7 @@ vi.mock('telegraf', () => {
             unpinChatMessage,
             sendDocument,
         };
+        use = vi.fn();
         command = vi.fn();
         action = vi.fn();
         on = vi.fn();
@@ -123,6 +124,14 @@ describe('channels/telegram', () => {
         inlineKeyboard.mockClear();
         callbackButton.mockClear();
         vi.resetModules();
+    });
+
+    it('registers the KISMATIK guard before any command', async () => {
+        const telegram = await import('./telegram');
+        const bot = telegram.bot as any;
+
+        expect(bot.use).toHaveBeenCalledTimes(1);
+        expect(bot.use.mock.invocationCallOrder[0]).toBeLessThan(bot.command.mock.invocationCallOrder[0]);
     });
 
     it('registers only the compact everyday Telegram menu', async () => {

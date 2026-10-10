@@ -15,6 +15,7 @@ let closeDatabaseRef: (() => void) | null = null;
 let closeApiServerRef: (() => Promise<void>) | null = null;
 let closeTransportsRef: (() => Promise<void>) | null = null;
 let closeDeliveryWorkerRef: (() => void) | null = null;
+let closeKismatikRef: (() => void) | null = null;
 let processLockRef: ProcessLock | null = null;
 
 async function shutdown(signal: string, exitCode = 0) {
@@ -29,6 +30,12 @@ async function shutdown(signal: string, exitCode = 0) {
         closeDeliveryWorkerRef?.();
     } catch (error) {
         console.error('[BOOT] Failed to stop the delivery worker cleanly:', error);
+    }
+
+    try {
+        closeKismatikRef?.();
+    } catch (error) {
+        console.error('[BOOT] Failed to stop KISMATIK cleanly:', error);
     }
 
     try {
@@ -212,6 +219,11 @@ async function bootstrap() {
     // Anything queued before the last shutdown goes out now.
     deliveryWorker.startDeliveryWorker();
     closeDeliveryWorkerRef = deliveryWorker.stopDeliveryWorker;
+
+    // Community memory for the groups in KISMATIK_CHAT_IDS; a no-op without them.
+    const kismatik = await import('./kismatik/scheduler');
+    kismatik.startKismatikScheduler();
+    closeKismatikRef = kismatik.stopKismatikScheduler;
 
     db.logEvent('reboot', { reason: 'startup', timestamp: new Date().toISOString() });
     try {

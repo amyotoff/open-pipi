@@ -29,3 +29,21 @@ OPENROUTER_API_KEY=...
 # ANTHROPIC_API_KEY=...
 # Existing GEMINI_EXECUTOR_MODEL / GEMINI_ADVISOR_MODEL aliases apply
 # to Gemini routes when no corresponding LLM_*_MODEL override is set.
+
+# KISMATIK — community memory for public Telegram groups (docs/kismatik.md).
+# Off unless groups are listed. The bot must be an admin in each group, or have
+# privacy mode disabled in BotFather, to see ordinary messages.
+# KISMATIK_CHAT_IDS=-1001111111111,-1002222222222
+# Embeddings: local (EmbeddingGemma in-process, default), gemini, or none.
+# KISMATIK_EMBEDDER=local
+# Model for answers/matching (same provider as LLM_PROVIDER); default is PiPi's executor:
+# KISMATIK_LLM_MODEL=anthropic/claude-haiku-5.5
+# KISMATIK_LOCAL_MODEL=onnx-community/embeddinggemma-2-ONNX
+# KISMATIK_LOCAL_DTYPE=fp32
+# KISMATIK_GEMINI_EMBED_MODEL=gemini-embedding-001
+# KISMATIK_EMBEDDING_DIM=256
+# KISMATIK_DIGEST_INTERVAL_MIN=120
+# Community wiki compile (advisor model, ~$0.02 per post, English pages):
+# KISMATIK_WIKI=on
+# KISMATIK_MAX_SUGGESTIONS_PER_DAY=5
+# KISMATIK_MAX_ASKS_PER_USER_PER_DAY=30
