@@ -20,8 +20,11 @@ const SYSTEM = [
     '- Используй только id, которые есть в evidence. Не придумывай.',
     '- Называй людей по именам, как в переписке: «Аня советовала…».',
     '- Если мнения расходятся — так и скажи и приведи обе стороны.',
-    '- Если в evidence нет ответа, ответь ровно: NO_ANSWER',
+    '- Различай, что сделало само сообщество, а что просто упомянуто в посте (анонс чужих событий, чужие вакансии, подборки).',
+    '- Если evidence отвечает хотя бы частично — ответь тем, что есть, и скажи, чего не хватает.',
+    '- Если в evidence совсем нет ответа, ответь ровно: NO_ANSWER',
     '- Не добавляй общих знаний от себя. Коротко: 1–5 предложений, язык вопроса.',
+    '- Простой текст без markdown; для списка — строки, начинающиеся с «• ».',
 ].join('\n');
 
 export function messageLink(chatId: string, messageId: number, username?: string | null): string {
@@ -46,7 +49,18 @@ function renderEvidence(evidence: Evidence[]): { text: string; wikiIndex: Map<nu
     return { text: `<evidence>\n${parts.join('\n')}\n</evidence>`, wikiIndex };
 }
 
-/** Escape the model text, then turn checked citations into links and drop the rest. */
+// One citation or a list of them: [msg:1], [msg:1, msg:2], [msg:1, 2].
+const CITATION = /\[((?:msg|wiki):\d+(?:\s*,\s*(?:(?:msg|wiki):)?\d+)*)\]/g;
+
+/** Models answer in markdown whatever they are told; Telegram HTML shows it raw. */
+function markdownToTelegram(html: string): string {
+    return html.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>').replace(/^[ \t]*[*-][ \t]+/gm, '• ');
+}
+
+/**
+ * Escape the model text, then turn checked citations into links and drop the
+ * rest. Each source is linked once; repeats of it add nothing but arrows.
+ */
 export function renderCitations(
     raw: string,
     chatId: string,
@@ -55,19 +69,25 @@ export function renderCitations(
     username?: string | null
 ): { html: string; cited: number } {
     let cited = 0;
-    const html = escapeHtml(raw).replace(/\[(msg|wiki):(\d+)\]/g, (_match, kind: string, id: string) => {
-        const n = Number(id);
-        if (kind === 'msg' && knownMessages.has(n)) {
+    const linked = new Set<string>();
+    const html = escapeHtml(raw).replace(CITATION, (_match, list: string) => {
+        let kind = 'msg';
+        const links: string[] = [];
+        for (const part of list.split(',')) {
+            const [, explicitKind, id] = /^\s*(?:(msg|wiki):)?(\d+)\s*$/.exec(part) ?? [];
+            if (!id) continue;
+            kind = explicitKind ?? kind;
+            const n = Number(id);
+            const key = `${kind}:${n}`;
+            const valid = kind === 'msg' ? knownMessages.has(n) : n >= 1 && n <= wikiCount;
+            if (!valid || linked.has(key)) continue;
+            linked.add(key);
             cited += 1;
-            return `<a href="${storedLink(chatId, n, username)}">↗</a>`;
+            links.push(kind === 'msg' ? `<a href="${storedLink(chatId, n, username)}">↗</a>` : '<i>(вики)</i>');
         }
-        if (kind === 'wiki' && n >= 1 && n <= wikiCount) {
-            cited += 1;
-            return '<i>(вики)</i>';
-        }
-        return '';
+        return links.join(' ');
     });
-    return { html: html.replace(/ +([.,;:!?])/g, '$1').trim(), cited };
+    return { html: markdownToTelegram(html.replace(/ +([.,;:!?])/g, '$1')).trim(), cited };
 }
 
 export async function answerQuestion(chatId: string, question: string): Promise<string> {

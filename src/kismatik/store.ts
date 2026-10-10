@@ -405,6 +405,21 @@ export function forgetMessage(chatId: string, messageId: number): boolean {
                 }
             }
         }
+        // Later chunks of this post's thread open with a line quoting it; that quote goes too.
+        const quote = `↳ к посту [msg:${messageId}]: `;
+        const quoting = conn
+            .prepare(`SELECT * FROM chunks WHERE chat_id = ? AND thread_root = ? AND text LIKE ?`)
+            .all(chatId, messageId, `${quote}%`) as any[];
+        for (const chunk of quoting) {
+            const text = chunk.text.slice(chunk.text.indexOf('\n') + 1);
+            conn.prepare(`DELETE FROM vectors WHERE chunk_id = ?`).run(chunk.id);
+            conn.prepare(`UPDATE chunks SET text = ?, chars = ?, embedded = 0 WHERE id = ?`).run(
+                text,
+                text.length,
+                chunk.id
+            );
+            writeChunkFts(chatId, chunk.id, text);
+        }
         return true;
     })();
 }

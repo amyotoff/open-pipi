@@ -32,6 +32,14 @@ export interface KismatikConfig {
     chunkGapMs: number;
     chunkMaxChars: number;
     digestIntervalMs: number;
+    /**
+     * Compile chat into the community wiki. Off by default: answers reach the
+     * eval bar on search alone, and compile runs on the advisor model in English
+     * at about $0.02 per channel post.
+     */
+    wiki: boolean;
+    /** One wiki source per this many characters; a long source makes compile time out. */
+    wikiSourceChars: number;
     maxSuggestionsPerDay: number;
     maxAsksPerUserPerDay: number;
 }
@@ -49,6 +57,8 @@ export function loadKismatikConfig(env: NodeJS.ProcessEnv = process.env): Kismat
         chunkGapMs: readInt(env.KISMATIK_CHUNK_GAP_MIN, 10) * 60_000,
         chunkMaxChars: readInt(env.KISMATIK_CHUNK_MAX_CHARS, 1500),
         digestIntervalMs: readInt(env.KISMATIK_DIGEST_INTERVAL_MIN, 120) * 60_000,
+        wiki: env.KISMATIK_WIKI === 'on',
+        wikiSourceChars: readInt(env.KISMATIK_WIKI_SOURCE_CHARS, 6000),
         maxSuggestionsPerDay: readInt(env.KISMATIK_MAX_SUGGESTIONS_PER_DAY, 5),
         maxAsksPerUserPerDay: readInt(env.KISMATIK_MAX_ASKS_PER_USER_PER_DAY, 30),
     };

@@ -48,6 +48,18 @@ function displayName(from: KismatikContext['from']): string {
     return name || (from.username ? `@${from.username}` : `id${from.id}`);
 }
 
+// Telegram redelivers an update it never saw acknowledged; a command is not stored, so remember it here.
+const seenCommands = new Set<string>();
+
+function isFirstDelivery(chatId: string, messageId: number | undefined): boolean {
+    if (messageId === undefined) return true;
+    const key = `${chatId}:${messageId}`;
+    if (seenCommands.has(key)) return false;
+    seenCommands.add(key);
+    if (seenCommands.size > 1000) seenCommands.delete(seenCommands.values().next().value as string);
+    return true;
+}
+
 function today(): string {
     return new Date().toISOString().slice(0, 10);
 }
@@ -94,6 +106,7 @@ async function handleKm(ctx: KismatikContext, chatId: string, args: string): Pro
             if (isPaused(chatId)) return replyHtml(ctx, 'KISMATIK на паузе.');
             return ask(ctx, chatId, tail);
         case 'wiki': {
+            if (!kismatikConfig().wiki) return replyHtml(ctx, 'Вики в этом чате не ведётся — спросите меня напрямую.');
             const pages = listWikiPages({ spaceId: communitySpaceId(chatId), limit: 30 });
             if (pages.length === 0)
                 return replyHtml(ctx, 'Вики пока пустая — она собирается из переписки раз в пару часов.');
@@ -202,6 +215,7 @@ export async function handleKismatikUpdate(ctx: KismatikContext): Promise<boolea
             const botName = ctx.botInfo?.username;
             if (command.target && botName && command.target.toLowerCase() !== botName.toLowerCase()) return true;
             if (command.name === 'km') {
+                if (!isFirstDelivery(chatId, message.message_id)) return true;
                 await handleKm(ctx, chatId, command.args);
                 return true;
             }
@@ -211,7 +225,7 @@ export async function handleKismatikUpdate(ctx: KismatikContext): Promise<boolea
 
         if (isPaused(chatId) || !text.trim()) return true;
 
-        addMessage(
+        const isNew = addMessage(
             chatId,
             {
                 message_id: message.message_id,
@@ -228,6 +242,9 @@ export async function handleKismatikUpdate(ctx: KismatikContext): Promise<boolea
             },
             { gapMs: kismatikConfig().chunkGapMs, maxChars: kismatikConfig().chunkMaxChars }
         );
+
+        // A redelivered question was already answered.
+        if (!isNew) return true;
 
         const addressed = isAddressedToTelegramBot({
             message,
