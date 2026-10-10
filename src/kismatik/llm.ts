@@ -2,6 +2,7 @@ import { LLM_CONFIG } from '../config';
 import { guardLLMCall } from '../core/healthcheck';
 import { generateLLM } from '../core/llm-gateway';
 import { logTokenUsage } from '../db';
+import { logWarn } from '../utils/logging';
 import { kismatikConfig } from './config';
 
 export type KismatikLlm = (input: { system: string; user: string; maxTokens?: number }) => Promise<string>;
@@ -19,9 +20,16 @@ const defaultLlm: KismatikLlm = async ({ system, user, maxTokens }) => {
             { role: 'user', content: user },
         ],
         temperature: 0.2,
-        maxTokens: maxTokens ?? 1200,
+        // Minimal reasoning and room to spare: claude-haiku-5.5 spent a 1200-token budget
+        // thinking and returned nothing on list questions.
+        reasoning: 'minimal',
+        maxTokens: maxTokens ?? 3500,
         timeoutMs: 45_000,
     });
+    if (!response.text.trim() && response.finishReason) {
+        // An empty answer reads as "nothing found"; make the cause visible.
+        logWarn('KISMATIK', 'llm_empty', { model, finish_reason: response.finishReason });
+    }
     logTokenUsage(model, response.usage.inputTokens, response.usage.outputTokens, undefined, response.usage.costUsd);
     return response.text;
 };

@@ -122,7 +122,7 @@ export async function extractSignals(chatId: string, batch: Chunk[], now: number
     const raw = await kismatikLlm()({
         system: SIGNALS_SYSTEM,
         user: batch.map((chunk) => chunk.text).join('\n\n'),
-        maxTokens: 1500,
+        maxTokens: 4000,
     });
     const parsed = parseJsonLoose<{ items?: Array<{ kind?: string; msg?: number; summary?: string }> }>(raw);
     const created: Signal[] = [];
@@ -182,7 +182,7 @@ async function findMatch(chatId: string, signal: Signal, now: number): Promise<S
     const raw = await kismatikLlm()({
         system: MATCH_SYSTEM,
         user: `${signal.kind}: ${signal.summary}\n\nКандидаты (${other}):\n${list}`,
-        maxTokens: 300,
+        maxTokens: 600,
     });
     // A long "why" can run past the token limit and cut the JSON off; the pick comes first.
     const pick = Number(parseJsonLoose<{ pick?: number | null }>(raw)?.pick ?? /"pick"\s*:\s*(\d+)/.exec(raw)?.[1]);
