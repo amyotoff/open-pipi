@@ -703,3 +703,30 @@ describe('import with channels', () => {
         expect(store.getMessage(A, 50)).toMatchObject({ user_id: '-1009999999999', author_kind: 'chat', link: null });
     });
 });
+
+describe('match parsing', () => {
+    it('reads the pick from JSON cut off by the token limit', async () => {
+        const { store, llm, digest } = await load();
+        const now = T0;
+        llm.setKismatikLlmForTest(async () => '{"pick": 1, "why": "Запрос: шеф ищет работу в любой стр');
+        const need = store.addSignal(A, {
+            kind: 'need',
+            message_id: 1,
+            user_id: '101',
+            user_name: 'Аня',
+            summary: 'ищу проектор',
+            expires_at: now + 1e9,
+        })!;
+        store.addSignal(A, {
+            kind: 'offer',
+            message_id: 2,
+            user_id: '102',
+            user_name: 'Боря',
+            summary: 'одолжу проектор',
+            expires_at: now + 1e9,
+        });
+        const sent: string[] = [];
+        digest.setGroupSender({ sendHtml: async (_c, html) => void sent.push(html) });
+        expect(await digest.matchSignals(A, [store.getSignal(A, need)!], now)).toBe(1);
+    });
+});

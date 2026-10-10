@@ -27,6 +27,8 @@ export interface KismatikConfig {
     /** fp32 beats q8 on ARM CPUs, where int8 kernels are slow; q4 is smaller and faster still. */
     localDtype: 'fp32' | 'q8' | 'q4';
     geminiModel: string;
+    /** Model for answers, extraction and matching; PiPi's executor model when unset. */
+    llmModel: string | null;
     embeddingDim: number;
     /** A new chunk starts after this much silence. */
     chunkGapMs: number;
@@ -53,6 +55,7 @@ export function loadKismatikConfig(env: NodeJS.ProcessEnv = process.env): Kismat
         localDtype:
             env.KISMATIK_LOCAL_DTYPE === 'q8' || env.KISMATIK_LOCAL_DTYPE === 'q4' ? env.KISMATIK_LOCAL_DTYPE : 'fp32',
         geminiModel: env.KISMATIK_GEMINI_EMBED_MODEL || 'gemini-embedding-001',
+        llmModel: env.KISMATIK_LLM_MODEL?.trim() || null,
         embeddingDim: readInt(env.KISMATIK_EMBEDDING_DIM, 256),
         chunkGapMs: readInt(env.KISMATIK_CHUNK_GAP_MIN, 10) * 60_000,
         chunkMaxChars: readInt(env.KISMATIK_CHUNK_MAX_CHARS, 1500),

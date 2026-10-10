@@ -2,15 +2,18 @@ import { LLM_CONFIG } from '../config';
 import { guardLLMCall } from '../core/healthcheck';
 import { generateLLM } from '../core/llm-gateway';
 import { logTokenUsage } from '../db';
+import { kismatikConfig } from './config';
 
 export type KismatikLlm = (input: { system: string; user: string; maxTokens?: number }) => Promise<string>;
 
 const defaultLlm: KismatikLlm = async ({ system, user, maxTokens }) => {
     const blocked = guardLLMCall();
     if (blocked) throw new Error(blocked);
+    // KISMATIK may run on its own model (KISMATIK_LLM_MODEL) without moving the rest of PiPi.
+    const model = kismatikConfig().llmModel || LLM_CONFIG.executorModel;
     const response = await generateLLM({
         provider: LLM_CONFIG.provider,
-        model: LLM_CONFIG.executorModel,
+        model,
         messages: [
             { role: 'system', content: system },
             { role: 'user', content: user },
@@ -19,13 +22,7 @@ const defaultLlm: KismatikLlm = async ({ system, user, maxTokens }) => {
         maxTokens: maxTokens ?? 1200,
         timeoutMs: 45_000,
     });
-    logTokenUsage(
-        LLM_CONFIG.executorModel,
-        response.usage.inputTokens,
-        response.usage.outputTokens,
-        undefined,
-        response.usage.costUsd
-    );
+    logTokenUsage(model, response.usage.inputTokens, response.usage.outputTokens, undefined, response.usage.costUsd);
     return response.text;
 };
 
