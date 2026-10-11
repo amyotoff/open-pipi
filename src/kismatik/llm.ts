@@ -5,9 +5,15 @@ import { logTokenUsage } from '../db';
 import { logWarn } from '../utils/logging';
 import { kismatikConfig } from './config';
 
-export type KismatikLlm = (input: { system: string; user: string; maxTokens?: number }) => Promise<string>;
+export type KismatikLlm = (input: {
+    system: string;
+    user: string;
+    maxTokens?: number;
+    temperature?: number;
+    timeoutMs?: number;
+}) => Promise<string>;
 
-const defaultLlm: KismatikLlm = async ({ system, user, maxTokens }) => {
+const defaultLlm: KismatikLlm = async ({ system, user, maxTokens, temperature, timeoutMs }) => {
     const blocked = guardLLMCall();
     if (blocked) throw new Error(blocked);
     // KISMATIK may run on its own model (KISMATIK_LLM_MODEL) without moving the rest of PiPi.
@@ -19,12 +25,12 @@ const defaultLlm: KismatikLlm = async ({ system, user, maxTokens }) => {
             { role: 'system', content: system },
             { role: 'user', content: user },
         ],
-        temperature: 0.2,
+        temperature: temperature ?? 0.2,
         // Minimal reasoning and room to spare: claude-haiku-5.5 spent a 1200-token budget
         // thinking and returned nothing on list questions.
         reasoning: 'minimal',
         maxTokens: maxTokens ?? 3500,
-        timeoutMs: 45_000,
+        timeoutMs: timeoutMs ?? 45_000,
     });
     if (!response.text.trim() && response.finishReason) {
         // An empty answer reads as "nothing found"; make the cause visible.

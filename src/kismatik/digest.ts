@@ -1,12 +1,11 @@
 /**
- * The background half: embed quiet chunks, compile them into the community
- * wiki, pull out who needs and who offers what, and point matching people at
- * each other in the group.
+ * The background half: embed quiet chunks, pull out who needs and who
+ * offers what, and point matching people at each other in the group. The
+ * wiki has its own queue (wiki.ts).
  */
 
-import { captureRawSource, runIngestQueue } from '../core/brain-ingest';
-import { logInfo, logWarn } from '../utils/logging';
-import { communitySpaceId, kismatikConfig } from './config';
+import { logWarn } from '../utils/logging';
+import { kismatikConfig } from './config';
 import { getEmbedder } from './embedder';
 import { kismatikLlm, parseJsonLoose } from './llm';
 import { storedLink } from './answer';
@@ -63,7 +62,7 @@ export async function embedPending(chatId: string, batch = 1): Promise<number> {
     return chunks.length;
 }
 
-/* -------------------------------------------------------------------- wiki */
+/* ----------------------------------------------------------------- batches */
 
 function batchChunks(chunks: Chunk[]): Chunk[] {
     const batch: Chunk[] = [];
@@ -74,36 +73,6 @@ function batchChunks(chunks: Chunk[]): Chunk[] {
         size += chunk.chars;
     }
     return batch;
-}
-
-async function compileToWiki(chatId: string, batch: Chunk[]): Promise<void> {
-    const spaceId = communitySpaceId(chatId);
-    const title = getCommunity(chatId)?.title || chatId;
-    const sources: Chunk[][] = [[]];
-    let size = 0;
-    for (const chunk of batch) {
-        const current = sources[sources.length - 1];
-        if (current.length > 0 && size + chunk.chars > kismatikConfig().wikiSourceChars) {
-            sources.push([chunk]);
-            size = chunk.chars;
-        } else {
-            current.push(chunk);
-            size += chunk.chars;
-        }
-    }
-    for (const source of sources) {
-        const from = new Date(source[0].first_ts).toISOString().slice(0, 10);
-        const to = new Date(source[source.length - 1].last_ts).toISOString().slice(0, 10);
-        captureRawSource({
-            spaceId,
-            topic: 'chat',
-            title: `Переписка «${title}» ${from === to ? from : `${from} — ${to}`}`,
-            content: source.map((chunk) => chunk.text).join('\n\n'),
-            published_at: to,
-        });
-    }
-    const result = await runIngestQueue({ spaceId, limit: sources.length + 2 });
-    logInfo('KISMATIK', 'wiki_ingest', { chat_id: chatId, sources: sources.length, ...result });
 }
 
 /* ----------------------------------------------------------------- signals */
@@ -234,10 +203,7 @@ export interface DigestResult {
     backlog: boolean;
 }
 
-/**
- * One pass for one community. Each stage fails on its own: a wiki compile
- * error still lets needs and offers through, and the reverse.
- */
+/** One pass for one community: needs and offers from the next batch of quiet chunks, then matches. */
 export async function digestCommunity(chatId: string, now = Date.now()): Promise<DigestResult> {
     const result: DigestResult = { chunks: 0, signals: 0, suggestions: 0, backlog: false };
     if (isPaused(chatId)) return result;
@@ -249,18 +215,12 @@ export async function digestCommunity(chatId: string, now = Date.now()): Promise
     if (batch.length === 0) return result;
     result.backlog = pending.length > batch.length;
 
-    try {
-        if (kismatikConfig().wiki) await compileToWiki(chatId, batch);
-    } catch (error: any) {
-        logWarn('KISMATIK', 'wiki_compile_failed', { chat_id: chatId, message: error?.message });
-    }
-
     let signals: Signal[];
     try {
         signals = await extractSignals(chatId, batch, now);
     } catch (error: any) {
         // Leave the batch undigested so the next pass tries again; a model outage must not
-        // silently drop everyone's needs and offers. A repeated wiki capture is deduplicated.
+        // silently drop everyone's needs and offers.
         logWarn('KISMATIK', 'signals_failed', { chat_id: chatId, message: error?.message });
         return result;
     }

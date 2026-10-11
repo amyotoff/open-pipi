@@ -2,6 +2,7 @@ import { logInfo, logWarn } from '../utils/logging';
 import { kismatikConfig } from './config';
 import { digestCommunity, embedPending } from './digest';
 import { closeKismatikDb, isPaused } from './store';
+import { ingestPending } from './wiki';
 
 const TICK_MS = 60_000;
 const EMBED_BUDGET_MS = 45_000;
@@ -28,6 +29,14 @@ async function tick(): Promise<void> {
                 }
             } catch (error: any) {
                 logWarn('KISMATIK', 'embed_failed', { chat_id: chatId, message: error?.message });
+            }
+
+            if (config.wiki) {
+                try {
+                    await ingestPending(chatId);
+                } catch (error: any) {
+                    logWarn('KISMATIK', 'wiki_tick_failed', { chat_id: chatId, message: error?.message });
+                }
             }
 
             const due = (lastDigest.get(chatId) ?? 0) + config.digestIntervalMs <= Date.now();

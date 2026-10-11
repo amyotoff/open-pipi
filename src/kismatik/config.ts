@@ -35,13 +35,13 @@ export interface KismatikConfig {
     chunkMaxChars: number;
     digestIntervalMs: number;
     /**
-     * Compile chat into the community wiki. Off by default: answers reach the
-     * eval bar on search alone, and compile runs on the advisor model in English
-     * at about $0.02 per channel post.
+     * Keep the community wiki (wiki.ts) and answer list questions from it plus
+     * search. Off by default: it costs about $0.007 per conversation to build
+     * and roughly doubles answer cost and latency.
      */
     wiki: boolean;
-    /** One wiki source per this many characters; a long source makes compile time out. */
-    wikiSourceChars: number;
+    /** Conversations folded into the wiki per hour, across all communities. */
+    wikiChunksPerHour: number;
     maxSuggestionsPerDay: number;
     maxAsksPerUserPerDay: number;
 }
@@ -61,7 +61,7 @@ export function loadKismatikConfig(env: NodeJS.ProcessEnv = process.env): Kismat
         chunkMaxChars: readInt(env.KISMATIK_CHUNK_MAX_CHARS, 1500),
         digestIntervalMs: readInt(env.KISMATIK_DIGEST_INTERVAL_MIN, 120) * 60_000,
         wiki: env.KISMATIK_WIKI === 'on',
-        wikiSourceChars: readInt(env.KISMATIK_WIKI_SOURCE_CHARS, 6000),
+        wikiChunksPerHour: readInt(env.KISMATIK_WIKI_CHUNKS_PER_HOUR, 20),
         maxSuggestionsPerDay: readInt(env.KISMATIK_MAX_SUGGESTIONS_PER_DAY, 5),
         maxAsksPerUserPerDay: readInt(env.KISMATIK_MAX_ASKS_PER_USER_PER_DAY, 30),
     };
@@ -82,9 +82,4 @@ export function setKismatikConfigForTest(config: Partial<KismatikConfig> | null)
 export function isKismatikChat(chatId: string | number | undefined | null): boolean {
     if (chatId === undefined || chatId === null) return false;
     return kismatikConfig().chatIds.has(String(chatId));
-}
-
-/** The brain scope a community's wiki lives in. Never the shared wiki. */
-export function communitySpaceId(chatId: string): string {
-    return `kismatik-${chatId}`;
 }

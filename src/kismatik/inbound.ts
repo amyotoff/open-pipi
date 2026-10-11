@@ -8,11 +8,11 @@
  */
 
 import { isOwner } from '../config';
-import { listWikiPages } from '../core/brain-wiki';
 import { isAddressedToTelegramBot } from '../transports/telegram/normalizer';
 import { logError, logInfo } from '../utils/logging';
 import { answerQuestion } from './answer';
-import { communitySpaceId, isKismatikChat, kismatikConfig } from './config';
+import { isKismatikChat, kismatikConfig } from './config';
+import { FOLDERS, forgetInWiki, listPages } from './wiki';
 import {
     addMessage,
     communityStats,
@@ -107,13 +107,27 @@ async function handleKm(ctx: KismatikContext, chatId: string, args: string): Pro
             return ask(ctx, chatId, tail);
         case 'wiki': {
             if (!kismatikConfig().wiki) return replyHtml(ctx, 'Вики в этом чате не ведётся — спросите меня напрямую.');
-            const pages = listWikiPages({ spaceId: communitySpaceId(chatId), limit: 30 });
+            const pages = listPages(chatId);
             if (pages.length === 0)
-                return replyHtml(ctx, 'Вики пока пустая — она собирается из переписки раз в пару часов.');
-            return replyHtml(
-                ctx,
-                ['<b>Что я знаю:</b>', ...pages.map((page) => `• ${escapeHtml(page.title)}`)].join('\n')
-            );
+                return replyHtml(ctx, 'Вики пока пустая — она собирается из переписки по мере разговоров.');
+            const names: Record<string, string> = {
+                people: 'Люди',
+                places: 'Места',
+                orgs: 'Заведения и компании',
+                events: 'События',
+                jobs: 'Вакансии',
+                topics: 'Темы',
+            };
+            const lines = [`<b>Что я знаю</b> — ${pages.length} страниц:`];
+            for (const folder of FOLDERS) {
+                const group = pages.filter((page) => page.category === folder);
+                if (group.length === 0) continue;
+                const shown = group.slice(0, 12).map((page) => escapeHtml(page.title));
+                lines.push(
+                    `<b>${names[folder]}</b> (${group.length}): ${shown.join(', ')}${group.length > 12 ? '…' : ''}`
+                );
+            }
+            return replyHtml(ctx, lines.join('\n'));
         }
         case 'forget': {
             const target = ctx.message?.reply_to_message?.message_id ?? Number(rest[0]?.match(/(\d+)\/?$/)?.[1]);
@@ -123,6 +137,7 @@ async function handleKm(ctx: KismatikContext, chatId: string, args: string): Pro
             if (!stored) return replyHtml(ctx, 'Этого сообщения в памяти нет.');
             if (stored.user_id !== userId && !owner) return replyHtml(ctx, 'Забыть можно только своё сообщение.');
             forgetMessage(chatId, Number(target));
+            forgetInWiki(chatId, Number(target));
             return replyHtml(ctx, 'Забыл.');
         }
         case 'on':

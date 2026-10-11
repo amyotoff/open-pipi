@@ -4,7 +4,7 @@
  */
 
 import fs from 'node:fs';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
     DAY,
     HOUR,
@@ -18,13 +18,6 @@ import {
     type SimChat,
 } from '../test-helpers/kismatik-sim';
 import { toStemQuery } from './text';
-
-// The wiki compiler would call the real model; the community wiki stays empty here.
-vi.mock('../core/brain-ingest', async (importOriginal) => ({
-    ...(await importOriginal<typeof import('../core/brain-ingest')>()),
-    captureRawSource: vi.fn(() => ({})),
-    runIngestQueue: vi.fn(async () => ({ processed: 0, compiled: 0, no_material: 0, failed: 0, retried: 0 })),
-}));
 
 const A = '-1001111111111';
 const B = '-1002222222222';
@@ -135,12 +128,13 @@ describe('simulation', () => {
         expect(s.mods.store.getMessage(A, 2)!.text).toContain('проектор');
         expect(s.mods.store.getMessage(B, 2)!.text).toContain('компостер');
 
-        const wiki = await import('../core/brain-wiki');
-        wiki.updateWikiPage({
-            path: 'topics/proektor.md',
-            body: '# Проектор\nПроектор в доме 5.',
-            spaceId: `kismatik-${A}`,
-        });
+        s.mods.store
+            .getKismatikDb()
+            .prepare(
+                `INSERT INTO wiki_pages (chat_id, path, title, summary, category, body, msg_ids, updated_at)
+                 VALUES (?, 'topics/proektor.md', 'Проектор', 'кто одалживает', 'topics', ?, '[2]', 0)`
+            )
+            .run(A, '# Проектор\n- Проектор в доме 5 [msg:2]');
         const listA = await s.feed(s.command(A, 103, '/km wiki'));
         const listB = await s.feed(s.command(B, 103, '/km wiki'));
         expect(listA.replies[0]).toContain('Проектор');

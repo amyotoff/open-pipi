@@ -1,21 +1,18 @@
 /**
- * Hybrid recall over one community: chat chunks by stemmed full text, chat
- * chunks by vector, and the community's compiled wiki pages. The lists are
- * fused with reciprocal rank fusion, which needs no score calibration.
+ * Recall over one community's chat: chunks by stemmed full text and by
+ * vector, fused with reciprocal rank fusion, which needs no score
+ * calibration. Wiki pages are chosen separately, by the model reading the
+ * index (wiki.ts).
  */
 
-// Registers the brain index rebuilder; without it a fresh wiki index opens empty.
-import '../core/brain';
-import { readWikiPage, searchWikiRows } from '../core/brain-wiki';
 import { logWarn } from '../utils/logging';
-import { communitySpaceId } from './config';
 import { getEmbedder } from './embedder';
 import { getChunks, loadVectors, searchChunksFts, type Chunk } from './store';
 import { toStemQuery } from './text';
 
 export type Evidence =
     | { kind: 'chat'; key: string; chunk: Chunk }
-    | { kind: 'wiki'; key: string; path: string; title: string; body: string };
+    | { kind: 'wiki'; key: string; path: string; title: string; body: string; msgIds: number[] };
 
 const RRF_K = 60;
 const LIST_DEPTH = 30;
@@ -61,62 +58,18 @@ async function vectorHits(chatId: string, question: string): Promise<number[]> {
     }
 }
 
-function wikiHits(chatId: string, question: string): Array<{ path: string; title: string }> {
-    try {
-        return searchWikiRows({
-            query: question,
-            limit: 5,
-            visibility: ['space'],
-            spaceId: communitySpaceId(chatId),
-        }).map((hit) => ({
-            path: hit.path,
-            title: hit.title,
-        }));
-    } catch (error: any) {
-        logWarn('KISMATIK', 'wiki_search_failed', { chat_id: chatId, message: error?.message });
-        return [];
-    }
-}
-
 export async function retrieve(chatId: string, question: string, limit = 8): Promise<Evidence[]> {
     const ftsIds = searchChunksFts(chatId, toStemQuery(question), LIST_DEPTH).map((hit) => hit.id);
     const vectorIds = await vectorHits(chatId, question);
-    const wiki = wikiHits(chatId, question);
+    const fused = rrf([ftsIds.map((id) => `chat:${id}`), vectorIds.map((id) => `chat:${id}`)]).slice(0, limit);
 
-    const fused = rrf([
-        ftsIds.map((id) => `chat:${id}`),
-        vectorIds.map((id) => `chat:${id}`),
-        wiki.map((page) => `wiki:${page.path}`),
-    ]).slice(0, limit);
-
-    const chunkIds = fused.filter((hit) => hit.key.startsWith('chat:')).map((hit) => Number(hit.key.slice(5)));
+    const chunkIds = fused.map((hit) => Number(hit.key.slice(5)));
     // getChunks filters by chat id too: a vector row from elsewhere cannot surface here.
     const chunks = new Map(getChunks(chatId, chunkIds).map((chunk) => [`chat:${chunk.id}`, chunk]));
-    const titles = new Map(wiki.map((page) => [`wiki:${page.path}`, page.title]));
-
     const evidence: Evidence[] = [];
     for (const hit of fused) {
         const chunk = chunks.get(hit.key);
-        if (chunk) {
-            evidence.push({ kind: 'chat', key: hit.key, chunk });
-            continue;
-        }
-        if (hit.key.startsWith('wiki:')) {
-            const pagePath = hit.key.slice(5);
-            try {
-                const page = readWikiPage(pagePath, { spaceId: communitySpaceId(chatId) });
-                if (!page.exists) continue;
-                evidence.push({
-                    kind: 'wiki',
-                    key: hit.key,
-                    path: pagePath,
-                    title: titles.get(hit.key) || pagePath,
-                    body: page.content.slice(0, 4000),
-                });
-            } catch {
-                // A page deleted since indexing is simply not evidence.
-            }
-        }
+        if (chunk) evidence.push({ kind: 'chat', key: hit.key, chunk });
     }
     return evidence;
 }

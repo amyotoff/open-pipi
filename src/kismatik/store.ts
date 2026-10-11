@@ -101,7 +101,10 @@ CREATE TABLE IF NOT EXISTS chunks (
     thread_root INTEGER,
     closed INTEGER NOT NULL DEFAULT 0,
     embedded INTEGER NOT NULL DEFAULT 0,
-    digested INTEGER NOT NULL DEFAULT 0
+    digested INTEGER NOT NULL DEFAULT 0,
+    wiki_state INTEGER NOT NULL DEFAULT 0,
+    wiki_attempts INTEGER NOT NULL DEFAULT 0,
+    wiki_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS chunks_chat_open ON chunks(chat_id, closed, last_ts);
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(stem, chat_id UNINDEXED, tokenize = 'unicode61');
@@ -133,6 +136,17 @@ CREATE TABLE IF NOT EXISTS suggestions (
     offer_id INTEGER NOT NULL,
     created_at INTEGER NOT NULL,
     PRIMARY KEY (chat_id, need_id, offer_id)
+);
+CREATE TABLE IF NOT EXISTS wiki_pages (
+    chat_id TEXT NOT NULL,
+    path TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    category TEXT NOT NULL,
+    body TEXT NOT NULL,
+    msg_ids TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (chat_id, path)
 );
 CREATE TABLE IF NOT EXISTS asks (
     chat_id TEXT NOT NULL,

@@ -34,7 +34,7 @@ export interface SimUpdate {
     message?: any;
 }
 
-export type LlmKind = 'answer' | 'signals' | 'match';
+export type LlmKind = 'answer' | 'signals' | 'match' | 'select' | 'wiki';
 export type LlmInput = { system: string; user: string; maxTokens?: number };
 export type LlmHook = (input: LlmInput) => string | Promise<string>;
 
@@ -73,6 +73,8 @@ export const hashEmbedder = {
 function kindOf(system: string): LlmKind {
     if (system.includes('память Telegram-сообщества')) return 'answer';
     if (system.includes('разбираешь переписку')) return 'signals';
+    if (system.includes('навигатор по вики')) return 'select';
+    if (system.includes('редактор вики')) return 'wiki';
     return 'match';
 }
 
@@ -117,6 +119,8 @@ export async function createSim(options: {
         },
         signals: () => '{"items":[]}',
         match: () => '{"pick":1}',
+        select: () => '{"pages":[]}',
+        wiki: () => '{"pages":[]}',
     };
 
     let mods = await loadModules();

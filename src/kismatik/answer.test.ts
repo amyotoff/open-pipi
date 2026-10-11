@@ -25,8 +25,7 @@ describe('renderCitations', () => {
         const { html, cited } = renderCitations(
             'Тбилиси [msg:305, msg:310] и удалённо [358]. Ещё раз [msg:305, 999].',
             A,
-            new Set([305, 310, 358]),
-            0
+            new Set([305, 310, 358])
         );
         expect(html.match(/\/305"/g)).toHaveLength(1);
         expect(html).toContain('/310"');
@@ -37,7 +36,7 @@ describe('renderCitations', () => {
 
     it('turns markdown bold and bullets into Telegram HTML', async () => {
         const { renderCitations } = await import('./answer');
-        const { html } = renderCitations('Города:\n*   **Милан** [msg:1]\n- Белград', A, new Set([1]), 0);
+        const { html } = renderCitations('Города:\n*   **Милан** [msg:1]\n- Белград', A, new Set([1]));
         expect(html).toContain('• <b>Милан</b>');
         expect(html).toContain('• Белград');
         expect(html).not.toContain('*');
