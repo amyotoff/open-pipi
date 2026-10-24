@@ -1063,13 +1063,19 @@ Useful scripts:
 | `pnpm test:evaluator` | Minimal operational evaluator |
 | `pnpm test:watch` | Watch mode |
 | `pnpm verify` | Complete local quality gate |
-| `pnpm release:check` | Quality gate plus high-severity production dependency audit |
+| `pnpm release:check` | Quality gate plus moderate-or-higher production dependency audit |
 | `pnpm bootstrap` | Description to grounding bootstrap flow |
 | `pnpm content:check` | Validate installable packs and groundings |
 | `pnpm content:new` | Scaffold a pack or grounding without overwriting content |
 | `pnpm setup` | Guided local AI, Telegram, and owner setup |
 | `pnpm setup:check` | Read-only first-run and configuration diagnostics |
 | `pnpm backup:restore` | Restore a runtime backup by id, path, `latest`, or `latest-healthy` |
+
+### Dependency security checks
+
+CI and `pnpm release:check` fail on production dependency advisories rated moderate or higher. To run only the audit, use `pnpm audit --prod --audit-level=moderate`.
+
+The dependency overrides require patched `qs` 6.16.0+ for HTTP query/body parsing and `music-metadata` 11.16.0+ for the optional WhatsApp adapter's media parsing. Keep `package.json` and `pnpm-lock.yaml` together when updating these constraints, install with `pnpm install --frozen-lockfile`, and rerun `pnpm verify` and the audit. A passing audit reflects the advisories known at the time of the check.
 
 ## Current Direction
 
