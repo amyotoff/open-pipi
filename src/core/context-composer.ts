@@ -28,6 +28,7 @@ import { ensureActiveMemorySprint } from './memory-sprint';
 import { resolveChannelRefFromExecutionContext } from './runtime-context';
 import { getGroundingContext } from './grounding-context';
 import { buildWikiContextBlock } from './brain-query';
+import { buildStateContextBlock } from './brain-state-context';
 import { logInfo } from '../utils/logging';
 
 /**
@@ -486,6 +487,8 @@ export function composeConversationContext(input: ComposeConversationInput): Con
         residentMap[personId] = r.nickname || r.display_name || r.username || `User ${personId}`;
     }
 
+    // Read concrete state before retrieval of narrative memories or cross-space dialogue.
+    const stateContext = buildStateContextBlock({ spaceId, query: latestUserText });
     const memoryContext = getMemoryContext({
         residentId: senderId,
         spaceId,
@@ -550,6 +553,7 @@ export function composeConversationContext(input: ComposeConversationInput): Con
 
     const systemParts = [
         systemPrompt,
+        stateContext,
         space?.channel === 'telegram'
             ? `\n[RESPONSE_CONTRACT]
 - Think and use tools as deeply as the work requires; keep the visible reply proportional.

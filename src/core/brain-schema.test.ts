@@ -40,6 +40,7 @@ describe('core/brain-schema', () => {
         expect(text).toContain('Privacy does not leak across chats');
         // The rule that keeps the shared wiki a place people chose to write to.
         expect(text).toContain('the owner asked to save it');
+        expect(text).toContain('Structured state is the first read for status');
     });
 
     it('falls back to the host schema when a space has not overridden it', async () => {
@@ -73,5 +74,13 @@ describe('core/brain-schema', () => {
         expect(schema.readBrainTemplate('article')).toContain('"kind": "article"');
         expect(schema.readBrainTemplate('archive')).toContain('"kind": "archive"');
         expect(schema.readBrainTemplate('raw')).toContain('> Collected:');
+
+        const state = schema.readBrainTemplate('state');
+        const json = JSON.parse(state.match(/```json\n([\s\S]*?)\n```/)![1]);
+        const { parseStatePatch } = await import('./brain-state');
+        expect(parseStatePatch(JSON.stringify(json))).toMatchObject({ kind: 'project', title: 'Website' });
+        expect(Object.values(json.set_fields)).toEqual([
+            expect.objectContaining({ value: null, status: 'unknown', observed_at: null, source: null }),
+        ]);
     });
 });

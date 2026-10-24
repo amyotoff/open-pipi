@@ -16,6 +16,7 @@ import { formatLintDigest, isLintDue, lintWiki } from '../core/brain-lint';
 import { getBrainSchema, readBrainTemplate } from '../core/brain-schema';
 import { resolveSpaceIdFromExecutionContext, RuntimeExecutionContext } from '../core/runtime-context';
 import { getMembership, getResident } from '../db';
+import { stateHandlers, stateTools, validateStateUpdateArgs } from './brain-state-tools';
 function brainScope(context?: RuntimeExecutionContext): { spaceId?: string } {
     return { spaceId: resolveSpaceIdFromExecutionContext(context) };
 }
@@ -56,6 +57,14 @@ const skill: SkillManifest = {
         pack_tags: ['jeeves', 'tutor', 'office', 'reporter'],
     },
     toolMeta: {
+        wiki_state_save: {
+            approval: 'explicit',
+            approval_action: 'wiki_save',
+            approval_reason: 'Writes structured state readable by everyone in this install.',
+            approval_detail_fields: ['id', 'expected_revision', 'patch_json'],
+            approval_action_fields: ['id', 'expected_revision', 'patch_json'],
+            approval_single_use: true,
+        },
         wiki_save: {
             approval: 'explicit',
             approval_action: 'wiki_save',
@@ -76,6 +85,7 @@ const skill: SkillManifest = {
         },
     },
     tools: [
+        ...stateTools,
         {
             name: 'append_note',
             description:
@@ -126,7 +136,8 @@ const skill: SkillManifest = {
         },
         {
             name: 'read_wiki_page',
-            description: 'Read a curated wiki page from the Brain Layer.',
+            description:
+                'Read a curated knowledge/reflection page from the Brain Layer. For mutable apartment/project status or lists, use wiki_state_read first.',
             parameters: {
                 type: Type.OBJECT,
                 properties: {
@@ -266,7 +277,7 @@ const skill: SkillManifest = {
         {
             name: 'wiki_answer',
             description:
-                'Answer a question from the wiki and cite the pages used. Use for "what do I know about X", "summarise everything on Y", or comparisons across compiled pages. This never writes files.',
+                'Answer a question from state or wiki knowledge with citations. The runtime reads matching structured records first for current status; explanations/history use prose pages. This never writes files or refreshes external devices.',
             parameters: {
                 type: Type.OBJECT,
                 properties: {
@@ -303,7 +314,8 @@ const skill: SkillManifest = {
                 properties: {
                     template: {
                         type: Type.STRING,
-                        description: 'Optional template to include: "article", "archive", or "raw".',
+                        description:
+                            'Optional template to include: "article", "state", "archive", or "raw". Use "state" for structured JSON state of an apartment, project, or other managed object.',
                     },
                 },
             },
@@ -391,6 +403,8 @@ const skill: SkillManifest = {
     ],
 
     preflight: {
+        wiki_state_update: validateStateUpdateArgs,
+        wiki_state_save: validateStateUpdateArgs,
         // Approval shows arguments, so what the owner needs to judge has to be an argument.
         wiki_save: (args: { path?: string; body?: string }) => ({
             ...args,
@@ -413,6 +427,7 @@ const skill: SkillManifest = {
     },
 
     handlers: {
+        ...stateHandlers,
         async append_note(args: { topic: string; text: string; tags?: string[] }, context?: RuntimeExecutionContext) {
             const note = appendNote({ topic: args.topic, text: args.text, tags: args.tags, ...brainScope(context) });
             return `[TOOL_RESULT] Notebook note appended: ${note.id}\nPath: ${note.file_path}\nTopic: ${note.topic}\nTags: ${note.tags.length > 0 ? note.tags.join(', ') : 'none'}`;
@@ -439,6 +454,9 @@ const skill: SkillManifest = {
         },
 
         async read_wiki_page(args: { path: string }, context?: RuntimeExecutionContext) {
+            // wiki_answer citations for state are logical references, resolved through the same scoped reader.
+            const stateRef = /^state\/(space|shared|native)\/([a-z0-9][a-z0-9_-]{0,63})\.json$/.exec(args.path);
+            if (stateRef) return stateHandlers.wiki_state_read({ origin: stateRef[1], id: stateRef[2] }, context);
             const page = readWikiPageForReader({
                 path: args.path,
                 ...brainScope(context),
@@ -568,7 +586,7 @@ const skill: SkillManifest = {
             // The shared wiki compiles without a chat attached, so the shipped schema is the
             // one actually in force. Showing a per-chat override here would be a fiction.
             const schema = getBrainSchema();
-            const name = args.template as 'article' | 'archive' | 'raw' | undefined;
+            const name = args.template as 'article' | 'state' | 'archive' | 'raw' | undefined;
             const template = name ? readBrainTemplate(name) : '';
             const suffix = name
                 ? template

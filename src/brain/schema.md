@@ -5,7 +5,8 @@ structured, what the conventions are, and which workflow to follow. It is meant 
 co-evolved — the owner can override it per space, and should, as they learn what their
 own domain needs.
 
-The other two layers are `raw/` (immutable sources) and `wiki/` (compiled pages).
+The data layers are `raw/` (immutable sources), `wiki/` (compiled knowledge and
+reflections), and `state/` (validated, mutable JSON records).
 
 ## Two wikis, one shared
 
@@ -27,6 +28,7 @@ be a decision somebody made, not a side effect of a conversation.
 
 ```
 raw/<topic>/YYYY-MM-DD-<slug>-<hash8>.md   immutable, never edited
+state/<id>.json                            validated structured state, atomic updates
 wiki/<topic>/<article>.md                  compiled pages, one topic level only
 wiki/index.md                              generated catalogue — never edit by hand
 wiki/log.md                                append-only history — never rewrite
@@ -45,6 +47,54 @@ as `../../raw/health/<file>.md` and another page as `../people/anna.md`.
 - `status` is `canonical`, or `needs_review` when a page was filed without being compiled.
 - `kind` is `article`, or `archive` for a filed answer.
 - `knowledge_updated_at` changes only when the knowledge changes — not for typo or link fixes.
+
+## Structured state is the first read for status
+
+Maintain apartment/project status and named lists with `wiki_state_update` in the current
+space, or `wiki_state_save` for explicitly shared state (owner confirmation required).
+These tools write `state/<id>.json`, validate its schema, check the revision, and atomically
+replace the file under a writer lock. Ordinary wiki prose writes cannot modify these files.
+The compiler still compiles narrative sources; a compiled paragraph does not update state.
+
+Use `wiki_state_list` to discover ids and origins, then `wiki_state_read`. For current
+status, the runtime selects matching records by id, title, aliases, and kind before text
+retrieval and injects bounded JSON into ordinary conversation context. `wiki_answer` uses
+matching state instead of older prose for status questions; explanations and historical
+questions still consult narrative pages. If selection misses the object, list/read it
+explicitly. Omitted field/item counts mean a partial view, never an empty list.
+
+The built-in `todos` and `shopping` states read the current space's existing SQLite tables
+directly. Use `todos_add/complete/remove` and `shopping_add/complete/remove` to update them.
+There is no copied wiki list to become stale. Named lists use kind `todo` or `shopping` in
+`state/`; each item has a stable id, text, status (`pending` or `done`), and optional shopping
+quantity. A project or apartment uses typed fields. A reflection such as "why calling a
+plumber is difficult" belongs in a wiki article; "call the plumber" is a todo item.
+
+Read `wiki_schema(template: "state")` for patch examples. Create with expected_revision 0;
+later updates must use the exact revision just read. A patch supports `set_fields`,
+`remove_fields`, `upsert_items`, and `remove_items`, preserving all other entries. Never
+blindly retry a revision conflict: read, reconsider the intended change, then patch.
+
+Each field has `value`, `status`, `observed_at`, and `source`; optional fields are `unit`,
+`refresh` (configured provider and entity_id), `value_type`, and `max_age_seconds`. The runtime
+retains a field's established type and optional freshness metadata across value updates. Values stay typed:
+`null` is unknown, `false` is off, and zero is a number. A `known` value needs an observation
+time and source. Source references must correspond to real evidence; schema validation
+cannot prove the truth of a source claim. Store missing information as unknown/null.
+Allowed statuses are known, unknown, stale, unavailable, and disputed. Older observations
+and conflicting known values at the same timestamp are rejected. Record conflicts explicitly.
+
+Freshness is calculated at read time. External values with no freshness policy are stale;
+expired values require a fresh authorized integration read. Bindings are descriptive data,
+never permission to execute arbitrary tools or URLs. The wiki tools do not poll devices.
+If a read fails, report the last known value and its time or say unknown/unavailable.
+Requested state and observed state must occupy separate fields. An accepted command or
+an archived answer never proves current state. Use the provider's history for sensor time
+series; promote supported patterns into knowledge separately.
+
+State visibility follows its storage scope: space-local or explicitly shared. Reads never
+search another space. Shared and local objects with the same id remain distinct by origin.
+Records are limited to 64 KiB, 128 fields, 200 items, and 10 levels of JSON nesting.
 
 ## Writing rules
 
@@ -107,6 +157,7 @@ dispositions:
 Choose `no_material` freely. A thin source forced into a page makes the index worse.
 
 **Query.** Search with `wiki_search`, read with `read_wiki_page`, answer with `wiki_answer`.
+For object status, use `wiki_state_list` and `wiki_state_read` before searching dialogue. Consult source history for gaps and explanations.
 All three compare relevance ranks only inside their originating index and reserve result slots
 for both the shared wiki and the chat's own pages (5 + 3 at the default limit). A result marked
 `[this chat only]` is not visible elsewhere.
@@ -124,5 +175,5 @@ bookkeeping and reports facts; it never rewrites a claim.
 
 ## Templates
 
-`templates/article.md`, `templates/archive.md` and `templates/raw.md` hold the exact page
+`templates/article.md`, `templates/state.md`, `templates/archive.md` and `templates/raw.md` hold the exact page
 shapes. Read one when the format matters.

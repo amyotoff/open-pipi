@@ -51,7 +51,11 @@ Short version: we have the notebook and a place to put pages. We do not have the
 
 ### D1 — Markdown is the source of truth; SQLite is a disposable cache
 
-Already true; make it a guarantee rather than a habit. Any state that cannot be reconstructed by `rebuildBrainIndex` from files alone is a bug. Enforced by a test: mutate, delete `indexes/sqlite.db`, rebuild, assert the index is byte-identical.
+The wiki index can be reconstructed by `rebuildBrainIndex` from Markdown files alone.
+Structured object state (D15) has separate authoritative JSON files, read directly without
+an index; built-in lists retain their existing SQLite storage. Index rebuilds do not alter
+either source of structured state. The wiki rebuild test mutates pages, deletes the derived
+index, rebuilds it, and checks the reconstructed rows.
 
 This is what buys the gist's "the wiki is just a git repo of markdown files" — version history, Obsidian, `grep`, and restore points (`src/core/runtime-backup.ts`) all work without knowing anything about us.
 
@@ -176,6 +180,52 @@ SQLite FTS5 over title/excerpt/body plus the index is enough. The gist says inde
 
 Revisit on an observable, not a hunch: when lint reports index-miss rate (queries answered from FTS that the index alone missed) above a threshold we can actually measure.
 
+### D15 — Read structured object state before reconstructing it from dialogue
+
+Added 2026-10-25. For apartment and project status, the LLM wiki maintains a reusable
+structured JSON representation of the object. A conversation supplies evidence for updates;
+the assistant reads the resulting state first and searches conversation history for gaps,
+conflicts, or explanations. Repeatedly reconstructing the project from a space's messages
+throws away the work the wiki was supposed to preserve.
+
+The executable state layer now stores validated JSON in each scope's `state/<id>.json`.
+The SQLite wiki index remains rebuildable from Markdown; structured state is read directly
+from its JSON files and is unaffected by index rebuilding. Runtime backups already include
+these files. The default todo/shopping lists remain authoritative in their existing SQLite
+tables and are read through adapters, without duplicating them in JSON files.
+
+`brain-state.ts` validates JSON, timestamps, field/list types, identifiers, size and depth.
+Updates use an expected revision and a writer lock, apply only requested fields/items, and
+commit by fsynced temporary file plus atomic rename. A failed patch leaves the old document
+intact. Delayed observations and same-time conflicting known values are rejected. A process
+crash can leave a lock file; it is never stolen automatically and requires operator inspection.
+Source references are recorded, but validation does not prove their factual truth.
+
+`brain-state-context.ts` selects records by id, title, aliases and kind before narrative
+retrieval, calculates freshness and emits bounded JSON with explicit omission counts.
+Conversation context receives these records before text memory. `wiki_answer` uses matching
+state for current-status queries and narrative retrieval for explanations/history. If aliases
+or query matching miss an object, the explicit catalogue/read tools are the fallback. This
+is deterministic matching, not unrestricted semantic intent recognition.
+
+`wiki_state_update` writes only the current space. `wiki_state_save` uses the existing
+shared-wiki approval boundary; origin remains explicit in read results. The tools expose
+revision conflicts to the caller rather than silently retrying. Built-in lists are updated
+through their existing tools; named lists use the same validated file store as other objects.
+Reflections about why calling a plumber is difficult remain wiki articles, while the action
+"call the plumber" belongs in a todo list.
+
+The runtime calculates stale/unknown/unavailable states but does not automatically poll
+Home Assistant. The agent uses the existing authorized integration to refresh observations.
+Old JSON-in-Markdown examples are not silently migrated or treated as validated records.
+
+Research informing the design: [Zep](https://arxiv.org/abs/2501.13956) models temporal
+relationships; [APEX-MEM](https://aclanthology.org/2026.acl-long.749/) preserves evolving
+structured events; [Temporal Blindness](https://aclanthology.org/2026.findings-acl.1848/)
+studies when agents fail to refresh dynamic information. Applying these ideas to apartment
+and project state is our engineering interpretation; the papers do not validate this
+particular implementation or establish sensor freshness thresholds.
+
 ## 3. Target module layout
 
 ```
@@ -183,6 +233,8 @@ src/core/
   brain-store.ts       # scopes, paths, dir layout + migration, db handle, index schema, scope lock
   brain-model.ts       # how the Brain Layer calls a model, and what happens when the budget ends
   brain-schema.ts      # loads the schema layer, per-space override
+  brain-state.ts       # validated JSON state, revisions, atomic patches
+  brain-state-context.ts # direct state reads, native lists, bounded context
   brain.ts             # notebook notes, note events, promotion, rebuild orchestration
   brain-wiki.ts        # pages: read/create/patch, frontmatter, links, search,
                        #   index.md projection, log.md append/read
@@ -194,7 +246,7 @@ src/skills/
 src/brain/
   schema.md            # the schema layer (D12)
   templates/
-    article.md  archive.md  raw.md
+    article.md  state.md  archive.md  raw.md
 ```
 
 Three modules were not in the original list, each for a stated reason.
@@ -226,6 +278,7 @@ for it would be a second definition of the same format.
 data/pipi-brain/<global|spaces/<encoded-id>>/
   raw/<topic>/YYYY-MM-DD-<slug>-<hash8>.md   # immutable
   notebook/daily/YYYY-MM-DD.md               # unchanged
+  state/<id>.json                            # structured state, independent of wiki index
   wiki/<topic>/<article>.md                  # one level of topics only
   wiki/index.md                              # generated (D2)
   wiki/log.md                                # append-only (D2)
@@ -338,7 +391,7 @@ Visibility (D3) is not a phase. It is enforced from Phase 1 onward, because retr
 | Wiki rot — pages nobody reads | The reference's own failure mode; the gist's whole argument | D11 passive injection makes staleness visible in ordinary turns, not only in lint |
 | Model writes confident nonsense from chat | Chat sources are thin and ambiguous | `No material` disposition (D5) plus the evidence check (D8) |
 | SQLite/file divergence | Two stores, one truth | D1 rebuild-equality test in CI |
-| Scope creep into a second memory system | `memory_entries` already exists and works | The wiki holds compiled, citable, durable knowledge; memory holds recent operational state. A fact that has a source goes in the wiki; a fact that has a deadline goes in memory |
+| Duplicate or stale object state | Dialogue memories and wiki pages can disagree | Use the structured wiki state as the first read for object status (D15), retain evidence, and refresh volatile external values from their provider. Chat memory and archives do not prove current state. |
 
 ## 9. Deliberately not building
 
@@ -350,6 +403,16 @@ Taken partly from the reference's own list of things it dropped after production
 - **Image ingestion** — the gist's own note applies: if sources are text, skip it. Revisit when a real source needs it.
 - **`qmd` or any external search binary** — a runtime that must run on a Raspberry Pi does not take a second search engine as a dependency for a wiki this size.
 - **Automatic scheduling of ingest** — capture stays user-initiated. The owner curates; the agent maintains. That division is the point of the pattern.
+
+## Live state dialogue evaluation
+
+With an explicitly approved OpenAI API key available in `.env.local`, run:
+
+```sh
+node --env-file=.env.local -r ts-node/register src/scripts/structured-state-dialogue.ts
+```
+
+This opt-in evaluation makes real OpenAI API calls through the normal context composer and tool executor. It creates an isolated database under `.tmp/`, adds two tasks and two shopping items, completes one of each, asks what remains, and checks that a reflection about booking a plumber does not change the task list. Assertions compare persisted records and responses, and verify that native state snapshots are supplied in the prompt. The transcript and snapshots are written to the printed evaluation directory. The script uses `gpt-4.1-mini`, incurs API usage, and is not part of the default unit test suite.
 
 ## References
 
