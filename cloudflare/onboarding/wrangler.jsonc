@@ -1,0 +1,13 @@
+{
+  "name": "open-pipi-onboarding-mvp",
+  "compatibility_date": "2026-09-09",
+  "workers_dev": true,
+  "preview_urls": false,
+  "routes": [
+    { "pattern": "open-pipi.amyote.com", "custom_domain": true }
+  ],
+  "assets": {
+    "html_handling": "drop-trailing-slash",
+    "not_found_handling": "none"
+  }
+}

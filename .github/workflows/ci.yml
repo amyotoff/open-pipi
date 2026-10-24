@@ -38,6 +38,20 @@ jobs:
       - name: Run the authoritative quality gate
         run: pnpm verify
 
+      - name: Install the isolated onboarding test browser
+        run: pnpm exec playwright-core install --with-deps chromium
+
+      - name: Test the onboarding browser journey
+        run: pnpm test:onboarding:e2e
+
+      - name: Save onboarding browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: onboarding-browser
+          path: output/playwright/
+          if-no-files-found: ignore
+
   security:
     runs-on: ubuntu-latest
     permissions:

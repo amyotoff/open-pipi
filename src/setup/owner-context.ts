@@ -7,6 +7,8 @@ const OWNER_CONTEXT_FILE = 'setup-owner-context.json';
 const MAX_FACTS = 5;
 const MAX_FACT_LENGTH = 240;
 const MAX_TASK_LENGTH = 500;
+const OWNER_CONTEXT_LOCK_FILE = `${OWNER_CONTEXT_FILE}.lock`;
+const LOCK_WAIT_MS = 2_000;
 
 export const SETUP_OWNER_CONTEXT_SUBJECT = 'Owner setup context';
 export const SETUP_OWNER_CONTEXT_SOURCE = 'setup-owner-context';
@@ -135,13 +137,83 @@ function writeOwnerContext(dataDir: string, context: StoredOwnerContext): void {
     }
 }
 
-/** Save bounded private context without requiring the runtime database to exist. */
-export function saveOwnerContext(dataDir: string, input: OwnerContextInput): StoredOwnerContext {
+function assertSafeOwnerContextTarget(dataDir: string): void {
+    try {
+        const stat = fs.lstatSync(getOwnerContextPath(dataDir));
+        if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0) {
+            throw new Error('Owner context path is unsafe.');
+        }
+        if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) {
+            throw new Error('Owner context path has an unexpected owner.');
+        }
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+}
+
+function sleepSync(milliseconds: number): void {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+function withOwnerContextLock<T>(dataDir: string, action: () => T): T {
+    const root = path.resolve(dataDir);
+    const lockPath = path.join(root, OWNER_CONTEXT_LOCK_FILE);
+    fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+    const deadline = Date.now() + LOCK_WAIT_MS;
+    let descriptor: number | undefined;
+
+    while (descriptor === undefined) {
+        try {
+            descriptor = fs.openSync(
+                lockPath,
+                fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW || 0),
+                0o600
+            );
+            fs.writeFileSync(descriptor, `${process.pid}\n`, 'utf8');
+            fs.fsyncSync(descriptor);
+        } catch (error) {
+            if (descriptor !== undefined) {
+                try {
+                    fs.closeSync(descriptor);
+                } catch {}
+                descriptor = undefined;
+                try {
+                    fs.unlinkSync(lockPath);
+                } catch {}
+            }
+            if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+            const stat = fs.lstatSync(lockPath);
+            if (!stat.isFile() || stat.isSymbolicLink()) {
+                throw new Error('Owner context lock path is unsafe.', { cause: error });
+            }
+            if (Date.now() >= deadline) throw new Error('Owner context is busy.', { cause: error });
+            sleepSync(10);
+        }
+    }
+
+    try {
+        return action();
+    } finally {
+        fs.closeSync(descriptor);
+        try {
+            fs.unlinkSync(lockPath);
+        } catch {}
+    }
+}
+
+function validRevision(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function buildOwnerContext(
+    input: OwnerContextInput,
+    previous: StoredOwnerContext | null,
+    revision: string = randomUUID()
+): StoredOwnerContext {
     const language = input.language.trim();
     const timezone = input.timezone.trim();
     if (!validLanguage(language) || !validTimeZone(timezone)) throw new Error('Owner locale metadata is invalid.');
 
-    const previous = readOwnerContext(dataDir);
     const displayName = input.displayName === undefined ? previous?.displayName : trimmed(input.displayName, 120);
     const facts =
         input.facts === undefined
@@ -152,10 +224,11 @@ export function saveOwnerContext(dataDir: string, input: OwnerContextInput): Sto
     if (input.facts !== undefined && (input.facts.length > MAX_FACTS || facts?.length !== input.facts.length)) {
         throw new Error('Owner context exceeds the supported bounds.');
     }
+    if (!validRevision(revision)) throw new Error('Owner context revision is invalid.');
 
-    const context: StoredOwnerContext = {
+    return {
         version: 1,
-        revision: randomUUID(),
+        revision,
         updatedAt: new Date().toISOString(),
         language,
         timezone,
@@ -163,18 +236,46 @@ export function saveOwnerContext(dataDir: string, input: OwnerContextInput): Sto
         ...(facts?.length ? { facts } : {}),
         ...(currentTask ? { currentTask } : {}),
     };
-    writeOwnerContext(dataDir, context);
-    return context;
+}
+
+/** Save bounded private context without requiring the runtime database to exist. */
+export function saveOwnerContext(dataDir: string, input: OwnerContextInput): StoredOwnerContext {
+    return withOwnerContextLock(dataDir, () => {
+        assertSafeOwnerContextTarget(dataDir);
+        const context = buildOwnerContext(input, readOwnerContext(dataDir));
+        writeOwnerContext(dataDir, context);
+        return context;
+    });
+}
+
+/** Atomically save only when the private context still has the expected revision. */
+export function saveOwnerContextIfRevision(
+    dataDir: string,
+    input: OwnerContextInput,
+    expectedRevision: string | null,
+    options?: { revision?: string }
+): StoredOwnerContext | null {
+    return withOwnerContextLock(dataDir, () => {
+        assertSafeOwnerContextTarget(dataDir);
+        const previous = readOwnerContext(dataDir);
+        if ((previous?.revision ?? null) !== expectedRevision) return null;
+        const context = buildOwnerContext(input, previous, options?.revision);
+        writeOwnerContext(dataDir, context);
+        return context;
+    });
 }
 
 export function markOwnerContextApplied(dataDir: string, revision: string, spaceId: string): boolean {
-    const current = readOwnerContext(dataDir);
-    if (!current || current.revision !== revision) return false;
-    writeOwnerContext(dataDir, {
-        ...current,
-        applied: { revision, spaceId, appliedAt: new Date().toISOString() },
+    return withOwnerContextLock(dataDir, () => {
+        assertSafeOwnerContextTarget(dataDir);
+        const current = readOwnerContext(dataDir);
+        if (!current || current.revision !== revision) return false;
+        writeOwnerContext(dataDir, {
+            ...current,
+            applied: { revision, spaceId, appliedAt: new Date().toISOString() },
+        });
+        return true;
     });
-    return true;
 }
 
 function findDatabasePath(dataDir: string): string | null {
