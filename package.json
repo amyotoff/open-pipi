@@ -26,7 +26,7 @@
         "release:check": "pnpm verify && pnpm audit --prod --audit-level=high",
         "test": "vitest run",
         "test:coverage": "vitest run --coverage",
-        "test:smoke": "vitest run src/skills/features.smoke.test.ts",
+        "test:smoke": "vitest run src/skills/features.smoke.test.ts && node --test e2e/nodemailer.cjs",
         "test:watch": "vitest",
         "test:evaluator": "vitest run src/core/evaluator.test.ts",
         "backup:restore": "ts-node src/scripts/restore-runtime-backup.ts",
@@ -63,7 +63,7 @@
     },
     "type": "commonjs",
     "dependencies": {
-        "@modelcontextprotocol/sdk": "1.30.0",
+        "@modelcontextprotocol/sdk": "1.32.2",
         "@opentelemetry/api": "^1.9.1",
         "@opentelemetry/instrumentation-express": "^0.68.0",
         "@opentelemetry/instrumentation-http": "^0.220.0",
@@ -76,15 +76,16 @@
         "dotenv": "^17.3.1",
         "express": "^5.2.1",
         "node-cron": "^4.2.1",
-        "telegraf": "^4.16.3"
+        "telegraf": "^4.16.3",
+        "zod": "^4.6.6"
     },
     "optionalDependencies": {
         "@hapi/boom": "^10.0.1",
         "@whiskeysockets/baileys": "^7.0.0-rc13",
         "discord.js": "^14.26.5",
-        "nodemailer": "^9.1.0",
+        "nodemailer": "^10.0.6",
         "playwright-core": "^1.58.2",
-        "sharp": "^0.35.4"
+        "sharp": "^0.35.5"
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",
@@ -108,11 +109,13 @@
     },
     "pnpm": {
         "overrides": {
-            "@grpc/grpc-js": "^1.14.4",
+            "@grpc/grpc-js": "^1.14.5",
             "@opentelemetry/core": "^2.9.0",
+            "express>body-parser": "^2.4.0",
+            "express>proxy-addr": "^2.0.8",
             "protobufjs": "^7.6.3",
-            "qs": "^6.15.2",
-            "undici": "^7.29.0",
+            "qs": "^6.16.1",
+            "undici": "^7.30.1",
             "ws": "^8.21.0"
         },
         "onlyBuiltDependencies": [

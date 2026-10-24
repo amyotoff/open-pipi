@@ -1,5 +1,28 @@
 # Agent onboarding experiment — validation
 
+## Dependency security update — 2026-10-25
+
+`pnpm audit --prod --audit-level=high` passes with zero critical/high findings; 10 moderate
+findings remain. The original audit reported 1 critical, 12 high, 30 moderate and 7 low.
+
+The update pins MCP SDK 1.32.2, Nodemailer 10.0.6 and Sharp 0.35.5. Existing overrides now require
+patched gRPC/Undici versions; scoped Express overrides fix proxy-addr and body-parser. Zod 4.6.7
+is an explicit MCP peer provider. The qs override meets body-parser 2.4.0's required range.
+Nodemailer 10 requires Node 20+, within the project's Node 24+ runtime requirement; see its
+[major release notes](https://github.com/nodemailer/nodemailer/releases/tag/v10.0.0).
+
+`pnpm verify` passed format, typecheck, lint, content checks, 130 files / 1124 tests, 20 feature
+smoke tests, the added Nodemailer compatibility smoke, coverage thresholds and build. Coverage
+remains 82.69% statements, 70.66% branches, 90.33% functions and 85.27% lines.
+`pnpm test:onboarding:e2e` passed all 46 browser checks.
+
+The Nodemailer smoke uses an in-memory stream transport and verifies recipient envelopes,
+thread references and UTF-8 message encoding. It opens no SMTP connection. Existing MCP tests
+verify the upgraded SDK with in-memory and real stdio transports, private confirmation and
+reconnect. The compatibility smoke lives outside the production source transport boundary;
+the boundary check remains unchanged. GitHub CI results for the final commit are recorded in
+PR #48. SDK 1.30.0 results below describe the original baseline.
+
 ## Scenario-based installation lab — 2026-09-10
 
 The page now identifies itself as an automatic-installation MVP test bench, with the official
