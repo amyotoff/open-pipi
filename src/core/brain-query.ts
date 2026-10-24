@@ -11,7 +11,7 @@ import {
 } from './brain-wiki';
 import { generateBrainText } from './brain-model';
 import { WIKI_STATE_READ_POLICY } from './brain-schema';
-import { boundedStateSnapshots, needsStateHistory, selectStateSnapshots, stateJson } from './brain-state-context';
+import { boundedStateSnapshots, selectStateSnapshots, stateJson } from './brain-state-context';
 
 /**
  * Query: how the wiki pays for itself.
@@ -140,12 +140,9 @@ export async function answerFromWiki(
 ): Promise<WikiAnswer> {
     const selection = selectStateSnapshots({ ...input, query: input.question });
     const states = boundedStateSnapshots(selection.snapshots);
-    // Current records answer status questions without letting older text outrank them.
-    // Explanations/history and queries without a matching object still use the wiki.
-    const hits =
-        states.length > 0 && !needsStateHistory(input.question)
-            ? []
-            : searchWiki({ ...input, query: input.question, limit: clampLimit(input.limit, 6, 1, 12) });
+    // State is read first and has precedence for current values. A broad kind match
+    // does not prove that it covers the requested object or every requested fact.
+    const hits = searchWiki({ ...input, query: input.question, limit: clampLimit(input.limit, 6, 1, 12) });
     if (hits.length === 0 && states.length === 0 && selection.errors.length === 0) {
         return {
             text: 'I searched the wiki index and its full text and found no page on this. Nothing has been compiled about it yet.',

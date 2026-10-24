@@ -296,6 +296,34 @@ describe('state adapters and tools', () => {
         expect(context.stateJson(bounded).length).toBeLessThanOrEqual(1500);
     });
 
+    it('retains every selected object when the first fills the payload budget', async () => {
+        const { state, context } = await load();
+        for (const id of ['home', 'office']) {
+            state.updateStoredState(
+                write(id, {
+                    kind: 'apartment',
+                    title: id,
+                    set_fields: { temperature: field(21), notes: field('x'.repeat(8000)) },
+                })
+            );
+        }
+        const selected = context.selectStateSnapshots({
+            ...scope,
+            query: 'Compare the current temperatures of home and office',
+        });
+        expect(selected.snapshots.map((item) => item.id).sort()).toEqual(['home', 'office']);
+        for (const query of ['Summarize the current temperature of home', 'What do we know about home temperature?']) {
+            expect(context.selectStateSnapshots({ ...scope, query }).snapshots.some((item) => item.id === 'home')).toBe(
+                true
+            );
+        }
+        const bounded = context.boundedStateSnapshots(selected.snapshots, 1500);
+        expect(bounded.map((item) => item.id).sort()).toEqual(['home', 'office']);
+        expect(context.stateJson(bounded).length).toBeLessThanOrEqual(1500);
+        expect(bounded.some((item) => item.omitted_fields > 0)).toBe(true);
+        expect(() => context.boundedStateSnapshots(selected.snapshots, 10)).toThrow('metadata exceeds');
+    });
+
     it('updates through the real tool surface and requires approval for shared writes', async () => {
         const { tools } = await load();
         const actor = { ...scope, userId: '111', turnId: 't2' };

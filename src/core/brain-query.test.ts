@@ -80,9 +80,32 @@ describe('core/brain-query', () => {
         const answer = await query.answerFromWiki({ ...scope, question: 'Website status' });
         const prompt = generateBrainText.mock.calls[0][0].prompt;
         expect(prompt).toContain('"value":"active"');
-        expect(prompt).not.toContain('website is cancelled');
-        expect(prompt).toContain('<wiki_pages_json>\n[]\n</wiki_pages_json>');
+        expect(prompt).toContain('website is cancelled');
+        expect(prompt.indexOf('<state_snapshots_json>')).toBeLessThan(prompt.indexOf('<wiki_pages_json>'));
+        expect(generateBrainText.mock.calls[0][0].system).toContain('Prefer these runtime-read records');
         expect(answer.citations).toEqual(['state/space/website.json']);
+    });
+
+    it('retains narrative evidence when a broad state match does not cover the requested project', async () => {
+        const { brain, query, generateBrainText } = await loadQuery(['Orion has a budget of 5000.']);
+        const state = await import('./brain-state');
+        state.updateStoredState({
+            ...scope,
+            id: 'atlas',
+            expected_revision: 0,
+            patch_json: JSON.stringify({ kind: 'project', title: 'Atlas', set_fields: {} }),
+            actor: '111',
+            source: 'turn:t1',
+        });
+        brain.updateWikiPage({
+            ...scope,
+            path: 'projects/orion.md',
+            body: '# Orion\n\nProject Orion launch budget: 5000.',
+        });
+        await query.answerFromWiki({ ...scope, question: 'What is the launch budget for Project Orion?' });
+        const prompt = generateBrainText.mock.calls[0][0].prompt;
+        expect(prompt).toContain('Project Orion launch budget: 5000');
+        expect(prompt.indexOf('<state_snapshots_json>')).toBeLessThan(prompt.indexOf('<wiki_pages_json>'));
     });
 
     it('keeps explanations in narrative retrieval without manufacturing a state object', async () => {

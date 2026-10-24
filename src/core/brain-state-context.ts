@@ -44,7 +44,7 @@ interface CatalogEntry {
 }
 
 export function needsStateHistory(query: string): boolean {
-    return /(?:почему|зачем|рассужд|размышл|объясни|мнение|что.*зна|сравни|вчера|истори|раньше|на прошл|\bwhy\b|\breasons?\b|\bexplain\b|\bhistory\b|\byesterday\b|\blast week\b|what.*know|summari[sz]e|\bcompare\b)/iu.test(
+    return /(?:почему|зачем|рассужд|размышл|объясни|мнение|вчера|истори|раньше|на прошл|\bwhy\b|\breasons?\b|\bexplain\b|\bhistory\b|\byesterday\b|\blast week\b)/iu.test(
         query
     );
 }
@@ -244,18 +244,20 @@ export function selectStateSnapshots(
 
 /** Keep JSON valid under the context budget; omissions are explicit, including an oversized single item. */
 export function boundedStateSnapshots(snapshots: StateSnapshot[], maxChars = 9000): StateSnapshot[] {
-    const bounded: StateSnapshot[] = [];
-    for (const original of snapshots) {
-        const view: StateSnapshot = {
-            ...original,
-            fields: {},
-            freshness: {},
-            items: [],
-            omitted_fields: Object.keys(original.fields).length,
-            omitted_items: original.total_items,
-        };
-        if (stateJson([...bounded, view]).length > maxChars) break;
-        bounded.push(view);
+    // Reserve metadata for every selected object before allocating field/item payloads.
+    const bounded: StateSnapshot[] = snapshots.map((original) => ({
+        ...original,
+        fields: {},
+        freshness: {},
+        items: [],
+        omitted_fields: Object.keys(original.fields).length,
+        omitted_items: original.total_items,
+    }));
+    if (stateJson(bounded).length > maxChars) {
+        throw new Error('State metadata exceeds the context budget; read fewer objects.');
+    }
+    for (const [index, original] of snapshots.entries()) {
+        const view = bounded[index];
         for (const [key, field] of Object.entries(original.fields)) {
             view.fields[key] = field;
             view.freshness[key] = original.freshness[key];

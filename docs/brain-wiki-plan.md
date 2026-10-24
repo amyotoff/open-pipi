@@ -204,7 +204,8 @@ Source references are recorded, but validation does not prove their factual trut
 `brain-state-context.ts` selects records by id, title, aliases and kind before narrative
 retrieval, calculates freshness and emits bounded JSON with explicit omission counts.
 Conversation context receives these records before text memory. `wiki_answer` uses matching
-state for current-status queries and narrative retrieval for explanations/history. If aliases
+state for current-status queries and supplements it with narrative retrieval so broad matches
+or partial records cannot hide relevant knowledge. If aliases
 or query matching miss an object, the explicit catalogue/read tools are the fallback. This
 is deterministic matching, not unrestricted semantic intent recognition.
 

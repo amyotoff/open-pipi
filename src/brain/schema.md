@@ -59,8 +59,8 @@ The compiler still compiles narrative sources; a compiled paragraph does not upd
 Use `wiki_state_list` to discover ids and origins, then `wiki_state_read`. For current
 status, the runtime selects matching records by id, title, aliases, and kind before text
 retrieval and injects bounded JSON into ordinary conversation context. `wiki_answer` uses
-matching state instead of older prose for status questions; explanations and historical
-questions still consult narrative pages. If selection misses the object, list/read it
+matching state ahead of older prose for status questions, while also consulting narrative
+pages for facts or objects missing from those records. If selection misses the object, list/read it
 explicitly. Omitted field/item counts mean a partial view, never an empty list.
 
 The built-in `todos` and `shopping` states read the current space's existing SQLite tables
