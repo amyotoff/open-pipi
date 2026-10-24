@@ -5,6 +5,8 @@
         en: {
             title: 'Automatic setup.',
             lead: 'A test bench for fully automatic installation.<br>Choose a local coding agent and a real target machine.',
+            productIntro:
+                'Open PiPi is your personal AI agent in Telegram, running on your computer or server. It remembers useful context and helps you plan your day and research questions. Chat with it like a teammate and make it your own, from its personality to custom skills.',
             experiment: 'Experimental release · results are still being tested',
             cardTitle: 'Build a precise handoff for your local agent.',
             agentNote:

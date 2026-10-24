@@ -104,6 +104,13 @@ h1 {
     margin: 0 auto;
     max-width: 630px;
 }
+.product-intro {
+    max-width: 670px;
+    margin: 24px auto 0;
+    font-size: 16px;
+    line-height: 1.6;
+    color: #666;
+}
 .experiment {
     font-size: 11px;
     color: #777;

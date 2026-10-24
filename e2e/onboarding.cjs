@@ -71,6 +71,16 @@ test('onboarding browser journey', { timeout: 120_000 }, async (t) => {
         const prompts = new Set();
         for (const language of ['en', 'ru']) {
             if ((await page.locator('html').getAttribute('lang')) !== language) await page.locator('#language').click();
+            await t.test(`${language}: three-sentence product introduction in the hero`, async () => {
+                const intro = page.locator('.hero #product-intro');
+                assert.equal(await intro.isVisible(), true);
+                const text = await intro.innerText();
+                assert.match(text, /Open PiPi/);
+                assert.match(text, /Telegram/);
+                assert.match(text, language === 'en' ? /computer or server/ : /компьютере или сервере/);
+                assert.match(text, language === 'en' ? /remembers useful context/ : /помнит важный контекст/);
+                assert.equal(text.split(/[.!?]+/).filter((sentence) => sentence.trim()).length, 3);
+            });
             for (const [client, clientName] of Object.entries(clients)) {
                 for (const [scenario, target] of Object.entries(scenarios)) {
                     await t.test(`${language}: ${client} / ${scenario}`, async () => {

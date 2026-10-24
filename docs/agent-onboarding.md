@@ -89,9 +89,14 @@ the owner's explicit choice in the private page. AI usage is billed by the confi
 ### Publish the public instructions to Cloudflare
 
 `cloudflare/onboarding/wrangler.jsonc` defines an isolated static Worker named
-`open-pipi-onboarding-mvp` on `workers.dev`. It has no custom domain routes, private API, remote MCP,
+`open-pipi-onboarding-mvp` on `workers.dev`, with the public custom domain `open-pipi.amyote.com`.
+It has no private API, remote MCP,
 runtime process, database, credentials, or user-data binding. The static artifact is generated from
 an explicit file allowlist; no repository or runtime directory is copied into the upload.
+
+The first screen introduces PiPi in three localized sentences while retaining the experimental
+installation-lab label. Instruction links resolve against the current origin on either hostname.
+The custom domain is managed in Wrangler configuration; Cloudflare provisions its DNS and HTTPS.
 
 From a reviewed, committed, clean checkout that has been pushed to the official repository:
 
