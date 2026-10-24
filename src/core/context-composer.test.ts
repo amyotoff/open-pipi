@@ -6,6 +6,7 @@ async function loadComposer(options?: {
     searchMessages?: any[];
     failureReceipt?: any;
     wikiBlock?: string;
+    stateBlock?: string;
 }) {
     vi.resetModules();
 
@@ -248,6 +249,8 @@ async function loadComposer(options?: {
     // Stubbed so the composer test never touches the Brain Layer on disk.
     const buildWikiContextBlock = vi.fn((_input: { query: string; spaceId?: string }) => options?.wikiBlock ?? '');
     vi.doMock('./brain-query', () => ({ buildWikiContextBlock }));
+    const buildStateContextBlock = vi.fn(() => options?.stateBlock ?? '');
+    vi.doMock('./brain-state-context', () => ({ buildStateContextBlock }));
 
     const mod = await import('./context-composer');
     return {
@@ -261,6 +264,7 @@ async function loadComposer(options?: {
             materializeAgentForSpace,
             getMemoryContext,
             buildWikiContextBlock,
+            buildStateContextBlock,
         },
     };
 }
@@ -276,6 +280,28 @@ afterEach(() => {
 });
 
 describe('core/context-composer', () => {
+    it('reads and includes structured state before narrative memory and wiki retrieval', async () => {
+        const mod = await loadComposer({
+            stateBlock: '[STRUCTURED_STATE]\n{"items":[{"text":"Milk"}]}',
+            wikiBlock: '[WIKI]\nOld notes',
+        });
+        const context = mod.composeConversationContext({
+            spaceId: 'telegram:chat-1',
+            senderId: '111',
+            channelRef: 'chat-1',
+        });
+        expect(mod.mocks.buildStateContextBlock).toHaveBeenCalledWith({
+            spaceId: 'telegram:chat-1',
+            query: 'Need a shortlist for tomorrow',
+        });
+        expect(mod.mocks.buildStateContextBlock.mock.invocationCallOrder[0]).toBeLessThan(
+            mod.mocks.getMemoryContext.mock.invocationCallOrder[0]
+        );
+        expect(mod.mocks.buildStateContextBlock.mock.invocationCallOrder[0]).toBeLessThan(
+            mod.mocks.buildWikiContextBlock.mock.invocationCallOrder[0]
+        );
+        expect(context.systemPrompt.indexOf('[STRUCTURED_STATE]')).toBeLessThan(context.systemPrompt.indexOf('[WIKI]'));
+    });
     it('builds pack-aware system context with authority and memory', async () => {
         const mod = await loadComposer();
         const result = mod.composeConversationContext({

@@ -234,6 +234,11 @@ describe('brain skill', () => {
         expect(withTemplate).toContain('--- article template ---');
         expect(withTemplate).toContain('"kind": "article"');
 
+        const stateTemplate = await skill.handlers.wiki_schema({ template: 'state' }, context);
+        expect(stateTemplate).toContain('--- state template ---');
+        expect(stateTemplate).toContain('## Current state');
+        expect(stateTemplate).toContain('"observed_at": null');
+
         const missing = await skill.handlers.wiki_schema({ template: 'nope' }, context);
         expect(missing).toContain('no template named');
     });
@@ -345,7 +350,11 @@ describe('brain skill', () => {
 
         // Every approval detail field must exist as an argument, or the prompt shows nothing.
         for (const [tool, meta] of Object.entries(skill.toolMeta || {})) {
-            const prepared = skill.preflight?.[tool]?.({ documents: [], body: '', path: 'a.md', title: 't' }) ?? {
+            const args =
+                tool === 'wiki_state_save'
+                    ? { id: 'website', expected_revision: 0, patch_json: '{"kind":"project","title":"Website"}' }
+                    : { documents: [], body: '', path: 'a.md', title: 't' };
+            const prepared = skill.preflight?.[tool]?.(args) ?? {
                 title: 't',
             };
             for (const field of meta.approval_detail_fields || []) {

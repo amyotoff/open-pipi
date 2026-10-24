@@ -48,6 +48,80 @@ afterEach(async () => {
 const scope = { spaceId: 'telegram:chat-1' };
 
 describe('core/brain-query', () => {
+    it('reads stored state ahead of conflicting narrative pages and accepts only supplied state citations', async () => {
+        const { brain, query, generateBrainText } = await loadQuery([
+            'Website is active [State](state/space/website.json); [Fake](state/space/fake.json).',
+        ]);
+        const state = await import('./brain-state');
+        state.updateStoredState({
+            ...scope,
+            id: 'website',
+            expected_revision: 0,
+            patch_json: JSON.stringify({
+                kind: 'project',
+                title: 'Website',
+                set_fields: {
+                    phase: {
+                        value: 'active',
+                        status: 'known',
+                        observed_at: '2026-10-24T10:00:00Z',
+                        source: 'message:m1',
+                    },
+                },
+            }),
+            actor: '111',
+            source: 'turn:t1',
+        });
+        brain.updateWikiPage({
+            ...scope,
+            path: 'projects/website.md',
+            body: '# Website\n\nOld conversation: website is cancelled.',
+        });
+        const answer = await query.answerFromWiki({ ...scope, question: 'Website status' });
+        const prompt = generateBrainText.mock.calls[0][0].prompt;
+        expect(prompt).toContain('"value":"active"');
+        expect(prompt).toContain('website is cancelled');
+        expect(prompt.indexOf('<state_snapshots_json>')).toBeLessThan(prompt.indexOf('<wiki_pages_json>'));
+        expect(generateBrainText.mock.calls[0][0].system).toContain('Prefer these runtime-read records');
+        expect(answer.citations).toEqual(['state/space/website.json']);
+    });
+
+    it('retains narrative evidence when a broad state match does not cover the requested project', async () => {
+        const { brain, query, generateBrainText } = await loadQuery(['Orion has a budget of 5000.']);
+        const state = await import('./brain-state');
+        state.updateStoredState({
+            ...scope,
+            id: 'atlas',
+            expected_revision: 0,
+            patch_json: JSON.stringify({ kind: 'project', title: 'Atlas', set_fields: {} }),
+            actor: '111',
+            source: 'turn:t1',
+        });
+        brain.updateWikiPage({
+            ...scope,
+            path: 'projects/orion.md',
+            body: '# Orion\n\nProject Orion launch budget: 5000.',
+        });
+        await query.answerFromWiki({ ...scope, question: 'What is the launch budget for Project Orion?' });
+        const prompt = generateBrainText.mock.calls[0][0].prompt;
+        expect(prompt).toContain('Project Orion launch budget: 5000');
+        expect(prompt.indexOf('<state_snapshots_json>')).toBeLessThan(prompt.indexOf('<wiki_pages_json>'));
+    });
+
+    it('keeps explanations in narrative retrieval without manufacturing a state object', async () => {
+        const { brain, query, generateBrainText } = await loadQuery(['Plumbers have limited availability.']);
+        brain.updateWikiPage({
+            ...scope,
+            path: 'home/plumbers.md',
+            body: '# Plumber\n\nWhy calling a plumber is difficult: limited availability.',
+        });
+        await query.answerFromWiki({ ...scope, question: 'Why is calling a plumber difficult?' });
+        expect(generateBrainText.mock.calls[0][0].prompt).toContain('limited availability');
+        expect(generateBrainText.mock.calls[0][0].prompt).toContain('"snapshots":[]');
+        const state = await import('./brain-state');
+        expect(state.listStoredStates(scope).documents).toEqual([]);
+    });
+
     it('finds pages by full text and by title', async () => {
         const { brain, query } = await loadQuery();
 
@@ -127,6 +201,50 @@ describe('core/brain-query', () => {
 
         expect(answer.citations).toEqual(['health/sleep.md']);
         expect(answer.citations).not.toContain('health/secret.md');
+    });
+
+    it('passes typed state and its evidence to the answer model with freshness and history rules', async () => {
+        const { brain, query, generateBrainText } = await loadQuery(['A live apartment check is needed.']);
+        const state = {
+            schema_version: 1,
+            subject: { id: 'apartment', kind: 'apartment' },
+            fields: {
+                'kitchen.temperature': {
+                    value: 21.5,
+                    unit: '°C',
+                    status: 'known',
+                    observed_at: '2026-10-24T10:00:00Z',
+                    source: 'tool:observation-1',
+                    refresh: { provider: 'home_assistant', entity_id: 'sensor.kitchen_temperature' },
+                    max_age_seconds: 60,
+                },
+                'kitchen.light_on': {
+                    value: false,
+                    status: 'known',
+                    observed_at: '2026-10-24T10:00:00Z',
+                    source: 'tool:observation-2',
+                },
+                'kitchen.humidity': { value: null, status: 'unknown', observed_at: null, source: null },
+            },
+        };
+        const body = '# Apartment state\n\n## Current state\n\n```json\n' + JSON.stringify(state) + '\n```';
+        brain.updateWikiPage({ ...scope, path: 'homes/apartment.md', body });
+
+        const before = Date.now();
+        await query.answerFromWiki({ ...scope, question: 'apartment state' });
+        const call = generateBrainText.mock.calls[0][0];
+        const pages = JSON.parse(call.prompt.match(/<wiki_pages_json>\n([\s\S]*?)\n<\/wiki_pages_json>/)[1]);
+        const suppliedState = JSON.parse(pages[0].content.match(/```json\n([\s\S]*?)\n```/)[1]);
+        expect(suppliedState).toEqual(state);
+        const currentTime = Date.parse(call.prompt.match(/Current time \(UTC\): ([^\n]+)/)[1]);
+        expect(currentTime).toBeGreaterThanOrEqual(before);
+        expect(currentTime).toBeLessThanOrEqual(Date.now());
+        expect(call.system).toContain('structured JSON state before searching space dialogue');
+        expect(call.system).toContain('cannot refresh external state');
+        expect(call.system).toContain('For historical questions');
+        expect(query.buildWikiContextBlock({ ...scope, query: 'apartment state' })).toContain(
+            'structured JSON state before searching space dialogue'
+        );
     });
 
     it('keeps relevance ahead of freshness and produces clean excerpts', async () => {
